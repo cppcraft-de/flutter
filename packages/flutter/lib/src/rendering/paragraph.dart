@@ -13,6 +13,7 @@ import 'dart:ui'
     show
         BoxHeightStyle,
         BoxWidthStyle,
+        GlyphInfo,
         Gradient,
         LineMetrics,
         PlaceholderAlignment,
@@ -1072,6 +1073,27 @@ class RenderParagraph extends RenderBox
     assert(!debugNeedsLayout);
     _layoutTextWithConstraints(constraints);
     return _textPainter.getFullHeightForCaret(position, Rect.zero);
+  }
+
+  /// Returns the line metrics from the exact paragraph used to paint this
+  /// render object.
+  ///
+  /// This read-only diagnostic API is valid only after [layout].
+  List<ui.LineMetrics> computeLineMetricsForDiagnostics() {
+    assert(!debugNeedsLayout);
+    _layoutTextWithConstraints(constraints);
+    return _textPainter.computeLineMetrics();
+  }
+
+  /// Returns the laid-out grapheme-cluster information associated with
+  /// [codeUnitOffset] from the exact paragraph used to paint this render
+  /// object.
+  ///
+  /// This read-only diagnostic API is valid only after [layout].
+  ui.GlyphInfo? getGlyphInfoAtForDiagnostics(int codeUnitOffset) {
+    assert(!debugNeedsLayout);
+    _layoutTextWithConstraints(constraints);
+    return _textPainter.getGlyphInfoAt(codeUnitOffset);
   }
 
   /// Returns a list of rects that bound the given selection.

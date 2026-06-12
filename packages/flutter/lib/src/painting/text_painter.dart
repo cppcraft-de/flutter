@@ -1702,6 +1702,25 @@ class TextPainter {
     );
   }
 
+  /// Returns the [ui.GlyphInfo] associated with [codeUnitOffset] in the laid
+  /// out paragraph, or null when that code unit isn't visible.
+  ///
+  /// The returned bounds are in this [TextPainter]'s coordinate system.
+  ui.GlyphInfo? getGlyphInfoAt(int codeUnitOffset) {
+    assert(_debugAssertTextLayoutIsValid);
+    assert(!_debugNeedsRelayout);
+    final _TextPainterLayoutCacheWithOffset cachedLayout = _layoutCache!;
+    final ui.GlyphInfo? rawGlyphInfo = cachedLayout.paragraph.getGlyphInfoAt(codeUnitOffset);
+    if (rawGlyphInfo == null || cachedLayout.paintOffset == Offset.zero) {
+      return rawGlyphInfo;
+    }
+    return ui.GlyphInfo(
+      rawGlyphInfo.graphemeClusterLayoutBounds.shift(cachedLayout.paintOffset),
+      rawGlyphInfo.graphemeClusterCodeUnitRange,
+      rawGlyphInfo.writingDirection,
+    );
+  }
+
   /// Returns the closest position within the text for the given pixel offset.
   TextPosition getPositionForOffset(Offset offset) {
     assert(_debugAssertTextLayoutIsValid);

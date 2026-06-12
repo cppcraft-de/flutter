@@ -2,7 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'dart:ui' as ui show BoxHeightStyle, BoxWidthStyle, Paragraph, TextBox;
+import 'dart:ui'
+    as ui
+    show BoxHeightStyle, BoxWidthStyle, GlyphInfo, LineMetrics, Paragraph, TextBox;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
@@ -123,6 +125,24 @@ void main() {
 
     final double height5 = paragraph.getFullHeightForCaret(const TextPosition(offset: 5));
     expect(height5, equals(10.0));
+  });
+
+  test('read-only paragraph diagnostics expose the painted layout', () {
+    final paragraph = RenderParagraph(
+      const TextSpan(text: 'AB', style: TextStyle(fontSize: 20.0)),
+      textDirection: TextDirection.ltr,
+    );
+    layout(paragraph);
+
+    final List<ui.LineMetrics> lines = paragraph.computeLineMetricsForDiagnostics();
+    final ui.GlyphInfo? glyph = paragraph.getGlyphInfoAtForDiagnostics(0);
+
+    expect(lines, hasLength(1));
+    expect(lines.single.height, greaterThan(0.0));
+    expect(lines.single.baseline, greaterThan(0.0));
+    expect(glyph, isNotNull);
+    expect(glyph!.graphemeClusterCodeUnitRange, const TextRange(start: 0, end: 1));
+    expect(glyph.graphemeClusterLayoutBounds.width, greaterThan(0.0));
   });
 
   test('getPositionForOffset control test', () {
