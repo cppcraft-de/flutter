@@ -55,8 +55,7 @@ void FinalizePdfData(void* isolate_callback_data, void* peer) {
 
 void InvokePdfCallback(std::unique_ptr<tonic::DartPersistentValue> callback,
                        fml::StatusOr<sk_sp<SkData>>&& buffer) {
-  std::shared_ptr<tonic::DartState> dart_state =
-      callback->dart_state().lock();
+  std::shared_ptr<tonic::DartState> dart_state = callback->dart_state().lock();
   if (!dart_state) {
     return;
   }
@@ -99,16 +98,15 @@ fml::StatusOr<sk_sp<SkData>> RenderPdf(
                          "PDF page scene was invalid.");
     }
 
-    SkCanvas* canvas = document->beginPage(
-        SkDoubleToScalar(page_width), SkDoubleToScalar(page_height));
+    SkCanvas* canvas = document->beginPage(SkDoubleToScalar(page_width),
+                                           SkDoubleToScalar(page_height));
     if (!canvas) {
       return fml::Status(fml::StatusCode::kInternal,
                          "SkPDF page creation failed.");
     }
 
-    const DlRect source_bounds =
-        DlRect::MakeWH(SafeNarrow(page.source_width),
-                       SafeNarrow(page.source_height));
+    const DlRect source_bounds = DlRect::MakeWH(SafeNarrow(page.source_width),
+                                                SafeNarrow(page.source_height));
     sk_sp<DisplayList> display_list = page.layer_tree->Flatten(
         source_bounds, snapshot_delegate->GetTextureRegistry(),
         snapshot_delegate->GetGrContext());
@@ -238,9 +236,9 @@ Dart_Handle Scene::toPdf(Dart_Handle scenes_handle,
     }
 
     pages.push_back(PdfPage{
-        .layer_tree =
-            scene->BuildLayerTree(static_cast<uint32_t>(std::ceil(source_width)),
-                                  static_cast<uint32_t>(std::ceil(source_height))),
+        .layer_tree = scene->BuildLayerTree(
+            static_cast<uint32_t>(std::ceil(source_width)),
+            static_cast<uint32_t>(std::ceil(source_height))),
         .source_width = source_width,
         .source_height = source_height,
     });
@@ -262,8 +260,8 @@ Dart_Handle Scene::toPdf(Dart_Handle scenes_handle,
   fml::TaskRunner::RunNowOrPostTask(
       raster_task_runner,
       fml::MakeCopyable([ui_task_runner, snapshot_delegate,
-                         pages = std::move(pages), page_width,
-                         page_height, ui_task]() mutable {
+                         pages = std::move(pages), page_width, page_height,
+                         ui_task]() mutable {
         auto result = RenderPdf(std::move(pages), page_width, page_height,
                                 snapshot_delegate);
         fml::TaskRunner::RunNowOrPostTask(

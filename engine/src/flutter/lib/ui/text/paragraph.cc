@@ -252,8 +252,8 @@ Dart_Handle Paragraph::computeGlyphMetricsForDiagnostics() const {
       glyph.fFont.getTypeface()->getFamilyName(&family);
       typeface_id = glyph.fFont.getTypeface()->uniqueID();
     }
-    tonic::CheckAndHandleError(Dart_ListSetAt(
-        record, position++, tonic::ToDart(family.c_str())));
+    tonic::CheckAndHandleError(
+        Dart_ListSetAt(record, position++, tonic::ToDart(family.c_str())));
     add_double(typeface_id);
     add_double(glyph.fFont.getSize());
     add_double(glyph.fFont.isSubpixel());
