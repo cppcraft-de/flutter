@@ -225,6 +225,8 @@ typedef CanvasPath Path;
   V(ParagraphBuilder, pop)                       \
   V(ParagraphBuilder, pushStyle)                 \
   V(Paragraph, alphabeticBaseline)               \
+  V(Paragraph, computeDetailedLineMetricsForDiagnostics) \
+  V(Paragraph, computeGlyphMetricsForDiagnostics)       \
   V(Paragraph, computeLineMetrics)               \
   V(Paragraph, didExceedMaxLines)                \
   V(Paragraph, dispose)                          \

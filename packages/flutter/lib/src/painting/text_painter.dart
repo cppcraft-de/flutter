@@ -34,6 +34,124 @@ import 'text_style.dart';
 export 'dart:ui' show LineMetrics;
 export 'package:flutter/services.dart' show TextRange, TextSelection;
 
+/// Detailed engine line metrics associated with a final laid-out line.
+class DiagnosticLineMetrics {
+  /// Creates detailed metrics associated with [lineMetrics].
+  const DiagnosticLineMetrics({
+    required this.lineMetrics,
+    required this.rawAscent,
+    required this.rawDescent,
+    required this.rawLeading,
+    required this.effectiveAscent,
+    required this.effectiveDescent,
+    required this.effectiveLeading,
+    required this.nextLineBaselinePitch,
+    required this.lineBoxHeight,
+  });
+
+  /// The standard public metrics for this line.
+  final ui.LineMetrics lineMetrics;
+
+  /// The ascent from final resolved-font metrics before line adjustments.
+  final double rawAscent;
+
+  /// The descent from final resolved-font metrics before line adjustments.
+  final double rawDescent;
+
+  /// The leading from final resolved-font metrics before line adjustments.
+  final double rawLeading;
+
+  /// The ascent used by SkParagraph's final line layout.
+  final double effectiveAscent;
+
+  /// The descent used by SkParagraph's final line layout.
+  final double effectiveDescent;
+
+  /// The leading used by SkParagraph's final line layout.
+  final double effectiveLeading;
+
+  /// Derived from SkParagraph's final line height.
+  final double nextLineBaselinePitch;
+
+  /// Derived from SkParagraph's final line height.
+  final double lineBoxHeight;
+}
+
+/// Detailed metrics for a glyph from the final laid-out paragraph.
+class DiagnosticGlyphMetrics {
+  /// Creates diagnostic metrics for one laid-out glyph.
+  const DiagnosticGlyphMetrics({
+    required this.lineNumber,
+    required this.runIndex,
+    required this.fontFamily,
+    required this.typefaceId,
+    required this.fontSize,
+    required this.subpixel,
+    required this.linearMetrics,
+    required this.hinting,
+    required this.edging,
+    required this.glyphId,
+    required this.utf8Cluster,
+    required this.shapePosition,
+    required this.offset,
+    required this.advance,
+    required this.finalOrigin,
+    required this.bounds,
+    required this.inkBounds,
+  });
+
+  /// The final laid-out line containing this glyph.
+  final int lineNumber;
+
+  /// The SkParagraph run containing this glyph.
+  final int runIndex;
+
+  /// The resolved typeface family name.
+  final String fontFamily;
+
+  /// The process-local resolved SkTypeface identifier.
+  final int typefaceId;
+
+  /// The resolved font size.
+  final double fontSize;
+
+  /// Whether the resolved SkFont requests subpixel positioning.
+  final bool subpixel;
+
+  /// Whether the resolved SkFont requests linear metrics.
+  final bool linearMetrics;
+
+  /// The numeric SkFontHinting value.
+  final int hinting;
+
+  /// The numeric SkFont::Edging value.
+  final int edging;
+
+  /// The resolved glyph identifier.
+  final int glyphId;
+
+  /// The UTF-8 cluster offset associated with this glyph.
+  final int utf8Cluster;
+
+  /// The position stored by the shaping/layout run.
+  final Offset shapePosition;
+
+  /// The shaping offset associated with this glyph.
+  final Offset offset;
+
+  /// The advance to the next shaping position.
+  final Offset advance;
+
+  /// The final glyph origin in paragraph coordinates.
+  final Offset finalOrigin;
+
+  /// The resolved glyph bounds relative to its origin.
+  final Rect bounds;
+
+  /// The resolved glyph bounds translated to [finalOrigin].
+  final Rect inkBounds;
+}
+
 /// The default font size if none is specified.
 ///
 /// This should be kept in sync with the defaults set in the engine (e.g.,
@@ -1816,6 +1934,80 @@ class TextPainter {
         : rawMetrics
               .map((ui.LineMetrics metrics) => _shiftLineMetrics(metrics, offset))
               .toList(growable: false);
+  }
+
+  /// Returns detailed metrics from the exact paragraph used for layout.
+  List<DiagnosticLineMetrics> computeDetailedLineMetricsForDiagnostics() {
+    assert(_debugAssertTextLayoutIsValid);
+    assert(!_debugNeedsRelayout);
+    final _TextPainterLayoutCacheWithOffset layout = _layoutCache!;
+    final List<ui.LineMetrics> lines = computeLineMetrics();
+    // The repository SDK's prebuilt dart:ui summary does not include this
+    // locally patched diagnostic method.
+    // ignore: undefined_method
+    final Float64List encoded = layout.paragraph.computeDetailedLineMetricsForDiagnostics();
+    if (encoded.length != lines.length * 8) {
+      return const <DiagnosticLineMetrics>[];
+    }
+    var position = 0;
+    return <DiagnosticLineMetrics>[
+      for (final ui.LineMetrics line in lines)
+        DiagnosticLineMetrics(
+          lineMetrics: line,
+          rawAscent: encoded[position++],
+          rawDescent: encoded[position++],
+          rawLeading: encoded[position++],
+          effectiveAscent: encoded[position++],
+          effectiveDescent: encoded[position++],
+          effectiveLeading: encoded[position++],
+          nextLineBaselinePitch: encoded[position++],
+          lineBoxHeight: encoded[position++],
+        ),
+    ];
+  }
+
+  /// Returns detailed glyph metrics from the exact paragraph used for layout.
+  List<DiagnosticGlyphMetrics> computeGlyphMetricsForDiagnostics() {
+    assert(_debugAssertTextLayoutIsValid);
+    assert(!_debugNeedsRelayout);
+    final _TextPainterLayoutCacheWithOffset layout = _layoutCache!;
+    // The repository SDK's prebuilt dart:ui summary does not include this
+    // locally patched diagnostic method.
+    // ignore: undefined_method
+    final List<Object?> encoded = layout.paragraph.computeGlyphMetricsForDiagnostics();
+    return <DiagnosticGlyphMetrics>[
+      for (final Object? value in encoded)
+        if (value case final List<Object?> record when record.length == 27)
+          DiagnosticGlyphMetrics(
+            lineNumber: (record[0]! as num).toInt(),
+            runIndex: (record[1]! as num).toInt(),
+            fontFamily: record[2]! as String,
+            typefaceId: (record[3]! as num).toInt(),
+            fontSize: (record[4]! as num).toDouble(),
+            subpixel: (record[5]! as num) != 0,
+            linearMetrics: (record[6]! as num) != 0,
+            hinting: (record[7]! as num).toInt(),
+            edging: (record[8]! as num).toInt(),
+            glyphId: (record[9]! as num).toInt(),
+            utf8Cluster: (record[10]! as num).toInt(),
+            shapePosition: Offset((record[11]! as num).toDouble(), (record[12]! as num).toDouble()),
+            offset: Offset((record[13]! as num).toDouble(), (record[14]! as num).toDouble()),
+            advance: Offset((record[15]! as num).toDouble(), (record[16]! as num).toDouble()),
+            finalOrigin: Offset((record[17]! as num).toDouble(), (record[18]! as num).toDouble()),
+            bounds: Rect.fromLTRB(
+              (record[19]! as num).toDouble(),
+              (record[20]! as num).toDouble(),
+              (record[21]! as num).toDouble(),
+              (record[22]! as num).toDouble(),
+            ),
+            inkBounds: Rect.fromLTRB(
+              (record[23]! as num).toDouble(),
+              (record[24]! as num).toDouble(),
+              (record[25]! as num).toDouble(),
+              (record[26]! as num).toDouble(),
+            ),
+          ),
+    ];
   }
 
   bool _disposed = false;

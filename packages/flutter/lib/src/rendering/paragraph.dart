@@ -1085,6 +1085,22 @@ class RenderParagraph extends RenderBox
     return _textPainter.computeLineMetrics();
   }
 
+  /// Returns detailed line metrics from the exact paragraph used to paint this
+  /// render object.
+  List<DiagnosticLineMetrics> computeDetailedLineMetricsForDiagnostics() {
+    assert(!debugNeedsLayout);
+    _layoutTextWithConstraints(constraints);
+    return _textPainter.computeDetailedLineMetricsForDiagnostics();
+  }
+
+  /// Returns detailed glyph metrics from the exact paragraph used to paint this
+  /// render object.
+  List<DiagnosticGlyphMetrics> computeGlyphMetricsForDiagnostics() {
+    assert(!debugNeedsLayout);
+    _layoutTextWithConstraints(constraints);
+    return _textPainter.computeGlyphMetricsForDiagnostics();
+  }
+
   /// Returns the laid-out grapheme-cluster information associated with
   /// [codeUnitOffset] from the exact paragraph used to paint this render
   /// object.

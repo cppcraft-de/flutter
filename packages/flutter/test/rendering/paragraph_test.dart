@@ -135,10 +135,27 @@ void main() {
     layout(paragraph);
 
     final List<ui.LineMetrics> lines = paragraph.computeLineMetricsForDiagnostics();
+    final List<DiagnosticLineMetrics> detailedLines = paragraph
+        .computeDetailedLineMetricsForDiagnostics();
+    final List<DiagnosticGlyphMetrics> glyphMetrics = paragraph.computeGlyphMetricsForDiagnostics();
     final ui.GlyphInfo? glyph = paragraph.getGlyphInfoAtForDiagnostics(0);
 
     expect(lines, hasLength(1));
+    expect(detailedLines, hasLength(1));
+    expect(detailedLines.single.lineMetrics.lineNumber, lines.single.lineNumber);
+    expect(detailedLines.single.rawAscent, greaterThan(0.0));
+    expect(detailedLines.single.rawDescent, greaterThanOrEqualTo(0.0));
+    expect(detailedLines.single.nextLineBaselinePitch, detailedLines.single.lineBoxHeight);
     expect(lines.single.height, greaterThan(0.0));
+    expect(glyphMetrics, hasLength(2));
+    expect(glyphMetrics.first.lineNumber, 0);
+    expect(glyphMetrics.first.fontFamily, isNotEmpty);
+    expect(glyphMetrics.first.glyphId, greaterThan(0));
+    expect(glyphMetrics.first.advance.dx, greaterThan(0.0));
+    expect(
+      glyphMetrics.first.inkBounds,
+      glyphMetrics.first.bounds.shift(glyphMetrics.first.finalOrigin),
+    );
     expect(lines.single.baseline, greaterThan(0.0));
     expect(glyph, isNotNull);
     expect(glyph!.graphemeClusterCodeUnitRange, const TextRange(start: 0, end: 1));
