@@ -846,6 +846,14 @@ recursedeps = [
 
 hooks = [
   {
+    'name': 'Apply local Skia text patches',
+    'pattern': '.',
+    'action': [
+      'python3',
+      'engine/src/flutter/tools/skia_patches/apply_skia_patches.py',
+    ],
+  },
+  {
     # Generate the Dart SDK's .dart_tool/package_confg.json file.
     'name': 'Generate .dart_tool/package_confg.json',
     'pattern': '.',
