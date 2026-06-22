@@ -1,0 +1,185 @@
+diff --git a/modules/skparagraph/src/Run.h b/modules/skparagraph/src/Run.h
+index e6f1d62cc2..dcf4f2eb86 100644
+--- a/modules/skparagraph/src/Run.h
++++ b/modules/skparagraph/src/Run.h
+@@ -14,6 +14,8 @@
+ #include "modules/skparagraph/include/TextStyle.h"
+ #include "modules/skshaper/include/SkShaper.h"
+ 
++#include <cstdlib>
++#include <cstring>
+ #include <math.h>
+ #include <algorithm>
+ #include <functional>
+@@ -455,6 +457,28 @@ public:
+ 
+     SkScalar delta() const { return height() - ideographicBaseline(); }
+ 
++    static bool environmentVariableEnabled(const char* value) {
++        return value != nullptr &&
++               (std::strcmp(value, "1") == 0 ||
++                std::strcmp(value, "true") == 0 ||
++                std::strcmp(value, "TRUE") == 0 ||
++                std::strcmp(value, "yes") == 0 ||
++                std::strcmp(value, "on") == 0);
++    }
++
++    static bool useQtLikeIntegerMetrics() {
++        const char* value = std::getenv("FLUTTER_QT_LINE_METRICS");
++        if (value == nullptr || *value == '\0') {
++            value = std::getenv("FLUTTER_INTEGER_TEXT_METRICS");
++        }
++        return environmentVariableEnabled(value);
++    }
++
++    static bool useAlternativeLineHeight() {
++        return useQtLikeIntegerMetrics() &&
++               environmentVariableEnabled(std::getenv("FLUTTER_USE_ALTERNATIVE_LINE_HEIGHT"));
++    }
++
+     void updateLineMetrics(InternalLineMetrics& metrics) {
+         if (metrics.fForceStrut) {
+             metrics.fAscent = fAscent;
+@@ -480,9 +504,22 @@ public:
+     }
+ 
+     SkScalar height() const {
++        if (useQtLikeIntegerMetrics()) {
++            return useAlternativeLineHeight()
++                ? this->nextLineBaselinePitch()
++                : this->lineBoxHeight();
++        }
+         return ::round((double)fDescent - fAscent + fLeading);
+     }
+ 
++    SkScalar nextLineBaselinePitch() const {
++        return ::ceil((double)-fAscent + fDescent + fDiagnosticRawLeading);
++    }
++
++    SkScalar lineBoxHeight() const {
++        return this->layoutAscent() + this->layoutDescent() + this->layoutLeading();
++    }
++
+     void update(SkScalar a, SkScalar d, SkScalar l) {
+         fAscent = a;
+         fDescent = d;
+@@ -494,15 +531,22 @@ public:
+         fRawDescent = rd;
+     }
+ 
+-    SkScalar alphabeticBaseline() const { return fLeading / 2 - fAscent; }
++    SkScalar alphabeticBaseline() const { return baseline(); }
+     SkScalar ideographicBaseline() const { return fDescent - fAscent + fLeading; }
+     SkScalar deltaBaselines() const { return fLeading / 2 + fDescent; }
+-    SkScalar baseline() const { return fLeading / 2 - fAscent; }
++    SkScalar baseline() const {
++        return useQtLikeIntegerMetrics() ? this->layoutAscent() : fLeading / 2 - fAscent;
++    }
+     SkScalar ascent() const { return fAscent; }
+     SkScalar descent() const { return fDescent; }
+     SkScalar leading() const { return fLeading; }
+     SkScalar rawAscent() const { return fRawAscent; }
+     SkScalar rawDescent() const { return fRawDescent; }
+     SkScalar rawLeading() const { return fDiagnosticRawLeading; }
++    SkScalar layoutAscent() const { return ::ceil((double)-fAscent); }
++    SkScalar layoutDescent() const { return ::ceil((double)fDescent); }
++    SkScalar layoutLeading() const {
++        return std::max(0.0f, std::max(fLeading, fDiagnosticRawLeading));
++    }
+     void setForceStrut(bool value) { fForceStrut = value; }
+     bool getForceStrut() const { return fForceStrut; }
+ 
+diff --git a/modules/skparagraph/src/TextLine.cpp b/modules/skparagraph/src/TextLine.cpp
+index 04798e3518..5a33ffca17 100644
+--- a/modules/skparagraph/src/TextLine.cpp
++++ b/modules/skparagraph/src/TextLine.cpp
+@@ -1123,9 +1123,15 @@ LineMetrics TextLine::getMetrics() const {
+     result.fEndIndex = fOwner->getUTF16Index(fText.end);
+     result.fEndIncludingNewline = fOwner->getUTF16Index(fTextIncludingNewlines.end);
+     result.fHardBreak = endsWithHardLineBreak();
+-    result.fAscent = - fMaxRunMetrics.ascent();
+-    result.fDescent = fMaxRunMetrics.descent();
+-    result.fUnscaledAscent = - fMaxRunMetrics.ascent(); // TODO: implement
++    if (InternalLineMetrics::useQtLikeIntegerMetrics()) {
++        result.fAscent = this->sizes().layoutAscent();
++        result.fDescent = this->sizes().layoutDescent();
++        result.fUnscaledAscent = result.fAscent; // TODO: implement
++    } else {
++        result.fAscent = - fMaxRunMetrics.ascent();
++        result.fDescent = fMaxRunMetrics.descent();
++        result.fUnscaledAscent = - fMaxRunMetrics.ascent(); // TODO: implement
++    }
+     result.fHeight = fAdvance.fY;
+     result.fWidth = fAdvance.fX;
+     if (fOwner->getApplyRoundingHack()) {
+@@ -1134,16 +1140,27 @@ LineMetrics TextLine::getMetrics() const {
+     }
+     result.fLeft = this->offset().fX;
+     // This is Flutter definition of a baseline
+-    result.fBaseline = this->offset().fY + this->height() - this->sizes().descent();
++    result.fBaseline = this->offset().fY +
++        (InternalLineMetrics::useQtLikeIntegerMetrics()
++            ? this->baseline()
++            : this->height() - this->sizes().descent());
+     result.fLineNumber = this - fOwner->lines().data();
+     result.fRawAscent = -this->sizes().rawAscent();
+     result.fRawDescent = this->sizes().rawDescent();
+     result.fRawLeading = this->sizes().rawLeading();
+-    result.fEffectiveAscent = -this->sizes().ascent();
+-    result.fEffectiveDescent = this->sizes().descent();
+-    result.fEffectiveLeading = this->sizes().leading();
++    result.fEffectiveAscent = InternalLineMetrics::useQtLikeIntegerMetrics()
++        ? this->sizes().layoutAscent()
++        : -this->sizes().ascent();
++    result.fEffectiveDescent = InternalLineMetrics::useQtLikeIntegerMetrics()
++        ? this->sizes().layoutDescent()
++        : this->sizes().descent();
++    result.fEffectiveLeading = InternalLineMetrics::useQtLikeIntegerMetrics()
++        ? this->sizes().layoutLeading()
++        : this->sizes().leading();
+     result.fNextLineBaselinePitch = this->height();
+-    result.fLineBoxHeight = this->height();
++    result.fLineBoxHeight = InternalLineMetrics::useQtLikeIntegerMetrics()
++        ? this->sizes().lineBoxHeight()
++        : this->height();
+ 
+     // Fill out the style parts
+     this->iterateThroughVisualRuns(false,
+diff --git a/modules/skparagraph/src/TextStyle.cpp b/modules/skparagraph/src/TextStyle.cpp
+index de2dee3116..6e73f8c16b 100644
+--- a/modules/skparagraph/src/TextStyle.cpp
++++ b/modules/skparagraph/src/TextStyle.cpp
+@@ -23,6 +23,7 @@ TextStyle TextStyle::cloneForPlaceholder() {
+     result.fIsPlaceholder = true;
+     result.fFontFeatures = fFontFeatures;
+     result.fHalfLeading = fHalfLeading;
++    result.fSubpixel = fSubpixel;
+     result.fBaselineShift = fBaselineShift;
+     result.fFontArguments = fFontArguments;
+     return result;
+@@ -43,6 +44,9 @@ bool TextStyle::equals(const TextStyle& other) const {
+     if (!(fFontStyle == other.fFontStyle)) {
+         return false;
+     }
++    if (fSubpixel != other.fSubpixel) {
++        return false;
++    }
+     if (fFontFamilies != other.fFontFamilies) {
+         return false;
+     }
+@@ -103,6 +107,7 @@ bool TextStyle::equalsByFonts(const TextStyle& that) const {
+ 
+     return !fIsPlaceholder && !that.fIsPlaceholder &&
+            fFontStyle == that.fFontStyle &&
++           fSubpixel == that.fSubpixel &&
+            fFontFamilies == that.fFontFamilies &&
+            fFontFeatures == that.fFontFeatures &&
+            fFontArguments == that.getFontArguments() &&
+@@ -154,6 +159,7 @@ bool TextStyle::matchOneAttribute(StyleType styleType, const TextStyle& other) c
+                    fLocale == other.fLocale &&
+                    fFontFamilies == other.fFontFamilies &&
+                    fFontSize == other.fFontSize &&
++                   fSubpixel == other.fSubpixel &&
+                    fHeight == other.fHeight &&
+                    fHalfLeading == other.fHalfLeading &&
+                    fBaselineShift == other.fBaselineShift &&
