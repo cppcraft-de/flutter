@@ -260,6 +260,8 @@ TEST_F(PainterTest, DetailedLineMetricsComeFromFinalLayout) {
 
 TEST_F(PainterTest, QtLikeIntegerLineMetricsRoundBaselineAndPitch) {
   ScopedEnvironmentVariable environment("FLUTTER_QT_LINE_METRICS", "true");
+  ScopedEnvironmentVariable alternative_line_height(
+      "FLUTTER_USE_ALTERNATIVE_LINE_HEIGHT", nullptr);
   auto style = makeStyle();
   style.font_size = 19;
   auto paragraph = layoutText(style, u"HHHH");
@@ -280,7 +282,29 @@ TEST_F(PainterTest, QtLikeIntegerLineMetricsRoundBaselineAndPitch) {
   EXPECT_DOUBLE_EQ(line.line_box_height,
                    expected_ascent + expected_descent + expected_leading);
   EXPECT_DOUBLE_EQ(line.next_line_baseline_pitch, line.line_box_height);
+  EXPECT_DOUBLE_EQ(line.height, line.line_box_height);
   EXPECT_DOUBLE_EQ(glyphs.front().fFinalOrigin.fY, line.baseline);
+}
+
+TEST_F(PainterTest, AlternativeLineHeightUsesRawLeadingPitch) {
+  ScopedEnvironmentVariable environment("FLUTTER_QT_LINE_METRICS", "true");
+  ScopedEnvironmentVariable alternative_line_height(
+      "FLUTTER_USE_ALTERNATIVE_LINE_HEIGHT", "true");
+  auto style = makeStyle();
+  style.font_size = 19;
+  auto paragraph = layoutText(style, u"HHHH");
+  const auto& metrics = paragraph->GetLineMetrics();
+
+  ASSERT_EQ(metrics.size(), 1u);
+  const txt::LineMetrics& line = metrics.front();
+  const double expected_baseline_pitch =
+      std::ceil(line.raw_ascent + line.raw_descent + line.raw_leading);
+
+  EXPECT_DOUBLE_EQ(line.next_line_baseline_pitch, expected_baseline_pitch);
+  EXPECT_DOUBLE_EQ(line.height, expected_baseline_pitch);
+  EXPECT_DOUBLE_EQ(line.line_box_height,
+                   std::ceil(line.raw_ascent) + std::ceil(line.raw_descent) +
+                       std::max(0.0, line.raw_leading));
 }
 
 TEST_F(PainterTest, DrawsSolidLineSkia) {
