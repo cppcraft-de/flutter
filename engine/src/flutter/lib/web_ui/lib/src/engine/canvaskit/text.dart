@@ -984,6 +984,12 @@ class CkParagraph implements ui.Paragraph {
   }
 
   @override
+  Float64List computeDetailedLineMetricsForDiagnostics() => Float64List(0);
+
+  @override
+  List<Object?> computeGlyphMetricsForDiagnostics() => const <Object?>[];
+
+  @override
   ui.LineMetrics? getLineMetricsAt(int lineNumber) {
     assert(!_disposed, 'Paragraph has been disposed.');
     final SkLineMetrics? metrics = skiaObject.getLineMetricsAt(lineNumber.toDouble());
