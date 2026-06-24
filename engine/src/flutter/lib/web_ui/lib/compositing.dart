@@ -62,7 +62,20 @@ abstract final class PdfDocument {
     PdfPageFormat format = PdfPageFormat.a4,
     PdfPageOrientation orientation = PdfPageOrientation.portrait,
   }) {
-    throw UnsupportedError("PDF generation is not supported on Flutter web.");
+    if (pages.isEmpty) {
+      throw ArgumentError.value(pages, 'pages', 'must contain at least one page');
+    }
+
+    for (var i = 0; i < pages.length; i += 1) {
+      final PdfPage page = pages[i];
+      if (page.size.width <= 0 || page.size.height <= 0) {
+        throw ArgumentError.value(page.size, 'pages[$i].size', 'must be positive');
+      }
+    }
+
+    return Future<Uint8List>.value(
+      engine.renderer.createPdfDocument(pages, pageSize: format.sizeFor(orientation)),
+    );
   }
 }
 

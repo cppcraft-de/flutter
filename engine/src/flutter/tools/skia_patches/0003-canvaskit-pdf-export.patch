@@ -1,0 +1,120 @@
+diff --git a/modules/canvaskit/canvaskit_bindings.cpp b/modules/canvaskit/canvaskit_bindings.cpp
+index 9d2920c708..57bd72fe4a 100644
+--- a/modules/canvaskit/canvaskit_bindings.cpp
++++ b/modules/canvaskit/canvaskit_bindings.cpp
+@@ -45,6 +45,7 @@
+ #include "include/core/SkTypeface.h"
+ #include "include/core/SkTypes.h"
+ #include "include/core/SkVertices.h"
++#include "include/docs/SkPDFDocument.h"
+ #include "include/effects/Sk1DPathEffect.h"
+ #include "include/effects/Sk2DPathEffect.h"
+ #include "include/effects/SkCornerPathEffect.h"
+@@ -940,6 +941,52 @@ Uint8Array toBytes(sk_sp<const SkData> data) {
+             .call<Uint8Array>("slice");  // slice with no args makes a copy of the memory view.
+ }
+ 
++Uint8Array MakePdf(JSArray pictures, Float32Array sourceSizes, double pageWidth,
++                   double pageHeight) {
++#ifndef SK_SUPPORT_PDF
++    SkDebugf("CanvasKit was built without PDF support.\n");
++    return emscripten::val::null();
++#else
++    const size_t pageCount = pictures["length"].as<size_t>();
++    if (pageCount == 0 || pageWidth <= 0 || pageHeight <= 0) {
++        return emscripten::val::null();
++    }
++
++    JSSpan<float> sizes(sourceSizes);
++    if (sizes.size() != pageCount * 2) {
++        return emscripten::val::null();
++    }
++
++    SkDynamicMemoryWStream stream;
++    sk_sp<SkDocument> document = SkPDF::MakeDocument(&stream);
++    if (!document) {
++        return emscripten::val::null();
++    }
++
++    for (size_t i = 0; i < pageCount; ++i) {
++        sk_sp<SkPicture> picture = pictures[i].as<sk_sp<SkPicture>>();
++        const float sourceWidth = sizes.data()[i * 2];
++        const float sourceHeight = sizes.data()[i * 2 + 1];
++        if (!picture || sourceWidth <= 0 || sourceHeight <= 0) {
++            return emscripten::val::null();
++        }
++
++        SkCanvas* canvas = document->beginPage(pageWidth, pageHeight);
++        if (!canvas) {
++            return emscripten::val::null();
++        }
++        canvas->save();
++        canvas->scale(pageWidth / sourceWidth, pageHeight / sourceHeight);
++        canvas->drawPicture(picture);
++        canvas->restore();
++        document->endPage();
++    }
++
++    document->close();
++    return toBytes(stream.detachAsData());
++#endif
++}
++
+ #ifdef CK_ENABLE_WEBGL
+ // We need to call into the JS side of things to free webGL contexts. This object will be called
+ // with _setTextureCleanup after CanvasKit loads. The object will have one attribute,
+@@ -1176,6 +1223,7 @@ EMSCRIPTEN_BINDINGS(Skia) {
+                  return std::get<0>(codec->getImage());
+              }),
+              allow_raw_pointers());
++    function("MakePdf", &MakePdf);
+ 
+     // These won't be called directly, there are corresponding JS helpers to deal with arrays.
+     function("_MakeImage",
+diff --git a/modules/canvaskit/compile.sh b/modules/canvaskit/compile.sh
+index c56d1d08ce..f9091815af 100755
+--- a/modules/canvaskit/compile.sh
++++ b/modules/canvaskit/compile.sh
+@@ -251,7 +251,7 @@ echo "Compiling"
+   \
+   skia_enable_skshaper=true \
+   skia_enable_skparagraph=true \
+-  skia_enable_pdf=false \
++  skia_enable_pdf=true \
+   skia_canvaskit_enable_rt_shader=true \
+   skia_canvaskit_force_tracing=${FORCE_TRACING} \
+   skia_canvaskit_profile_build=${PROFILE_BUILD} \
+diff --git a/modules/canvaskit/externs.js b/modules/canvaskit/externs.js
+index 988f377a7c..d18afd7d5d 100644
+--- a/modules/canvaskit/externs.js
++++ b/modules/canvaskit/externs.js
+@@ -48,6 +48,7 @@ var CanvasKit = {
+   MakeImageFromEncoded: function() {},
+   MakeImageFromCanvasImageSource: function() {},
+   MakeOnScreenGLSurface: function() {},
++  MakePdf: function() {},
+   MakeRenderTarget: function() {},
+   MakePicture: function() {},
+   MakeSWCanvasSurface: function() {},
+diff --git a/modules/canvaskit/npm_build/types/index.d.ts b/modules/canvaskit/npm_build/types/index.d.ts
+index 892a27ebe3..c7578a4c7a 100644
+--- a/modules/canvaskit/npm_build/types/index.d.ts
++++ b/modules/canvaskit/npm_build/types/index.d.ts
+@@ -423,6 +423,17 @@ export interface CanvasKit {
+      */
+     MakePicture(bytes: Uint8Array | ArrayBuffer): SkPicture | null;
+ 
++    /**
++     * Returns PDF bytes for the supplied SkPictures, scaling each source size to the page size.
++     * Source sizes are flattened as [width0, height0, width1, height1, ...].
++     * @param pictures
++     * @param sourceSizes
++     * @param pageWidth
++     * @param pageHeight
++     */
++    MakePdf(pictures: SkPicture[], sourceSizes: Float32Array, pageWidth: number,
++            pageHeight: number): Uint8Array | null;
++
+     /**
+      * Returns an Vertices based on the given positions and optional parameters.
+      * See SkVertices.h (especially the Builder) for more details.

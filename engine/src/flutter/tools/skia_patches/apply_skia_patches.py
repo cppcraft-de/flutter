@@ -33,11 +33,14 @@ def run_git(skia_dir, args, *, check=True, capture_output=False):
 def patch_stack_already_applied(skia_dir):
   required_markers = {
       'modules/skparagraph/src/ParagraphImpl.cpp': 'ParagraphImpl::getGlyphDiagnostics',
-      'modules/skparagraph/src/Run.h': 'FLUTTER_QT_LINE_METRICS',
+      'modules/skparagraph/src/Run.h': 'kUseQtLikeIntegerMetricsByDefault',
       'modules/skparagraph/src/TextLine.cpp': 'fNextLineBaselinePitch',
+      'modules/canvaskit/paragraph_bindings.cpp': 'getGlyphDiagnostics',
       'src/ports/SkFontHost_FreeType.cpp': 'FT_Size_Metrics& sizeMetrics',
       'src/ports/SkScalerContext_win_dw.cpp': 'qtLineHeight',
       'src/ports/SkScalerContext_mac_ct.cpp': 'SkOTTableHorizontalHeader',
+      'modules/canvaskit/canvaskit_bindings.cpp': 'MakePdf(JSArray pictures',
+      'modules/canvaskit/compile.sh': 'skia_enable_pdf=true',
   }
   for relative_path, marker in required_markers.items():
     contents = (skia_dir / relative_path).read_text(encoding='utf-8')
