@@ -84,6 +84,70 @@ index c229c444e6..6dc18f4456 100644
      metrics->fAvgCharWidth = avgCharWidth * fScale.y();
      metrics->fXMin = xmin * fScale.y();
      metrics->fXMax = xmax * fScale.y();
+diff --git a/src/ports/SkScalerContext_win_dw.cpp b/src/ports/SkScalerContext_win_dw.cpp
+index 1d064b8031..c815a05a78 100644
+--- a/src/ports/SkScalerContext_win_dw.cpp
++++ b/src/ports/SkScalerContext_win_dw.cpp
+@@ -49,10 +49,31 @@
+ #include <dwrite.h>
+ #include <dwrite_1.h>
+ #include <dwrite_3.h>
+ 
++#include <cmath>
++#include <cstdlib>
++#include <cstring>
++
+ namespace {
+ static inline const constexpr bool kSkShowTextBlitCoverage = false;
+ 
++static bool environment_variable_enabled(const char* value) {
++    return value != nullptr &&
++           (std::strcmp(value, "1") == 0 ||
++            std::strcmp(value, "true") == 0 ||
++            std::strcmp(value, "TRUE") == 0 ||
++            std::strcmp(value, "yes") == 0 ||
++            std::strcmp(value, "on") == 0);
++}
++
++static bool use_qt_like_integer_metrics() {
++    const char* value = std::getenv("FLUTTER_QT_LINE_METRICS");
++    if (value == nullptr || *value == '\0') {
++        value = std::getenv("FLUTTER_INTEGER_TEXT_METRICS");
++    }
++    return environment_variable_enabled(value);
++}
++
+ /* Note:
+  * In versions 8 and 8.1 of Windows, some calls in DWrite are not thread safe.
+  * The mutex returned from maybe_dw_mutex protects the calls that are
+@@ -1870,9 +1891,24 @@ void SkScalerContext_DW::generateFontMetrics(SkFontMetrics* metrics) {
+ 
+     SkScalar upem = SkIntToScalar(dwfm.designUnitsPerEm);
+ 
+-    metrics->fAscent = -fTextSizeRender * SkIntToScalar(dwfm.ascent) / upem;
+-    metrics->fDescent = fTextSizeRender * SkIntToScalar(dwfm.descent) / upem;
+-    metrics->fLeading = fTextSizeRender * SkIntToScalar(dwfm.lineGap) / upem;
++    if (use_qt_like_integer_metrics()) {
++        const SkScalar qtAscent =
++            SkScalarCeilToScalar(fTextSizeRender * SkIntToScalar(dwfm.ascent) / upem);
++        const SkScalar qtDescent =
++            SkScalarCeilToScalar(fTextSizeRender * SkIntToScalar(dwfm.descent) / upem);
++        const SkScalar qtLineHeight = std::floor(
++            fTextSizeRender *
++                SkIntToScalar(dwfm.ascent + dwfm.descent + dwfm.lineGap) / upem +
++            0.5f);
++
++        metrics->fAscent = -qtAscent;
++        metrics->fDescent = qtDescent;
++        metrics->fLeading = qtLineHeight - qtAscent - qtDescent;
++    } else {
++        metrics->fAscent = -fTextSizeRender * SkIntToScalar(dwfm.ascent) / upem;
++        metrics->fDescent = fTextSizeRender * SkIntToScalar(dwfm.descent) / upem;
++        metrics->fLeading = fTextSizeRender * SkIntToScalar(dwfm.lineGap) / upem;
++    }
+     metrics->fXHeight = fTextSizeRender * SkIntToScalar(dwfm.xHeight) / upem;
+     metrics->fCapHeight = fTextSizeRender * SkIntToScalar(dwfm.capHeight) / upem;
+     metrics->fUnderlineThickness = fTextSizeRender * SkIntToScalar(dwfm.underlineThickness) / upem;
 diff --git a/modules/skparagraph/src/Run.h b/modules/skparagraph/src/Run.h
 index e6f1d62cc2..dcf4f2eb86 100644
 --- a/modules/skparagraph/src/Run.h
@@ -265,6 +329,18 @@ diff --git a/modules/skparagraph/src/TextLine.cpp b/modules/skparagraph/src/Text
 index 04798e3518..5a33ffca17 100644
 --- a/modules/skparagraph/src/TextLine.cpp
 +++ b/modules/skparagraph/src/TextLine.cpp
+@@ -152,8 +152,9 @@ TextLine::TextLine(ParagraphImpl* owner,
+     for (auto runIndex = start.runIndex(); runIndex <= end.runIndex(); ++runIndex) {
+         auto& run = fOwner->run(runIndex);
+         runLevels[runLevelsIndex++] = run.fBidiLevel;
+-        fMaxRunMetrics.add(
+-            InternalLineMetrics(run.correctAscent(), run.correctDescent(), run.fFontMetrics.fLeading));
++        fMaxRunMetrics.add(InternalLineMetrics(
++            run.correctAscent(), run.correctDescent(), run.fFontMetrics.fLeading,
++            run.ascent(), run.descent(), run.leading()));
+         if (run.isPlaceholder()) {
+             placeholdersInOriginalOrder.push_back(runIndex);
+         }
 @@ -1123,9 +1123,15 @@ LineMetrics TextLine::getMetrics() const {
      result.fEndIndex = fOwner->getUTF16Index(fText.end);
      result.fEndIncludingNewline = fOwner->getUTF16Index(fTextIncludingNewlines.end);
