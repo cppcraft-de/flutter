@@ -145,11 +145,16 @@ void main() {
     expect(detailedLines.single.lineMetrics.lineNumber, lines.single.lineNumber);
     expect(detailedLines.single.rawAscent, greaterThan(0.0));
     expect(detailedLines.single.rawDescent, greaterThanOrEqualTo(0.0));
+    expect(detailedLines.single.heightInputAscent, lessThan(0.0));
+    expect(detailedLines.single.heightInputDescent, greaterThanOrEqualTo(0.0));
+    expect(detailedLines.single.lineHeightBranch, 0);
     expect(detailedLines.single.nextLineBaselinePitch, detailedLines.single.lineBoxHeight);
     expect(lines.single.height, greaterThan(0.0));
     expect(glyphMetrics, hasLength(2));
     expect(glyphMetrics.first.lineNumber, 0);
     expect(glyphMetrics.first.fontFamily, isNotEmpty);
+    expect(glyphMetrics.first.fontMetricsAscent, lessThan(0.0));
+    expect(glyphMetrics.first.fontMetricsDescent, greaterThanOrEqualTo(0.0));
     expect(glyphMetrics.first.glyphId, greaterThan(0));
     expect(glyphMetrics.first.advance.dx, greaterThan(0.0));
     expect(

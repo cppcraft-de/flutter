@@ -215,10 +215,11 @@ tonic::Float64List Paragraph::computeLineMetrics() const {
 tonic::Float64List Paragraph::computeDetailedLineMetricsForDiagnostics() const {
   std::vector<txt::LineMetrics> metrics = m_paragraph_->GetLineMetrics();
 
-  // Groups of 8: raw ascent/descent/leading, effective
-  // ascent/descent/leading, next-line baseline pitch, and line-box height.
+  // Groups of 13: raw ascent/descent/leading, effective
+  // ascent/descent/leading, height input ascent/descent/leading/raw-leading,
+  // line-height branch, next-line baseline pitch, and line-box height.
   tonic::Float64List result(
-      Dart_NewTypedData(Dart_TypedData_kFloat64, metrics.size() * 8));
+      Dart_NewTypedData(Dart_TypedData_kFloat64, metrics.size() * 13));
   uint64_t position = 0;
   for (const txt::LineMetrics& line : metrics) {
     result[position++] = line.raw_ascent;
@@ -227,6 +228,11 @@ tonic::Float64List Paragraph::computeDetailedLineMetricsForDiagnostics() const {
     result[position++] = line.effective_ascent;
     result[position++] = line.effective_descent;
     result[position++] = line.effective_leading;
+    result[position++] = line.height_input_ascent;
+    result[position++] = line.height_input_descent;
+    result[position++] = line.height_input_leading;
+    result[position++] = line.height_input_raw_leading;
+    result[position++] = line.line_height_branch;
     result[position++] = line.next_line_baseline_pitch;
     result[position++] = line.line_box_height;
   }
@@ -238,7 +244,7 @@ Dart_Handle Paragraph::computeGlyphMetricsForDiagnostics() const {
   Dart_Handle result = Dart_NewList(glyphs.size());
   for (intptr_t i = 0; i < static_cast<intptr_t>(glyphs.size()); ++i) {
     const auto& glyph = glyphs[i];
-    Dart_Handle record = Dart_NewList(27);
+    Dart_Handle record = Dart_NewList(32);
     intptr_t position = 0;
     auto add_double = [&](double value) {
       tonic::CheckAndHandleError(
@@ -260,6 +266,11 @@ Dart_Handle Paragraph::computeGlyphMetricsForDiagnostics() const {
     add_double(glyph.fFont.isLinearMetrics());
     add_double(static_cast<int>(glyph.fFont.getHinting()));
     add_double(static_cast<int>(glyph.fFont.getEdging()));
+    add_double(glyph.fFontMetrics.fTop);
+    add_double(glyph.fFontMetrics.fAscent);
+    add_double(glyph.fFontMetrics.fDescent);
+    add_double(glyph.fFontMetrics.fBottom);
+    add_double(glyph.fFontMetrics.fLeading);
     add_double(glyph.fGlyph);
     add_double(glyph.fUtf8Cluster);
     add_double(glyph.fShapePosition.fX);

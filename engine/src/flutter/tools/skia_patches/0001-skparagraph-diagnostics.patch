@@ -1,8 +1,8 @@
 diff --git a/modules/skparagraph/include/Metrics.h b/modules/skparagraph/include/Metrics.h
-index 2c9821ae28..5e032ae3f8 100644
+index 2c9821ae28..9efa7e944a 100644
 --- a/modules/skparagraph/include/Metrics.h
 +++ b/modules/skparagraph/include/Metrics.h
-@@ -86,6 +86,19 @@ public:
+@@ -86,6 +86,26 @@ public:
      // Zero indexed line number
      size_t fLineNumber = 0;
  
@@ -13,20 +13,33 @@ index 2c9821ae28..5e032ae3f8 100644
 +    double fEffectiveAscent = 0.0;
 +    double fEffectiveDescent = 0.0;
 +    double fEffectiveLeading = 0.0;
-+    // Derived from TextLine::height(), which is the vertical advance used when
-+    // positioning the next line.
++    double fHeightInputAscent = 0.0;
++    double fHeightInputDescent = 0.0;
++    double fHeightInputLeading = 0.0;
++    double fHeightInputRawLeading = 0.0;
++    // 0: normal SkParagraph height, 2: Qt/FreeType size-metric baseline pitch.
++    double fLineHeightBranch = 0.0;
++    // The vertical advance used when positioning the next line.
 +    double fNextLineBaselinePitch = 0.0;
-+    // Derived from TextLine::height(); currently identical to baseline pitch.
++    // The occupied line height, tracked separately from baseline pitch.
 +    double fLineBoxHeight = 0.0;
 +
      // Mapping between text index ranges and the FontMetrics associated with
      // them. The first run will be keyed under start_index. The metrics here
      // are before layout and are the base values we calculate from.
 diff --git a/modules/skparagraph/include/Paragraph.h b/modules/skparagraph/include/Paragraph.h
-index a7112c8f39..08ea6110ed 100644
+index a7112c8f39..8b494b4f58 100644
 --- a/modules/skparagraph/include/Paragraph.h
 +++ b/modules/skparagraph/include/Paragraph.h
-@@ -112,6 +112,23 @@ public:
+@@ -2,6 +2,7 @@
+ #ifndef Paragraph_DEFINED
+ #define Paragraph_DEFINED
+ 
++#include "include/core/SkFontMetrics.h"
+ #include "include/core/SkPath.h"
+ #include "modules/skparagraph/include/FontCollection.h"
+ #include "modules/skparagraph/include/Metrics.h"
+@@ -112,6 +113,24 @@ public:
      using ExtendedVisitor = std::function<void(int lineNumber, const ExtendedVisitorInfo*)>;
      virtual void extendedVisit(const ExtendedVisitor&) = 0;
  
@@ -34,6 +47,7 @@ index a7112c8f39..08ea6110ed 100644
 +        int fLineNumber;
 +        size_t fRunIndex;
 +        SkFont fFont;
++        SkFontMetrics fFontMetrics;
 +        SkGlyphID fGlyph;
 +        uint32_t fUtf8Cluster;
 +        SkPoint fShapePosition;
@@ -51,10 +65,10 @@ index a7112c8f39..08ea6110ed 100644
       *
       * @param lineNumber  a line number
 diff --git a/modules/skparagraph/src/ParagraphImpl.cpp b/modules/skparagraph/src/ParagraphImpl.cpp
-index 9ea8267545..c30d3c644e 100644
+index 9ea8267545..831e622fa4 100644
 --- a/modules/skparagraph/src/ParagraphImpl.cpp
 +++ b/modules/skparagraph/src/ParagraphImpl.cpp
-@@ -1239,6 +1239,48 @@ void ParagraphImpl::visit(const Visitor& visitor) {
+@@ -1239,6 +1239,51 @@ void ParagraphImpl::visit(const Visitor& visitor) {
      }
  }
  
@@ -79,10 +93,13 @@ index 9ea8267545..c30d3c644e 100644
 +                            sourceRun->fPositions[sourceIndex + 1] - shapePosition;
 +                    const SkPoint finalOrigin = blobRun.positions[i] + rec.fOffset;
 +                    const SkRect bounds = blobRun.font.getBounds(blobRun.glyphs[i], nullptr);
++                    SkFontMetrics fontMetrics;
++                    blobRun.font.getMetrics(&fontMetrics);
 +                    result.push_back({
 +                            lineNumber,
 +                            sourceRun->fIndex,
 +                            blobRun.font,
++                            fontMetrics,
 +                            blobRun.glyphs[i],
 +                            SkToU32(sourceRun->globalClusterIndex(sourceIndex)),
 +                            shapePosition,
@@ -194,10 +211,10 @@ index 8f5d709c8b..e6f1d62cc2 100644
      bool fForceStrut;
  };
 diff --git a/modules/skparagraph/src/TextLine.cpp b/modules/skparagraph/src/TextLine.cpp
-index bb60d70f9c..04798e3518 100644
+index bb60d70f9c..2af1f7fae5 100644
 --- a/modules/skparagraph/src/TextLine.cpp
 +++ b/modules/skparagraph/src/TextLine.cpp
-@@ -1136,6 +1136,14 @@ LineMetrics TextLine::getMetrics() const {
+@@ -1136,6 +1136,19 @@ LineMetrics TextLine::getMetrics() const {
      // This is Flutter definition of a baseline
      result.fBaseline = this->offset().fY + this->height() - this->sizes().descent();
      result.fLineNumber = this - fOwner->lines().data();
@@ -207,6 +224,11 @@ index bb60d70f9c..04798e3518 100644
 +    result.fEffectiveAscent = -this->sizes().ascent();
 +    result.fEffectiveDescent = this->sizes().descent();
 +    result.fEffectiveLeading = this->sizes().leading();
++    result.fHeightInputAscent = this->sizes().ascent();
++    result.fHeightInputDescent = this->sizes().descent();
++    result.fHeightInputLeading = this->sizes().leading();
++    result.fHeightInputRawLeading = this->sizes().rawLeading();
++    result.fLineHeightBranch = 0.0;
 +    result.fNextLineBaselinePitch = this->height();
 +    result.fLineBoxHeight = this->height();
  

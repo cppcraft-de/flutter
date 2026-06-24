@@ -3149,8 +3149,10 @@ abstract class Paragraph {
   /// Returns engine-specific detailed line metrics for diagnostics.
   ///
   /// Each line is encoded as raw ascent/descent/leading, effective
-  /// ascent/descent/leading, next-line baseline pitch, and line-box height.
-  /// Backends that do not expose these values return an empty list.
+  /// ascent/descent/leading, height input ascent/descent/leading/raw-leading,
+  /// line-height branch, next-line baseline pitch, and line-box height.
+  /// Branch values are 0 for normal and 2 for Qt/FreeType size-metric baseline
+  /// pitch. Backends that do not expose these values return an empty list.
   Float64List computeDetailedLineMetricsForDiagnostics() => Float64List(0);
 
   /// Returns engine-specific glyph metrics from the final laid-out paragraph.

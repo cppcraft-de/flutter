@@ -33,7 +33,7 @@ def run_git(skia_dir, args, *, check=True, capture_output=False):
 def patch_stack_already_applied(skia_dir):
   required_markers = {
       'modules/skparagraph/src/ParagraphImpl.cpp': 'ParagraphImpl::getGlyphDiagnostics',
-      'modules/skparagraph/src/Run.h': 'FLUTTER_USE_ALTERNATIVE_LINE_HEIGHT',
+      'modules/skparagraph/src/Run.h': 'FLUTTER_QT_LINE_METRICS',
       'modules/skparagraph/src/TextLine.cpp': 'fNextLineBaselinePitch',
   }
   for relative_path, marker in required_markers.items():

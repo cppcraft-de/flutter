@@ -11,7 +11,67 @@ index e6f1d62cc2..dcf4f2eb86 100644
  #include <math.h>
  #include <algorithm>
  #include <functional>
-@@ -455,6 +457,28 @@ public:
+@@ -388,6 +390,9 @@ public:
+         fRawDescent = d;
+         fRawLeading = l;
+         fDiagnosticRawLeading = l;
++        fHeightInputAscent = a;
++        fHeightInputDescent = d;
++        fHeightInputLeading = l;
+         fForceStrut = false;
+     }
+ 
+@@ -399,6 +404,9 @@ public:
+         fRawDescent = rd;
+         fRawLeading = rl;
+         fDiagnosticRawLeading = rl;
++        fHeightInputAscent = ra;
++        fHeightInputDescent = rd;
++        fHeightInputLeading = rl;
+         fForceStrut = false;
+     }
+ 
+@@ -412,6 +420,9 @@ public:
+         fRawDescent = metrics.fDescent;
+         fRawLeading = metrics.fLeading;
+         fDiagnosticRawLeading = metrics.fLeading;
++        fHeightInputAscent = metrics.fAscent;
++        fHeightInputDescent = metrics.fDescent;
++        fHeightInputLeading = metrics.fLeading;
+         fForceStrut = forceStrut;
+     }
+ 
+@@ -427,6 +438,9 @@ public:
+         fRawDescent = std::max(fRawDescent, run->descent());
+         fRawLeading = std::max(fRawLeading, run->leading());
+         fDiagnosticRawLeading = std::max(fDiagnosticRawLeading, run->leading());
++        fHeightInputAscent = std::min(fHeightInputAscent, run->ascent());
++        fHeightInputDescent = std::max(fHeightInputDescent, run->descent());
++        fHeightInputLeading = std::max(fHeightInputLeading, run->leading());
+     }
+ 
+     void add(InternalLineMetrics other) {
+@@ -437,6 +451,9 @@ public:
+         fRawDescent = std::max(fRawDescent, other.fRawDescent);
+         fRawLeading = std::max(fRawLeading, other.fRawLeading);
+         fDiagnosticRawLeading = std::max(fDiagnosticRawLeading, other.fDiagnosticRawLeading);
++        fHeightInputAscent = std::min(fHeightInputAscent, other.fHeightInputAscent);
++        fHeightInputDescent = std::max(fHeightInputDescent, other.fHeightInputDescent);
++        fHeightInputLeading = std::max(fHeightInputLeading, other.fHeightInputLeading);
+     }
+ 
+     void clean() {
+@@ -447,6 +464,9 @@ public:
+         fRawDescent = SK_ScalarMin;
+         fRawLeading = 0;
+         fDiagnosticRawLeading = SK_ScalarMin;
++        fHeightInputAscent = SK_ScalarMax;
++        fHeightInputDescent = SK_ScalarMin;
++        fHeightInputLeading = SK_ScalarMin;
+     }
+ 
+     bool isClean() {
+@@ -455,6 +457,23 @@ public:
  
      SkScalar delta() const { return height() - ideographicBaseline(); }
  
@@ -32,38 +92,47 @@ index e6f1d62cc2..dcf4f2eb86 100644
 +        return environmentVariableEnabled(value);
 +    }
 +
-+    static bool useAlternativeLineHeight() {
-+        return useQtLikeIntegerMetrics() &&
-+               environmentVariableEnabled(std::getenv("FLUTTER_USE_ALTERNATIVE_LINE_HEIGHT"));
-+    }
-+
      void updateLineMetrics(InternalLineMetrics& metrics) {
          if (metrics.fForceStrut) {
              metrics.fAscent = fAscent;
-@@ -480,9 +504,22 @@ public:
+@@ -463,5 +511,8 @@ public:
+             metrics.fRawLeading = fRawLeading;
+             metrics.fDiagnosticRawLeading = fDiagnosticRawLeading;
++            metrics.fHeightInputAscent = fHeightInputAscent;
++            metrics.fHeightInputDescent = fHeightInputDescent;
++            metrics.fHeightInputLeading = fHeightInputLeading;
+         } else {
+             // This is another of those flutter changes. To be removed...
+             metrics.fAscent = std::min(metrics.fAscent, fAscent - fLeading / 2.0f);
+@@ -480,9 +504,27 @@ public:
      }
  
      SkScalar height() const {
 +        if (useQtLikeIntegerMetrics()) {
-+            return useAlternativeLineHeight()
-+                ? this->nextLineBaselinePitch()
-+                : this->lineBoxHeight();
++            return this->nextLineBaselinePitch();
 +        }
          return ::round((double)fDescent - fAscent + fLeading);
      }
  
 +    SkScalar nextLineBaselinePitch() const {
-+        return ::ceil((double)-fAscent + fDescent + fDiagnosticRawLeading);
++        return ::ceil((double)-fHeightInputAscent + fHeightInputDescent + fHeightInputLeading);
++    }
++
++    int lineHeightBranch() const {
++        if (!useQtLikeIntegerMetrics()) {
++            return 0;
++        }
++        return 2;
 +    }
 +
 +    SkScalar lineBoxHeight() const {
-+        return this->layoutAscent() + this->layoutDescent() + this->layoutLeading();
++        return ::ceil((double)-fHeightInputAscent + fHeightInputDescent + this->layoutLeading());
 +    }
 +
      void update(SkScalar a, SkScalar d, SkScalar l) {
          fAscent = a;
          fDescent = d;
-@@ -494,15 +531,22 @@ public:
+@@ -494,16 +538,27 @@ public:
          fRawDescent = rd;
      }
  
@@ -78,17 +147,34 @@ index e6f1d62cc2..dcf4f2eb86 100644
      SkScalar ascent() const { return fAscent; }
      SkScalar descent() const { return fDescent; }
      SkScalar leading() const { return fLeading; }
-     SkScalar rawAscent() const { return fRawAscent; }
-     SkScalar rawDescent() const { return fRawDescent; }
-     SkScalar rawLeading() const { return fDiagnosticRawLeading; }
-+    SkScalar layoutAscent() const { return ::ceil((double)-fAscent); }
-+    SkScalar layoutDescent() const { return ::ceil((double)fDescent); }
+-    SkScalar rawAscent() const { return fRawAscent; }
+-    SkScalar rawDescent() const { return fRawDescent; }
+-    SkScalar rawLeading() const { return fDiagnosticRawLeading; }
++    SkScalar rawAscent() const { return fHeightInputAscent; }
++    SkScalar rawDescent() const { return fHeightInputDescent; }
++    SkScalar rawLeading() const { return fHeightInputLeading; }
++    SkScalar heightInputAscent() const { return fHeightInputAscent; }
++    SkScalar heightInputDescent() const { return fHeightInputDescent; }
++    SkScalar heightInputLeading() const { return fHeightInputLeading; }
++    SkScalar heightInputRawLeading() const { return fHeightInputLeading; }
++    SkScalar layoutAscent() const { return ::ceil((double)-fHeightInputAscent); }
++    SkScalar layoutDescent() const { return ::ceil((double)fHeightInputDescent); }
 +    SkScalar layoutLeading() const {
-+        return std::max(0.0f, std::max(fLeading, fDiagnosticRawLeading));
++        return std::max(0.0f, fHeightInputLeading);
 +    }
      void setForceStrut(bool value) { fForceStrut = value; }
      bool getForceStrut() const { return fForceStrut; }
  
+@@ -524,6 +601,9 @@ private:
+     // Preserves negative resolved-font leading for diagnostics without
+     // changing SkParagraph's existing line-layout behavior.
+     SkScalar fDiagnosticRawLeading;
++    SkScalar fHeightInputAscent;
++    SkScalar fHeightInputDescent;
++    SkScalar fHeightInputLeading;
+ 
+     bool fForceStrut;
+ };
 diff --git a/modules/skparagraph/src/TextLine.cpp b/modules/skparagraph/src/TextLine.cpp
 index 04798e3518..5a33ffca17 100644
 --- a/modules/skparagraph/src/TextLine.cpp
@@ -112,7 +198,7 @@ index 04798e3518..5a33ffca17 100644
      result.fHeight = fAdvance.fY;
      result.fWidth = fAdvance.fX;
      if (fOwner->getApplyRoundingHack()) {
-@@ -1134,16 +1140,27 @@ LineMetrics TextLine::getMetrics() const {
+@@ -1134,21 +1140,32 @@ LineMetrics TextLine::getMetrics() const {
      }
      result.fLeft = this->offset().fX;
      // This is Flutter definition of a baseline
@@ -137,6 +223,16 @@ index 04798e3518..5a33ffca17 100644
 +    result.fEffectiveLeading = InternalLineMetrics::useQtLikeIntegerMetrics()
 +        ? this->sizes().layoutLeading()
 +        : this->sizes().leading();
+-    result.fHeightInputAscent = this->sizes().ascent();
+-    result.fHeightInputDescent = this->sizes().descent();
+-    result.fHeightInputLeading = this->sizes().leading();
+-    result.fHeightInputRawLeading = this->sizes().rawLeading();
+-    result.fLineHeightBranch = 0.0;
++    result.fHeightInputAscent = this->sizes().heightInputAscent();
++    result.fHeightInputDescent = this->sizes().heightInputDescent();
++    result.fHeightInputLeading = this->sizes().heightInputLeading();
++    result.fHeightInputRawLeading = this->sizes().heightInputRawLeading();
++    result.fLineHeightBranch = this->sizes().lineHeightBranch();
      result.fNextLineBaselinePitch = this->height();
 -    result.fLineBoxHeight = this->height();
 +    result.fLineBoxHeight = InternalLineMetrics::useQtLikeIntegerMetrics()

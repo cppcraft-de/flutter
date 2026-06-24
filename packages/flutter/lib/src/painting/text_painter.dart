@@ -45,6 +45,11 @@ class DiagnosticLineMetrics {
     required this.effectiveAscent,
     required this.effectiveDescent,
     required this.effectiveLeading,
+    required this.heightInputAscent,
+    required this.heightInputDescent,
+    required this.heightInputLeading,
+    required this.heightInputRawLeading,
+    required this.lineHeightBranch,
     required this.nextLineBaselinePitch,
     required this.lineBoxHeight,
   });
@@ -70,10 +75,27 @@ class DiagnosticLineMetrics {
   /// The leading used by SkParagraph's final line layout.
   final double effectiveLeading;
 
-  /// Derived from SkParagraph's final line height.
+  /// The signed ascent input used by SkParagraph's active line-height formula.
+  final double heightInputAscent;
+
+  /// The descent input used by SkParagraph's active line-height formula.
+  final double heightInputDescent;
+
+  /// The leading input used by SkParagraph's active line-height formula.
+  final double heightInputLeading;
+
+  /// The raw leading input used by SkParagraph's active line-height formula.
+  final double heightInputRawLeading;
+
+  /// The active line-height formula branch.
+  ///
+  /// Values are 0 for normal and 2 for Qt/FreeType size-metric baseline pitch.
+  final int lineHeightBranch;
+
+  /// The vertical advance used when positioning the next line.
   final double nextLineBaselinePitch;
 
-  /// Derived from SkParagraph's final line height.
+  /// The occupied line height, tracked separately from baseline pitch.
   final double lineBoxHeight;
 }
 
@@ -90,6 +112,11 @@ class DiagnosticGlyphMetrics {
     required this.linearMetrics,
     required this.hinting,
     required this.edging,
+    required this.fontMetricsTop,
+    required this.fontMetricsAscent,
+    required this.fontMetricsDescent,
+    required this.fontMetricsBottom,
+    required this.fontMetricsLeading,
     required this.glyphId,
     required this.utf8Cluster,
     required this.shapePosition,
@@ -126,6 +153,21 @@ class DiagnosticGlyphMetrics {
 
   /// The numeric SkFont::Edging value.
   final int edging;
+
+  /// The resolved SkFontMetrics top value.
+  final double fontMetricsTop;
+
+  /// The resolved SkFontMetrics ascent value.
+  final double fontMetricsAscent;
+
+  /// The resolved SkFontMetrics descent value.
+  final double fontMetricsDescent;
+
+  /// The resolved SkFontMetrics bottom value.
+  final double fontMetricsBottom;
+
+  /// The resolved SkFontMetrics leading value.
+  final double fontMetricsLeading;
 
   /// The resolved glyph identifier.
   final int glyphId;
@@ -1946,7 +1988,7 @@ class TextPainter {
     // locally patched diagnostic method.
     // ignore: undefined_method
     final Float64List encoded = layout.paragraph.computeDetailedLineMetricsForDiagnostics();
-    if (encoded.length != lines.length * 8) {
+    if (encoded.length != lines.length * 13) {
       return const <DiagnosticLineMetrics>[];
     }
     var position = 0;
@@ -1960,6 +2002,11 @@ class TextPainter {
           effectiveAscent: encoded[position++],
           effectiveDescent: encoded[position++],
           effectiveLeading: encoded[position++],
+          heightInputAscent: encoded[position++],
+          heightInputDescent: encoded[position++],
+          heightInputLeading: encoded[position++],
+          heightInputRawLeading: encoded[position++],
+          lineHeightBranch: encoded[position++].toInt(),
           nextLineBaselinePitch: encoded[position++],
           lineBoxHeight: encoded[position++],
         ),
@@ -1977,7 +2024,7 @@ class TextPainter {
     final List<Object?> encoded = layout.paragraph.computeGlyphMetricsForDiagnostics();
     return <DiagnosticGlyphMetrics>[
       for (final Object? value in encoded)
-        if (value case final List<Object?> record when record.length == 27)
+        if (value case final List<Object?> record when record.length == 32)
           DiagnosticGlyphMetrics(
             lineNumber: (record[0]! as num).toInt(),
             runIndex: (record[1]! as num).toInt(),
@@ -1988,23 +2035,28 @@ class TextPainter {
             linearMetrics: (record[6]! as num) != 0,
             hinting: (record[7]! as num).toInt(),
             edging: (record[8]! as num).toInt(),
-            glyphId: (record[9]! as num).toInt(),
-            utf8Cluster: (record[10]! as num).toInt(),
-            shapePosition: Offset((record[11]! as num).toDouble(), (record[12]! as num).toDouble()),
-            offset: Offset((record[13]! as num).toDouble(), (record[14]! as num).toDouble()),
-            advance: Offset((record[15]! as num).toDouble(), (record[16]! as num).toDouble()),
-            finalOrigin: Offset((record[17]! as num).toDouble(), (record[18]! as num).toDouble()),
+            fontMetricsTop: (record[9]! as num).toDouble(),
+            fontMetricsAscent: (record[10]! as num).toDouble(),
+            fontMetricsDescent: (record[11]! as num).toDouble(),
+            fontMetricsBottom: (record[12]! as num).toDouble(),
+            fontMetricsLeading: (record[13]! as num).toDouble(),
+            glyphId: (record[14]! as num).toInt(),
+            utf8Cluster: (record[15]! as num).toInt(),
+            shapePosition: Offset((record[16]! as num).toDouble(), (record[17]! as num).toDouble()),
+            offset: Offset((record[18]! as num).toDouble(), (record[19]! as num).toDouble()),
+            advance: Offset((record[20]! as num).toDouble(), (record[21]! as num).toDouble()),
+            finalOrigin: Offset((record[22]! as num).toDouble(), (record[23]! as num).toDouble()),
             bounds: Rect.fromLTRB(
-              (record[19]! as num).toDouble(),
-              (record[20]! as num).toDouble(),
-              (record[21]! as num).toDouble(),
-              (record[22]! as num).toDouble(),
-            ),
-            inkBounds: Rect.fromLTRB(
-              (record[23]! as num).toDouble(),
               (record[24]! as num).toDouble(),
               (record[25]! as num).toDouble(),
               (record[26]! as num).toDouble(),
+              (record[27]! as num).toDouble(),
+            ),
+            inkBounds: Rect.fromLTRB(
+              (record[28]! as num).toDouble(),
+              (record[29]! as num).toDouble(),
+              (record[30]! as num).toDouble(),
+              (record[31]! as num).toDouble(),
             ),
           ),
     ];

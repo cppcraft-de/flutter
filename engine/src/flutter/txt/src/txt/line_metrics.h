@@ -57,6 +57,11 @@ class LineMetrics {
   double effective_ascent = 0.0;
   double effective_descent = 0.0;
   double effective_leading = 0.0;
+  double height_input_ascent = 0.0;
+  double height_input_descent = 0.0;
+  double height_input_leading = 0.0;
+  double height_input_raw_leading = 0.0;
+  double line_height_branch = 0.0;
   double next_line_baseline_pitch = 0.0;
   double line_box_height = 0.0;
 

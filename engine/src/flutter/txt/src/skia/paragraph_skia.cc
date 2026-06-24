@@ -253,6 +253,11 @@ std::vector<LineMetrics>& ParagraphSkia::GetLineMetrics() {
       txtm.effective_ascent = skm.fEffectiveAscent;
       txtm.effective_descent = skm.fEffectiveDescent;
       txtm.effective_leading = skm.fEffectiveLeading;
+      txtm.height_input_ascent = skm.fHeightInputAscent;
+      txtm.height_input_descent = skm.fHeightInputDescent;
+      txtm.height_input_leading = skm.fHeightInputLeading;
+      txtm.height_input_raw_leading = skm.fHeightInputRawLeading;
+      txtm.line_height_branch = skm.fLineHeightBranch;
       txtm.next_line_baseline_pitch = skm.fNextLineBaselinePitch;
       txtm.line_box_height = skm.fLineBoxHeight;
 
