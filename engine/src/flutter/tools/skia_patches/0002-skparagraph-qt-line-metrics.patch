@@ -148,6 +148,92 @@ index 1d064b8031..c815a05a78 100644
      metrics->fXHeight = fTextSizeRender * SkIntToScalar(dwfm.xHeight) / upem;
      metrics->fCapHeight = fTextSizeRender * SkIntToScalar(dwfm.capHeight) / upem;
      metrics->fUnderlineThickness = fTextSizeRender * SkIntToScalar(dwfm.underlineThickness) / upem;
+diff --git a/src/ports/SkScalerContext_mac_ct.cpp b/src/ports/SkScalerContext_mac_ct.cpp
+index 0670b7615a..100763481f 100644
+--- a/src/ports/SkScalerContext_mac_ct.cpp
++++ b/src/ports/SkScalerContext_mac_ct.cpp
+@@ -44,6 +44,8 @@
+ #include "src/ports/SkTypeface_mac_ct.h"
+ #include "src/sfnt/SkOTTableTypes.h"
+ #include "src/sfnt/SkOTTable_OS_2.h"
++#include "src/sfnt/SkOTTable_head.h"
++#include "src/sfnt/SkOTTable_hhea.h"
+ #include "src/utils/mac/SkCGBase.h"
+ #include "src/utils/mac/SkCGGeometry.h"
+ #include "src/utils/mac/SkCTFont.h"
+@@ -51,12 +53,32 @@
+ #include "src/utils/mac/SkUniqueCFRef.h"
+ 
+ #include <algorithm>
++#include <cmath>
++#include <cstdlib>
++#include <cstring>
+ 
+ class SkDescriptor;
+ 
+ 
+ namespace {
+ static inline const constexpr bool kSkShowTextBlitCoverage = false;
++
++static bool environment_variable_enabled(const char* value) {
++    return value != nullptr &&
++           (std::strcmp(value, "1") == 0 ||
++            std::strcmp(value, "true") == 0 ||
++            std::strcmp(value, "TRUE") == 0 ||
++            std::strcmp(value, "yes") == 0 ||
++            std::strcmp(value, "on") == 0);
++}
++
++static bool use_qt_like_integer_metrics() {
++    const char* value = std::getenv("FLUTTER_QT_LINE_METRICS");
++    if (value == nullptr || *value == '\0') {
++        value = std::getenv("FLUTTER_INTEGER_TEXT_METRICS");
++    }
++    return environment_variable_enabled(value);
++}
+ }
+ 
+ static void sk_memset_rect32(uint32_t* ptr, uint32_t value,
+@@ -700,6 +722,39 @@ void SkScalerContext_Mac::generateFontMetrics(SkFontMetrics* metrics) {
+     metrics->fStrikeoutThickness = 0;
+     metrics->fStrikeoutPosition = 0;
+ 
++    if (use_qt_like_integer_metrics()) {
++        sk_sp<SkData> head = this->getTypeface()->copyTableData(
++                SkTEndian_SwapBE32(SkOTTableHead::TAG));
++        sk_sp<SkData> hhea = this->getTypeface()->copyTableData(
++                SkTEndian_SwapBE32(SkOTTableHorizontalHeader::TAG));
++        if (head && hhea && sizeof(SkOTTableHead) <= head->size() &&
++                sizeof(SkOTTableHorizontalHeader) <= hhea->size()) {
++            const SkOTTableHead* headTable = static_cast<const SkOTTableHead*>(head->data());
++            const SkOTTableHorizontalHeader* hheaTable =
++                    static_cast<const SkOTTableHorizontalHeader*>(hhea->data());
++            const uint16_t upem = SkEndian_SwapBE16(headTable->unitsPerEm);
++            if (upem != 0) {
++                const SkScalar fontSize = SkScalarFromCGFloat(CTFontGetSize(fCTFont.get()));
++                const int16_t hheaAscent =
++                        static_cast<int16_t>(SkEndian_SwapBE16(hheaTable->Ascender));
++                const int16_t hheaDescent =
++                        static_cast<int16_t>(SkEndian_SwapBE16(hheaTable->Descender));
++                const int16_t hheaLineGap =
++                        static_cast<int16_t>(SkEndian_SwapBE16(hheaTable->LineGap));
++                const SkScalar ascent = fontSize * SkIntToScalar(hheaAscent) / upem;
++                const SkScalar descent = fontSize * SkIntToScalar(-hheaDescent) / upem;
++                const SkScalar lineGap = fontSize * SkIntToScalar(hheaLineGap) / upem;
++                const SkScalar qtAscent = SkScalarCeilToScalar(ascent);
++                const SkScalar qtDescent = SkScalarCeilToScalar(descent);
++                const SkScalar qtLineHeight = std::floor(ascent + descent + lineGap + 0.5f);
++
++                metrics->fAscent = -qtAscent;
++                metrics->fDescent = qtDescent;
++                metrics->fLeading = qtLineHeight - qtAscent - qtDescent;
++            }
++        }
++    }
++
+     metrics->fFlags = 0;
+     metrics->fFlags |= SkFontMetrics::kUnderlineThicknessIsValid_Flag;
+     metrics->fFlags |= SkFontMetrics::kUnderlinePositionIsValid_Flag;
 diff --git a/modules/skparagraph/src/Run.h b/modules/skparagraph/src/Run.h
 index e6f1d62cc2..dcf4f2eb86 100644
 --- a/modules/skparagraph/src/Run.h

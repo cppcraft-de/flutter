@@ -35,6 +35,9 @@ def patch_stack_already_applied(skia_dir):
       'modules/skparagraph/src/ParagraphImpl.cpp': 'ParagraphImpl::getGlyphDiagnostics',
       'modules/skparagraph/src/Run.h': 'FLUTTER_QT_LINE_METRICS',
       'modules/skparagraph/src/TextLine.cpp': 'fNextLineBaselinePitch',
+      'src/ports/SkFontHost_FreeType.cpp': 'FT_Size_Metrics& sizeMetrics',
+      'src/ports/SkScalerContext_win_dw.cpp': 'qtLineHeight',
+      'src/ports/SkScalerContext_mac_ct.cpp': 'SkOTTableHorizontalHeader',
   }
   for relative_path, marker in required_markers.items():
     contents = (skia_dir / relative_path).read_text(encoding='utf-8')
