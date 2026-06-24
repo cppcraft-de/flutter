@@ -1,3 +1,89 @@
+diff --git a/src/ports/SkFontHost_FreeType.cpp b/src/ports/SkFontHost_FreeType.cpp
+index c229c444e6..6dc18f4456 100644
+--- a/src/ports/SkFontHost_FreeType.cpp
++++ b/src/ports/SkFontHost_FreeType.cpp
+@@ -46,6 +46,8 @@
+ #include <memory>
+ #include <optional>
+ #include <tuple>
++#include <cstdlib>
++#include <cstring>
+ 
+ #include <ft2build.h>
+ #include <freetype/ftadvanc.h>
+@@ -72,6 +74,23 @@ namespace {
+ 
+ using SkUniqueFTFace = std::unique_ptr<FT_FaceRec, SkFunctionObject<FT_Done_Face>>;
+ using SkUniqueFTSize = std::unique_ptr<FT_SizeRec, SkFunctionObject<FT_Done_Size>>;
++
++static bool environment_variable_enabled(const char* value) {
++    return value != nullptr &&
++           (std::strcmp(value, "1") == 0 ||
++            std::strcmp(value, "true") == 0 ||
++            std::strcmp(value, "TRUE") == 0 ||
++            std::strcmp(value, "yes") == 0 ||
++            std::strcmp(value, "on") == 0);
++}
++
++static bool use_qt_like_integer_metrics() {
++    const char* value = std::getenv("FLUTTER_QT_LINE_METRICS");
++    if (value == nullptr || *value == '\0') {
++        value = std::getenv("FLUTTER_INTEGER_TEXT_METRICS");
++    }
++    return environment_variable_enabled(value);
++}
+ }
+ 
+ // SK_FREETYPE_MINIMUM_RUNTIME_VERSION 0x<major><minor><patch><flags>
+@@ -1583,6 +1602,11 @@ void SkScalerContext_FreeType::generateFontMetrics(SkFontMetrics* metrics) {
+     // pull from format-specific metrics as needed
+     SkScalar ascent, descent, leading, xmin, xmax, ymin, ymax;
+     SkScalar underlineThickness, underlinePosition;
++    const bool useQtLikeMetrics = use_qt_like_integer_metrics();
++    bool useQtLikeSizeMetrics = false;
++    SkScalar qtAscent = 0.0f;
++    SkScalar qtDescent = 0.0f;
++    SkScalar qtLeading = 0.0f;
+     if (face->face_flags & FT_FACE_FLAG_SCALABLE) { // scalable outline font
+         // FreeType will always use HHEA metrics if they're not zero.
+         // It completely ignores the OS/2 fsSelection::UseTypoMetrics bit.
+@@ -1653,6 +1677,16 @@ void SkScalerContext_FreeType::generateFontMetrics(SkFontMetrics* metrics) {
+         sk_bzero(metrics, sizeof(*metrics));
+         return;
+     }
++
++    if (useQtLikeMetrics) {
++        const FT_Size_Metrics& sizeMetrics = face->size->metrics;
++        qtAscent = -SkFDot6ToScalar(sizeMetrics.ascender);
++        qtDescent = -SkFDot6ToScalar(sizeMetrics.descender);
++        qtLeading = SkFDot6ToScalar(sizeMetrics.height -
++                                    sizeMetrics.ascender +
++                                    sizeMetrics.descender);
++        useQtLikeSizeMetrics = true;
++    }
+ 
+     // synthesize elements that were not provided by the os/2 table or format-specific metrics
+     if (!x_height) {
+@@ -1665,15 +1699,15 @@ void SkScalerContext_FreeType::generateFontMetrics(SkFontMetrics* metrics) {
+     }
+ 
+     // disallow negative linespacing
+-    if (leading < 0.0f) {
++    if (!useQtLikeSizeMetrics && leading < 0.0f) {
+         leading = 0.0f;
+     }
+ 
+     metrics->fTop = ymax * fScale.y();
+-    metrics->fAscent = ascent * fScale.y();
+-    metrics->fDescent = descent * fScale.y();
++    metrics->fAscent = useQtLikeSizeMetrics ? qtAscent : ascent * fScale.y();
++    metrics->fDescent = useQtLikeSizeMetrics ? qtDescent : descent * fScale.y();
+     metrics->fBottom = ymin * fScale.y();
+-    metrics->fLeading = leading * fScale.y();
++    metrics->fLeading = useQtLikeSizeMetrics ? qtLeading : leading * fScale.y();
+     metrics->fAvgCharWidth = avgCharWidth * fScale.y();
+     metrics->fXMin = xmin * fScale.y();
+     metrics->fXMax = xmax * fScale.y();
 diff --git a/modules/skparagraph/src/Run.h b/modules/skparagraph/src/Run.h
 index e6f1d62cc2..dcf4f2eb86 100644
 --- a/modules/skparagraph/src/Run.h
