@@ -312,10 +312,9 @@ TEST_F(PainterTest, AlternativeLineHeightEnvKeepsSignedPitch) {
   EXPECT_DOUBLE_EQ(line.line_height_branch, 2);
   EXPECT_DOUBLE_EQ(line.next_line_baseline_pitch, expected_baseline_pitch);
   EXPECT_DOUBLE_EQ(line.height, expected_baseline_pitch);
-  EXPECT_DOUBLE_EQ(
-      line.line_box_height,
-      std::ceil(line.raw_ascent + line.raw_descent +
-                std::max(0.0, line.raw_leading)));
+  EXPECT_DOUBLE_EQ(line.line_box_height,
+                   std::ceil(line.raw_ascent + line.raw_descent +
+                             std::max(0.0, line.raw_leading)));
 }
 
 TEST_F(PainterTest, DrawsSolidLineSkia) {
