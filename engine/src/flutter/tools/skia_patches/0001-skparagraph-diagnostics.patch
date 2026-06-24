@@ -2,7 +2,7 @@ diff --git a/modules/skparagraph/include/Metrics.h b/modules/skparagraph/include
 index 2c9821ae28..9efa7e944a 100644
 --- a/modules/skparagraph/include/Metrics.h
 +++ b/modules/skparagraph/include/Metrics.h
-@@ -86,6 +86,26 @@ public:
+@@ -86,6 +86,24 @@ public:
      // Zero indexed line number
      size_t fLineNumber = 0;
  
