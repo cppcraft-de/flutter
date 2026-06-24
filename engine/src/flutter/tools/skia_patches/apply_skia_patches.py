@@ -34,6 +34,7 @@ def patch_stack_already_applied(skia_dir):
   required_markers = {
       'modules/skparagraph/src/ParagraphImpl.cpp': 'ParagraphImpl::getGlyphDiagnostics',
       'modules/skparagraph/src/Run.h': 'kUseQtLikeIntegerMetricsByDefault',
+      'modules/skparagraph/src/Run.cpp': 'Run::commit()',
       'modules/skparagraph/src/TextLine.cpp': 'fNextLineBaselinePitch',
       'modules/canvaskit/paragraph_bindings.cpp': 'getGlyphDiagnostics',
       'src/ports/SkFontHost_FreeType.cpp': 'FT_Size_Metrics& sizeMetrics',

@@ -88,8 +88,41 @@ index f5d80b3476..aaf354e5e6 100644
          .function("getLineMetrics", &GetLineMetrics)
          .function("getLineMetricsAt", &GetLineMetricsAt)
          .function("getLineNumberAt", &para::Paragraph::getLineNumberAt)
+diff --git a/modules/skparagraph/src/Run.cpp b/modules/skparagraph/src/Run.cpp
+index a1cfc403f8..9ea0a8620e 100644
+--- a/modules/skparagraph/src/Run.cpp
++++ b/modules/skparagraph/src/Run.cpp
+@@ -87,6 +87,28 @@ SkShaper::RunHandler::Buffer Run::newRunBuffer() {
+     return {fGlyphs.data(), fPositions.data(), fOffsets.data(), fClusterIndexes.data(), fOffset};
+ }
+ 
++void Run::commit() {
++    if (!InternalLineMetrics::useQtLikeIntegerMetrics() || this->isPlaceholder()) {
++        return;
++    }
++
++    SkScalar originalX = fPositions.empty() ? 0.0f : fPositions[0].fX;
++    SkScalar x = originalX;
++    SkScalar width = 0.0f;
++    for (size_t i = 0; i < this->size(); ++i) {
++        const SkScalar nextX = fPositions[i + 1].fX;
++        const SkScalar advance = SkDoubleToScalar(::round((double)(nextX - originalX)));
++        fPositions[i].fX = x;
++        x += advance;
++        width += advance;
++        originalX = nextX;
++    }
++    if (!fPositions.empty()) {
++        fPositions[this->size()].fX = x;
++    }
++    fAdvance.fX = width;
++}
++
+ void Run::copyTo(SkTextBlobBuilder& builder, size_t pos, size_t size) const {
+     SkASSERT(pos + size <= this->size());
+     const auto& blobBuffer = builder.allocRunPos(fFont, SkToInt(size));
 diff --git a/modules/skparagraph/src/Run.h b/modules/skparagraph/src/Run.h
-index 736cab9dfd..0cc5b4aa72 100644
+index 736cab9dfd..bfe849e677 100644
 --- a/modules/skparagraph/src/Run.h
 +++ b/modules/skparagraph/src/Run.h
 @@ -14,6 +14,8 @@
@@ -101,6 +134,15 @@ index 736cab9dfd..0cc5b4aa72 100644
  #include <math.h>
  #include <algorithm>
  #include <functional>
+@@ -161,7 +163,7 @@ public:
+         return SkSpan<const uint32_t>(fClusterIndexes.begin(), fClusterIndexes.size());
+     }
+ 
+-    void commit() { }
++    void commit();
+ 
+     void resetJustificationShifts() {
+         fJustificationShifts.clear();
 @@ -389,6 +391,9 @@ public:
          fRawDescent = d;
          fRawLeading = l;
