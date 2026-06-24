@@ -252,12 +252,12 @@ TEST_F(PainterTest, DetailedLineMetricsComeFromFinalLayout) {
   EXPECT_GE(line.height_input_descent, 0);
   const double expected_leading = std::max(0.0, line.raw_leading);
   EXPECT_DOUBLE_EQ(line.line_height_branch, 2);
-  EXPECT_DOUBLE_EQ(line.next_line_baseline_pitch,
-                   std::ceil(line.raw_ascent + line.raw_descent +
-                             line.raw_leading));
-  EXPECT_DOUBLE_EQ(line.line_box_height,
-                   std::ceil(line.raw_ascent + line.raw_descent +
-                             expected_leading));
+  EXPECT_DOUBLE_EQ(
+      line.next_line_baseline_pitch,
+      std::ceil(line.raw_ascent + line.raw_descent + line.raw_leading));
+  EXPECT_DOUBLE_EQ(
+      line.line_box_height,
+      std::ceil(line.raw_ascent + line.raw_descent + expected_leading));
   EXPECT_DOUBLE_EQ(line.height, line.next_line_baseline_pitch);
   ASSERT_EQ(glyphs.size(), 4u);
   EXPECT_EQ(glyphs.front().fLineNumber, 0);
