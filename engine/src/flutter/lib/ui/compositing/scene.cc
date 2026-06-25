@@ -8,14 +8,13 @@
 #include <string>
 #include <vector>
 
-#include "flutter/display_list/skia/dl_sk_canvas.h"
+#include "flutter/display_list/geometry/dl_geometry_conversions.h"
+#include "flutter/display_list/skia/dl_sk_dispatcher.h"
 #include "flutter/fml/make_copyable.h"
 #include "flutter/fml/status.h"
 #include "flutter/fml/status_or.h"
 #include "flutter/fml/trace_event.h"
-#if !SLIMPELLER
 #include "flutter/lib/ui/floating_point.h"
-#endif  // !SLIMPELLER
 #include "flutter/lib/ui/painting/display_list_deferred_image_gpu_skia.h"
 #include "flutter/lib/ui/painting/image.h"
 #include "flutter/lib/ui/painting/picture.h"
@@ -82,10 +81,6 @@ fml::StatusOr<sk_sp<SkData>> RenderPdf(
     double page_width,
     double page_height,
     const fml::TaskRunnerAffineWeakPtr<SnapshotDelegate>& snapshot_delegate) {
-#if SLIMPELLER
-  return fml::Status(fml::StatusCode::kUnimplemented,
-                     "PDF export is unavailable in SLIMPELLER builds.");
-#else
   SkDynamicMemoryWStream stream;
   sk_sp<SkDocument> document =
       SkPDF::MakeDocument(&stream, SkPDF::JPEG::MetadataWithCallbacks());
@@ -116,7 +111,13 @@ fml::StatusOr<sk_sp<SkData>> RenderPdf(
     canvas->save();
     canvas->scale(SkDoubleToScalar(page_width / page.source_width),
                   SkDoubleToScalar(page_height / page.source_height));
-    DlSkCanvasAdapter(canvas).DrawDisplayList(display_list);
+    DlSkCanvasDispatcher dispatcher(canvas);
+    if (display_list->has_rtree()) {
+      display_list->Dispatch(dispatcher,
+                             ToDlRect(canvas->getLocalClipBounds()));
+    } else {
+      display_list->Dispatch(dispatcher);
+    }
     canvas->restore();
 
     document->endPage();
@@ -124,7 +125,6 @@ fml::StatusOr<sk_sp<SkData>> RenderPdf(
 
   document->close();
   return stream.detachAsData();
-#endif  // SLIMPELLER
 }
 
 }  // namespace
