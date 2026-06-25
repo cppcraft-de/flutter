@@ -42,6 +42,7 @@ def patch_stack_already_applied(skia_dir):
       'src/ports/SkScalerContext_mac_ct.cpp': 'SkOTTableHorizontalHeader',
       'modules/canvaskit/canvaskit_bindings.cpp': 'MakePdf(JSArray pictures',
       'modules/canvaskit/compile.sh': 'skia_enable_pdf=true',
+      'modules/canvaskit/BUILD.gn': 'SK_SUPPORT_PDF',
   }
   for relative_path, marker in required_markers.items():
     contents = (skia_dir / relative_path).read_text(encoding='utf-8')

@@ -13,6 +13,8 @@ wasm_toolchain("canvaskit") {
 
     # Include image codecs.
     skia_use_libjpeg_turbo_decode = true
+    skia_use_libjpeg_turbo_encode = true
+    skia_use_no_jpeg_encode = false
     skia_use_libpng_decode = true
     skia_use_libwebp_decode = true
 
@@ -49,6 +51,8 @@ wasm_toolchain("canvaskit_chromium") {
     # using the browser's built-in codecs.
     # https://github.com/flutter/flutter/issues/122331
     skia_use_libjpeg_turbo_decode = true
+    skia_use_libjpeg_turbo_encode = true
+    skia_use_no_jpeg_encode = false
     skia_use_libpng_decode = true
     skia_use_libwebp_decode = true
 
@@ -103,6 +107,8 @@ wasm_toolchain("canvaskit_experimental_webparagraph") {
     # using the browser's built-in codecs.
     # https://github.com/flutter/flutter/issues/122331
     skia_use_libjpeg_turbo_decode = true
+    skia_use_libjpeg_turbo_encode = true
+    skia_use_no_jpeg_encode = false
     skia_use_libpng_decode = true
     skia_use_libwebp_decode = true
 

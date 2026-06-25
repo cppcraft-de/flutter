@@ -71,6 +71,20 @@ index 9d2920c708..57bd72fe4a 100644
  
      // These won't be called directly, there are corresponding JS helpers to deal with arrays.
      function("_MakeImage",
+diff --git a/modules/canvaskit/BUILD.gn b/modules/canvaskit/BUILD.gn
+index e54983ef1c..7af4cf6bde 100644
+--- a/modules/canvaskit/BUILD.gn
++++ b/modules/canvaskit/BUILD.gn
+@@ -368,6 +368,9 @@ skia_wasm_lib("canvaskit") {
+   if (!is_debug && !skia_canvaskit_force_tracing) {
+     defines += [ "SK_DISABLE_TRACING" ]
+   }
++  if (skia_use_zlib) {
++    defines += [ "SK_SUPPORT_PDF" ]
++  }
+   if (skia_canvaskit_enable_embedded_font) {
+     defines += [ "CK_EMBED_FONT" ]
+   }
 diff --git a/modules/canvaskit/compile.sh b/modules/canvaskit/compile.sh
 index c56d1d08ce..f9091815af 100755
 --- a/modules/canvaskit/compile.sh

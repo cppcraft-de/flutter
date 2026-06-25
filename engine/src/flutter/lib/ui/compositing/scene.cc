@@ -13,7 +13,9 @@
 #include "flutter/fml/status.h"
 #include "flutter/fml/status_or.h"
 #include "flutter/fml/trace_event.h"
+#if !SLIMPELLER
 #include "flutter/lib/ui/floating_point.h"
+#endif  // !SLIMPELLER
 #include "flutter/lib/ui/painting/display_list_deferred_image_gpu_skia.h"
 #include "flutter/lib/ui/painting/image.h"
 #include "flutter/lib/ui/painting/picture.h"
