@@ -22,9 +22,8 @@ declare_args() {
 
 import("//build/config/win/visual_studio_version.gni")
 
-# During Windows-hosted wasm builds this file is loaded to define the host
-# toolchain, while the default toolchain remains wasm.
-assert(is_win || target_os == "wasm")
+# Should only be running on Windows.
+assert(is_win)
 
 # Setup the Visual Studio state.
 #
@@ -45,7 +44,7 @@ if (use_rbe) {
   asm_prefix = ""
 }
 
-if (current_toolchain == default_toolchain && target_cpu != "wasm") {
+if (current_toolchain == default_toolchain) {
   if (is_debug) {
     configuration = "Debug"
   } else {
@@ -295,7 +294,6 @@ template("win_toolchains") {
         forward_variables_from(invoker.toolchain_args, "*")
       }
       current_cpu = toolchain_arch
-      current_os = "win"
       is_clang = true
     }
   }
@@ -330,11 +328,5 @@ if (target_cpu == "arm64") {
     win_toolchains(host_cpu) {
       toolchain_arch = host_cpu
     }
-  }
-}
-
-if (target_cpu == "wasm") {
-  win_toolchains(host_cpu) {
-    toolchain_arch = host_cpu
   }
 }

@@ -270,20 +270,12 @@ template("gcc_toolchain") {
     }
 
     tool("stamp") {
-      if (invoker.toolchain_cpu == "wasm" && host_os == "win") {
-        command = "python3 -c \"import pathlib; pathlib.Path(r'{{output}}').touch()\""
-      } else {
-        command = "touch {{output}}"
-      }
+      command = "touch {{output}}"
       description = "STAMP {{output}}"
     }
 
     tool("copy") {
-      if (invoker.toolchain_cpu == "wasm" && host_os == "win") {
-        command = "python3 -c \"import os, shutil; os.makedirs(os.path.dirname(r'{{output}}'), exist_ok=True); shutil.copy2(r'{{source}}', r'{{output}}')\""
-      } else {
-        command = "ln -f {{source}} {{output}} 2>/dev/null || (rm -rf {{output}} && cp -af {{source}} {{output}})"
-      }
+      command = "ln -f {{source}} {{output}} 2>/dev/null || (rm -rf {{output}} && cp -af {{source}} {{output}})"
       description = "COPY {{source}} {{output}}"
     }
 

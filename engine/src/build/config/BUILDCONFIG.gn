@@ -54,7 +54,7 @@ if (current_cpu == "") {
   current_cpu = target_cpu
 }
 if (current_os == "") {
-  if (host_os == "win" && target_os != "wasm") {
+  if (host_os == "win") {
     current_os = "win"
   } else {
     current_os = target_os

@@ -33,16 +33,11 @@ template("wasm_toolchain") {
       }
     }
 
-    emsdk_bin_ext = ""
-    if (host_os == "win") {
-      emsdk_bin_ext = ".bat"
-    }
-
     # emsdk_dir and em_config are defined in wasm.gni.
-    ar = "$emsdk_dir/upstream/emscripten/emar$emsdk_bin_ext --em-config $em_config_path"
-    cc = "$compiler_prefix$emsdk_dir/upstream/emscripten/emcc$emsdk_bin_ext --em-config $em_config_path"
-    cxx = "$compiler_prefix$emsdk_dir/upstream/emscripten/em++$emsdk_bin_ext --em-config $em_config_path"
-    asm = "$emsdk_dir/upstream/emscripten/emcc$emsdk_bin_ext --em-config $em_config_path"
+    ar = "$emsdk_dir/upstream/emscripten/emar --em-config $em_config_path"
+    cc = "$compiler_prefix$emsdk_dir/upstream/emscripten/emcc --em-config $em_config_path"
+    cxx = "$compiler_prefix$emsdk_dir/upstream/emscripten/em++ --em-config $em_config_path"
+    asm = "$emsdk_dir/upstream/emscripten/emcc --em-config $em_config_path"
 
     # emscripten emits this .worker.js file conditionally depending on whether
     # pthreads are on or not. Unfortunately, there is no way to conditionally
@@ -52,7 +47,7 @@ template("wasm_toolchain") {
     # dummy file. If the target does use pthreads, this dummy file will be
     # overwritten. If the target does not, the dummy file will satisfy the
     # toolchain's requirement that it has this as an output.
-    ld = "$emsdk_dir/upstream/emscripten/em++$emsdk_bin_ext --em-config $em_config_path"
+    ld = "$emsdk_dir/upstream/emscripten/em++ --em-config $em_config_path"
     readelf = "readelf"
     nm = "nm"
 
