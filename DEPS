@@ -846,11 +846,11 @@ recursedeps = [
 
 hooks = [
   {
-    'name': 'Apply local Skia text patches',
+    'name': 'Apply local WSC font rendering patches',
     'pattern': '.',
     'action': [
       'python3',
-      'engine/src/flutter/tools/skia_patches/apply_skia_patches.py',
+      'engine/src/flutter/tools/wsc_font_rendering_patches/apply_patches.py',
     ],
   },
   {

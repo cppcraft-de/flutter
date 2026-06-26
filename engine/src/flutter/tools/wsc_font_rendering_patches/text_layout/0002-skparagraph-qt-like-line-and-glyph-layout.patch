@@ -1,93 +1,3 @@
-diff --git a/modules/canvaskit/paragraph_bindings.cpp b/modules/canvaskit/paragraph_bindings.cpp
-index f5d80b3476..aaf354e5e6 100644
---- a/modules/canvaskit/paragraph_bindings.cpp
-+++ b/modules/canvaskit/paragraph_bindings.cpp
-@@ -354,6 +354,19 @@ JSObject JSObjectFromLineMetrics(skia::textlayout::LineMetrics& metrics) {
-     m.set("left", metrics.fLeft);
-     m.set("baseline", metrics.fBaseline);
-     m.set("lineNumber", metrics.fLineNumber);
-+    m.set("rawAscent", metrics.fRawAscent);
-+    m.set("rawDescent", metrics.fRawDescent);
-+    m.set("rawLeading", metrics.fRawLeading);
-+    m.set("effectiveAscent", metrics.fEffectiveAscent);
-+    m.set("effectiveDescent", metrics.fEffectiveDescent);
-+    m.set("effectiveLeading", metrics.fEffectiveLeading);
-+    m.set("heightInputAscent", metrics.fHeightInputAscent);
-+    m.set("heightInputDescent", metrics.fHeightInputDescent);
-+    m.set("heightInputLeading", metrics.fHeightInputLeading);
-+    m.set("heightInputRawLeading", metrics.fHeightInputRawLeading);
-+    m.set("lineHeightBranch", metrics.fLineHeightBranch);
-+    m.set("nextLineBaselinePitch", metrics.fNextLineBaselinePitch);
-+    m.set("lineBoxHeight", metrics.fLineBoxHeight);
-     return m;
- }
- 
-@@ -387,6 +400,57 @@ JSArray GetLineMetrics(para::Paragraph& self) {
-     return result;
- }
- 
-+JSArray GetGlyphDiagnostics(para::Paragraph& self) {
-+    const auto glyphs = self.getGlyphDiagnostics();
-+    JSArray result = emscripten::val::array();
-+    for (const auto& glyph : glyphs) {
-+        JSArray record = emscripten::val::array();
-+        auto add_number = [&](double value) {
-+            record.call<void>("push", value);
-+        };
-+        add_number(glyph.fLineNumber);
-+        add_number(glyph.fRunIndex);
-+        SkString family;
-+        SkTypefaceID typefaceID = 0;
-+        if (glyph.fFont.getTypeface() != nullptr) {
-+            glyph.fFont.getTypeface()->getFamilyName(&family);
-+            typefaceID = glyph.fFont.getTypeface()->uniqueID();
-+        }
-+        record.call<void>("push", std::string(family.c_str()));
-+        add_number(typefaceID);
-+        add_number(glyph.fFont.getSize());
-+        add_number(glyph.fFont.isSubpixel() ? 1 : 0);
-+        add_number(glyph.fFont.isLinearMetrics() ? 1 : 0);
-+        add_number(static_cast<int>(glyph.fFont.getHinting()));
-+        add_number(static_cast<int>(glyph.fFont.getEdging()));
-+        add_number(glyph.fFontMetrics.fTop);
-+        add_number(glyph.fFontMetrics.fAscent);
-+        add_number(glyph.fFontMetrics.fDescent);
-+        add_number(glyph.fFontMetrics.fBottom);
-+        add_number(glyph.fFontMetrics.fLeading);
-+        add_number(glyph.fGlyph);
-+        add_number(glyph.fUtf8Cluster);
-+        add_number(glyph.fShapePosition.fX);
-+        add_number(glyph.fShapePosition.fY);
-+        add_number(glyph.fOffset.fX);
-+        add_number(glyph.fOffset.fY);
-+        add_number(glyph.fAdvance.fX);
-+        add_number(glyph.fAdvance.fY);
-+        add_number(glyph.fFinalOrigin.fX);
-+        add_number(glyph.fFinalOrigin.fY);
-+        add_number(glyph.fBounds.fLeft);
-+        add_number(glyph.fBounds.fTop);
-+        add_number(glyph.fBounds.fRight);
-+        add_number(glyph.fBounds.fBottom);
-+        add_number(glyph.fInkBounds.fLeft);
-+        add_number(glyph.fInkBounds.fTop);
-+        add_number(glyph.fInkBounds.fRight);
-+        add_number(glyph.fInkBounds.fBottom);
-+        result.call<void>("push", record);
-+    }
-+    return result;
-+}
-+
- JSObject GetLineMetricsAt(para::Paragraph& self, size_t lineNumber) {
-     skia::textlayout::LineMetrics metrics;
-     return self.getLineMetricsAt(lineNumber, &metrics)
-@@ -528,6 +592,7 @@ EMSCRIPTEN_BINDINGS(Paragraph) {
-         .function("getGlyphPositionAtCoordinate", &para::Paragraph::getGlyphPositionAtCoordinate)
-         .function("getHeight", &para::Paragraph::getHeight)
-         .function("getIdeographicBaseline", &para::Paragraph::getIdeographicBaseline)
-+        .function("getGlyphDiagnostics", &GetGlyphDiagnostics)
-         .function("getLineMetrics", &GetLineMetrics)
-         .function("getLineMetricsAt", &GetLineMetricsAt)
-         .function("getLineNumberAt", &para::Paragraph::getLineNumberAt)
 diff --git a/modules/skparagraph/src/Run.cpp b/modules/skparagraph/src/Run.cpp
 index a1cfc403f8..9ea0a8620e 100644
 --- a/modules/skparagraph/src/Run.cpp
@@ -122,7 +32,7 @@ index a1cfc403f8..9ea0a8620e 100644
      SkASSERT(pos + size <= this->size());
      const auto& blobBuffer = builder.allocRunPos(fFont, SkToInt(size));
 diff --git a/modules/skparagraph/src/Run.h b/modules/skparagraph/src/Run.h
-index 736cab9dfd..bfe849e677 100644
+index 8f5d709c8b..2dc5bae737 100644
 --- a/modules/skparagraph/src/Run.h
 +++ b/modules/skparagraph/src/Run.h
 @@ -14,6 +14,8 @@
@@ -143,67 +53,67 @@ index 736cab9dfd..bfe849e677 100644
  
      void resetJustificationShifts() {
          fJustificationShifts.clear();
-@@ -389,6 +391,9 @@ public:
+@@ -388,6 +390,9 @@ public:
+         fRawAscent = a;
          fRawDescent = d;
          fRawLeading = l;
-         fDiagnosticRawLeading = l;
 +        fHeightInputAscent = a;
 +        fHeightInputDescent = d;
 +        fHeightInputLeading = l;
          fForceStrut = false;
      }
  
-@@ -400,6 +405,9 @@ public:
+@@ -398,6 +403,9 @@ public:
+         fRawAscent = ra;
          fRawDescent = rd;
          fRawLeading = rl;
-         fDiagnosticRawLeading = rl;
 +        fHeightInputAscent = ra;
 +        fHeightInputDescent = rd;
 +        fHeightInputLeading = rl;
          fForceStrut = false;
      }
  
-@@ -413,6 +421,9 @@ public:
+@@ -410,6 +418,9 @@ public:
+         fRawAscent = metrics.fAscent;
          fRawDescent = metrics.fDescent;
          fRawLeading = metrics.fLeading;
-         fDiagnosticRawLeading = metrics.fLeading;
 +        fHeightInputAscent = metrics.fAscent;
 +        fHeightInputDescent = metrics.fDescent;
 +        fHeightInputLeading = metrics.fLeading;
          fForceStrut = forceStrut;
      }
  
-@@ -428,6 +439,9 @@ public:
+@@ -424,6 +435,9 @@ public:
+         fRawAscent = std::min(fRawAscent, run->ascent());
          fRawDescent = std::max(fRawDescent, run->descent());
          fRawLeading = std::max(fRawLeading, run->leading());
-         fDiagnosticRawLeading = std::max(fDiagnosticRawLeading, run->leading());
 +        fHeightInputAscent = std::min(fHeightInputAscent, run->ascent());
 +        fHeightInputDescent = std::max(fHeightInputDescent, run->descent());
 +        fHeightInputLeading = std::max(fHeightInputLeading, run->leading());
      }
  
      void add(InternalLineMetrics other) {
-@@ -438,6 +452,9 @@ public:
+@@ -433,6 +447,9 @@ public:
+         fRawAscent = std::min(fRawAscent, other.fRawAscent);
          fRawDescent = std::max(fRawDescent, other.fRawDescent);
          fRawLeading = std::max(fRawLeading, other.fRawLeading);
-         fDiagnosticRawLeading = std::max(fDiagnosticRawLeading, other.fDiagnosticRawLeading);
 +        fHeightInputAscent = std::min(fHeightInputAscent, other.fHeightInputAscent);
 +        fHeightInputDescent = std::max(fHeightInputDescent, other.fHeightInputDescent);
 +        fHeightInputLeading = std::max(fHeightInputLeading, other.fHeightInputLeading);
      }
  
      void clean() {
-@@ -448,6 +465,9 @@ public:
+@@ -442,6 +459,9 @@ public:
+         fRawAscent = SK_ScalarMax;
          fRawDescent = SK_ScalarMin;
          fRawLeading = 0;
-         fDiagnosticRawLeading = SK_ScalarMin;
 +        fHeightInputAscent = SK_ScalarMax;
 +        fHeightInputDescent = SK_ScalarMin;
 +        fHeightInputLeading = SK_ScalarMin;
      }
  
      bool isClean() {
-@@ -461,6 +481,27 @@ public:
+@@ -455,6 +475,27 @@ public:
  
      SkScalar delta() const { return height() - ideographicBaseline(); }
  
@@ -231,17 +141,17 @@ index 736cab9dfd..bfe849e677 100644
      void updateLineMetrics(InternalLineMetrics& metrics) {
          if (metrics.fForceStrut) {
              metrics.fAscent = fAscent;
-@@ -470,6 +511,9 @@ public:
+@@ -463,6 +504,9 @@ public:
+             metrics.fRawAscent = fRawAscent;
              metrics.fRawDescent = fRawDescent;
              metrics.fRawLeading = fRawLeading;
-             metrics.fDiagnosticRawLeading = fDiagnosticRawLeading;
 +            metrics.fHeightInputAscent = fHeightInputAscent;
 +            metrics.fHeightInputDescent = fHeightInputDescent;
 +            metrics.fHeightInputLeading = fHeightInputLeading;
          } else {
              // This is another of those flutter changes. To be removed...
              metrics.fAscent = std::min(metrics.fAscent, fAscent - fLeading / 2.0f);
-@@ -485,9 +529,27 @@ public:
+@@ -478,9 +522,27 @@ public:
      }
  
      SkScalar height() const {
@@ -269,7 +179,7 @@ index 736cab9dfd..bfe849e677 100644
      void update(SkScalar a, SkScalar d, SkScalar l) {
          fAscent = a;
          fDescent = d;
-@@ -499,16 +561,27 @@ public:
+@@ -492,15 +554,27 @@ public:
          fRawDescent = rd;
      }
  
@@ -286,7 +196,6 @@ index 736cab9dfd..bfe849e677 100644
      SkScalar leading() const { return fLeading; }
 -    SkScalar rawAscent() const { return fRawAscent; }
 -    SkScalar rawDescent() const { return fRawDescent; }
--    SkScalar rawLeading() const { return fDiagnosticRawLeading; }
 +    SkScalar rawAscent() const { return fHeightInputAscent; }
 +    SkScalar rawDescent() const { return fHeightInputDescent; }
 +    SkScalar rawLeading() const { return fHeightInputLeading; }
@@ -302,10 +211,10 @@ index 736cab9dfd..bfe849e677 100644
      void setForceStrut(bool value) { fForceStrut = value; }
      bool getForceStrut() const { return fForceStrut; }
  
-@@ -528,6 +601,9 @@ private:
-     // Preserves negative resolved-font leading for diagnostics without
-     // changing SkParagraph's existing line-layout behavior.
-     SkScalar fDiagnosticRawLeading;
+@@ -517,6 +591,9 @@ private:
+     SkScalar fRawAscent;
+     SkScalar fRawDescent;
+     SkScalar fRawLeading;
 +    SkScalar fHeightInputAscent;
 +    SkScalar fHeightInputDescent;
 +    SkScalar fHeightInputLeading;
@@ -313,7 +222,7 @@ index 736cab9dfd..bfe849e677 100644
      bool fForceStrut;
  };
 diff --git a/modules/skparagraph/src/TextLine.cpp b/modules/skparagraph/src/TextLine.cpp
-index 856f67848b..55ea972b2c 100644
+index bb60d70f9c..4aaae6816a 100644
 --- a/modules/skparagraph/src/TextLine.cpp
 +++ b/modules/skparagraph/src/TextLine.cpp
 @@ -152,8 +152,9 @@ TextLine::TextLine(ParagraphImpl* owner,
@@ -347,7 +256,7 @@ index 856f67848b..55ea972b2c 100644
      result.fHeight = fAdvance.fY;
      result.fWidth = fAdvance.fX;
      if (fOwner->getApplyRoundingHack()) {
-@@ -1134,21 +1141,32 @@ LineMetrics TextLine::getMetrics() const {
+@@ -1134,7 +1141,10 @@ LineMetrics TextLine::getMetrics() const {
      }
      result.fLeft = this->offset().fX;
      // This is Flutter definition of a baseline
@@ -357,39 +266,8 @@ index 856f67848b..55ea972b2c 100644
 +            ? this->baseline()
 +            : this->height() - this->sizes().descent());
      result.fLineNumber = this - fOwner->lines().data();
-     result.fRawAscent = -this->sizes().rawAscent();
-     result.fRawDescent = this->sizes().rawDescent();
-     result.fRawLeading = this->sizes().rawLeading();
--    result.fEffectiveAscent = -this->sizes().ascent();
--    result.fEffectiveDescent = this->sizes().descent();
--    result.fEffectiveLeading = this->sizes().leading();
--    result.fHeightInputAscent = this->sizes().ascent();
--    result.fHeightInputDescent = this->sizes().descent();
--    result.fHeightInputLeading = this->sizes().leading();
--    result.fHeightInputRawLeading = this->sizes().rawLeading();
--    result.fLineHeightBranch = 0.0;
-+    result.fEffectiveAscent = InternalLineMetrics::useQtLikeIntegerMetrics()
-+        ? this->sizes().layoutAscent()
-+        : -this->sizes().ascent();
-+    result.fEffectiveDescent = InternalLineMetrics::useQtLikeIntegerMetrics()
-+        ? this->sizes().layoutDescent()
-+        : this->sizes().descent();
-+    result.fEffectiveLeading = InternalLineMetrics::useQtLikeIntegerMetrics()
-+        ? this->sizes().layoutLeading()
-+        : this->sizes().leading();
-+    result.fHeightInputAscent = this->sizes().heightInputAscent();
-+    result.fHeightInputDescent = this->sizes().heightInputDescent();
-+    result.fHeightInputLeading = this->sizes().heightInputLeading();
-+    result.fHeightInputRawLeading = this->sizes().heightInputRawLeading();
-+    result.fLineHeightBranch = this->sizes().lineHeightBranch();
-     result.fNextLineBaselinePitch = this->height();
--    result.fLineBoxHeight = this->height();
-+    result.fLineBoxHeight = InternalLineMetrics::useQtLikeIntegerMetrics()
-+        ? this->sizes().lineBoxHeight()
-+        : this->height();
  
      // Fill out the style parts
-     this->iterateThroughVisualRuns(false,
 diff --git a/src/ports/SkFontHost_FreeType.cpp b/src/ports/SkFontHost_FreeType.cpp
 index c229c444e6..d46edd8fed 100644
 --- a/src/ports/SkFontHost_FreeType.cpp
