@@ -69,6 +69,28 @@ TEST_F(SkiaParagraphBuilderTests, ParagraphStrutStyle) {
 }
 
 TEST_F(SkiaParagraphBuilderTests, SubpixelTracksEnvironment) {
+  ScopedEnvironmentVariable environment("FLUTTER_INTEGER_TEXT_METRICS",
+                                        nullptr);
+  ParagraphStyle style;
+  auto collection = std::make_shared<FontCollection>();
+  auto builder = ParagraphBuilderSkia(style, collection, false);
+
+  EXPECT_FALSE(builder.TxtToSkia(style).getTextStyle().getSubpixel());
+  EXPECT_FALSE(builder.TxtToSkia(TextStyle()).getSubpixel());
+}
+
+TEST_F(SkiaParagraphBuilderTests, SubpixelCanOptOutToVanilla) {
+  ScopedEnvironmentVariable environment("FLUTTER_INTEGER_TEXT_METRICS",
+                                        "false");
+  ParagraphStyle style;
+  auto collection = std::make_shared<FontCollection>();
+  auto builder = ParagraphBuilderSkia(style, collection, false);
+
+  EXPECT_TRUE(builder.TxtToSkia(style).getTextStyle().getSubpixel());
+  EXPECT_TRUE(builder.TxtToSkia(TextStyle()).getSubpixel());
+}
+
+TEST_F(SkiaParagraphBuilderTests, ExplicitSubpixelPatchValueStillWorks) {
   ScopedEnvironmentVariable environment("FLUTTER_INTEGER_TEXT_METRICS", "1");
   ParagraphStyle style;
   auto collection = std::make_shared<FontCollection>();
@@ -79,7 +101,7 @@ TEST_F(SkiaParagraphBuilderTests, SubpixelTracksEnvironment) {
 }
 
 TEST_F(SkiaParagraphBuilderTests, HintingTracksEnvironment) {
-  ScopedEnvironmentVariable environment("FCTWEAK_HINTING", "full");
+  ScopedEnvironmentVariable environment("FCTWEAK_HINTING", nullptr);
   ParagraphStyle style;
   auto collection = std::make_shared<FontCollection>();
   auto builder = ParagraphBuilderSkia(style, collection, false);
@@ -89,5 +111,18 @@ TEST_F(SkiaParagraphBuilderTests, HintingTracksEnvironment) {
             SkFontHinting::kFull);
   EXPECT_EQ(builder.TxtToSkia(TextStyle()).getFontHinting(),
             SkFontHinting::kFull);
+}
+
+TEST_F(SkiaParagraphBuilderTests, HintingCanOptOutToVanilla) {
+  ScopedEnvironmentVariable environment("FCTWEAK_HINTING", "none");
+  ParagraphStyle style;
+  auto collection = std::make_shared<FontCollection>();
+  auto builder = ParagraphBuilderSkia(style, collection, false);
+
+  EXPECT_FALSE(builder.TxtToSkia(style).hintingIsOn());
+  EXPECT_EQ(builder.TxtToSkia(style).getTextStyle().getFontHinting(),
+            SkFontHinting::kNone);
+  EXPECT_EQ(builder.TxtToSkia(TextStyle()).getFontHinting(),
+            SkFontHinting::kNone);
 }
 }  // namespace txt

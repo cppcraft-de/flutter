@@ -21,9 +21,26 @@ namespace {
 
 constexpr std::string_view kWeightAxisTag = "wght";
 
+bool EnvironmentVariableDisabled(const char* value) {
+  if (value == nullptr || *value == '\0') {
+    return false;
+  }
+
+  std::string normalized(value);
+  for (char& ch : normalized) {
+    ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+  }
+
+  return normalized == "0" || normalized == "false" || normalized == "no" ||
+         normalized == "off";
+}
+
 bool IsIntegerTextMetricsEnabledFromEnv() {
   const char* value = std::getenv("FLUTTER_INTEGER_TEXT_METRICS");
   if (value == nullptr || *value == '\0') {
+    return true;
+  }
+  if (EnvironmentVariableDisabled(value)) {
     return false;
   }
 
@@ -39,7 +56,7 @@ bool IsIntegerTextMetricsEnabledFromEnv() {
 std::optional<SkFontHinting> GetFontHintingFromEnv() {
   const char* value = std::getenv("FCTWEAK_HINTING");
   if (value == nullptr || *value == '\0') {
-    return std::nullopt;
+    return SkFontHinting::kFull;
   }
 
   std::string normalized(value);

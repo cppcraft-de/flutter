@@ -25,7 +25,7 @@ GROUP_DEPENDENCIES = {
 GROUP_MARKERS = {
     'text_layout': {
         'modules/skparagraph/src/TextStyle.cpp': 'fSubpixel == that.fSubpixel',
-        'modules/skparagraph/src/Run.h': 'kUseQtLikeIntegerMetricsByDefault',
+        'modules/skparagraph/src/Run.h': 'environmentVariableDisabled',
         'modules/skparagraph/src/Run.cpp': 'Run::commit()',
         'modules/skparagraph/src/TextLine.cpp': 'fNextLineBaselinePitch',
         'src/ports/SkFontHost_FreeType.cpp': 'FT_Size_Metrics& sizeMetrics',

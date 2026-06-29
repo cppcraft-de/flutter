@@ -113,7 +113,7 @@ index 8f5d709c8b..2dc5bae737 100644
      }
  
      bool isClean() {
-@@ -455,6 +475,27 @@ public:
+@@ -455,6 +475,38 @@ public:
  
      SkScalar delta() const { return height() - ideographicBaseline(); }
  
@@ -126,14 +126,25 @@ index 8f5d709c8b..2dc5bae737 100644
 +                std::strcmp(value, "on") == 0);
 +    }
 +
++    static bool environmentVariableDisabled(const char* value) {
++        return value != nullptr &&
++               (std::strcmp(value, "0") == 0 ||
++                std::strcmp(value, "false") == 0 ||
++                std::strcmp(value, "FALSE") == 0 ||
++                std::strcmp(value, "no") == 0 ||
++                std::strcmp(value, "off") == 0);
++    }
++
 +    static bool useQtLikeIntegerMetrics() {
-+        constexpr bool kUseQtLikeIntegerMetricsByDefault = true;
-+        if (kUseQtLikeIntegerMetricsByDefault) {
-+            return true;
-+        }
 +        const char* value = std::getenv("FLUTTER_QT_LINE_METRICS");
 +        if (value == nullptr || *value == '\0') {
 +            value = std::getenv("FLUTTER_INTEGER_TEXT_METRICS");
++        }
++        if (value == nullptr || *value == '\0') {
++            return true;
++        }
++        if (environmentVariableDisabled(value)) {
++            return false;
 +        }
 +        return environmentVariableEnabled(value);
 +    }
@@ -281,7 +292,7 @@ index c229c444e6..d46edd8fed 100644
  
  #include <ft2build.h>
  #include <freetype/ftadvanc.h>
-@@ -72,6 +74,27 @@ namespace {
+@@ -72,6 +74,38 @@ namespace {
  
  using SkUniqueFTFace = std::unique_ptr<FT_FaceRec, SkFunctionObject<FT_Done_Face>>;
  using SkUniqueFTSize = std::unique_ptr<FT_SizeRec, SkFunctionObject<FT_Done_Size>>;
@@ -295,21 +306,32 @@ index c229c444e6..d46edd8fed 100644
 +            std::strcmp(value, "on") == 0);
 +}
 +
++static bool environment_variable_disabled(const char* value) {
++    return value != nullptr &&
++           (std::strcmp(value, "0") == 0 ||
++            std::strcmp(value, "false") == 0 ||
++            std::strcmp(value, "FALSE") == 0 ||
++            std::strcmp(value, "no") == 0 ||
++            std::strcmp(value, "off") == 0);
++}
++
 +static bool use_qt_like_integer_metrics() {
-+    constexpr bool kUseQtLikeIntegerMetricsByDefault = true;
-+    if (kUseQtLikeIntegerMetricsByDefault) {
-+        return true;
-+    }
 +    const char* value = std::getenv("FLUTTER_QT_LINE_METRICS");
 +    if (value == nullptr || *value == '\0') {
 +        value = std::getenv("FLUTTER_INTEGER_TEXT_METRICS");
++    }
++    if (value == nullptr || *value == '\0') {
++        return true;
++    }
++    if (environment_variable_disabled(value)) {
++        return false;
 +    }
 +    return environment_variable_enabled(value);
 +}
  }
  
  // SK_FREETYPE_MINIMUM_RUNTIME_VERSION 0x<major><minor><patch><flags>
-@@ -1583,6 +1606,11 @@ void SkScalerContext_FreeType::generateFontMetrics(SkFontMetrics* metrics) {
+@@ -1583,6 +1617,11 @@ void SkScalerContext_FreeType::generateFontMetrics(SkFontMetrics* metrics) {
      // pull from format-specific metrics as needed
      SkScalar ascent, descent, leading, xmin, xmax, ymin, ymax;
      SkScalar underlineThickness, underlinePosition;
@@ -321,7 +343,7 @@ index c229c444e6..d46edd8fed 100644
      if (face->face_flags & FT_FACE_FLAG_SCALABLE) { // scalable outline font
          // FreeType will always use HHEA metrics if they're not zero.
          // It completely ignores the OS/2 fsSelection::UseTypoMetrics bit.
-@@ -1653,6 +1681,16 @@ void SkScalerContext_FreeType::generateFontMetrics(SkFontMetrics* metrics) {
+@@ -1653,6 +1692,16 @@ void SkScalerContext_FreeType::generateFontMetrics(SkFontMetrics* metrics) {
          return;
      }
  
@@ -338,7 +360,7 @@ index c229c444e6..d46edd8fed 100644
      // synthesize elements that were not provided by the os/2 table or format-specific metrics
      if (!x_height) {
          x_height = -ascent * fScale.y();
-@@ -1665,15 +1703,15 @@ void SkScalerContext_FreeType::generateFontMetrics(SkFontMetrics* metrics) {
+@@ -1665,15 +1714,15 @@ void SkScalerContext_FreeType::generateFontMetrics(SkFontMetrics* metrics) {
      }
  
      // disallow negative linespacing
@@ -371,7 +393,7 @@ index 0670b7615a..6e57595f32 100644
  #include "src/utils/mac/SkCGBase.h"
  #include "src/utils/mac/SkCGGeometry.h"
  #include "src/utils/mac/SkCTFont.h"
-@@ -51,12 +53,36 @@
+@@ -51,12 +53,47 @@
  #include "src/utils/mac/SkUniqueCFRef.h"
  
  #include <algorithm>
@@ -394,21 +416,32 @@ index 0670b7615a..6e57595f32 100644
 +            std::strcmp(value, "on") == 0);
 +}
 +
++static bool environment_variable_disabled(const char* value) {
++    return value != nullptr &&
++           (std::strcmp(value, "0") == 0 ||
++            std::strcmp(value, "false") == 0 ||
++            std::strcmp(value, "FALSE") == 0 ||
++            std::strcmp(value, "no") == 0 ||
++            std::strcmp(value, "off") == 0);
++}
++
 +static bool use_qt_like_integer_metrics() {
-+    constexpr bool kUseQtLikeIntegerMetricsByDefault = true;
-+    if (kUseQtLikeIntegerMetricsByDefault) {
-+        return true;
-+    }
 +    const char* value = std::getenv("FLUTTER_QT_LINE_METRICS");
 +    if (value == nullptr || *value == '\0') {
 +        value = std::getenv("FLUTTER_INTEGER_TEXT_METRICS");
++    }
++    if (value == nullptr || *value == '\0') {
++        return true;
++    }
++    if (environment_variable_disabled(value)) {
++        return false;
 +    }
 +    return environment_variable_enabled(value);
 +}
  }
  
  static void sk_memset_rect32(uint32_t* ptr, uint32_t value,
-@@ -700,6 +726,39 @@ void SkScalerContext_Mac::generateFontMetrics(SkFontMetrics* metrics) {
+@@ -700,6 +737,39 @@ void SkScalerContext_Mac::generateFontMetrics(SkFontMetrics* metrics) {
      metrics->fStrikeoutThickness = 0;
      metrics->fStrikeoutPosition = 0;
  
@@ -452,7 +485,7 @@ diff --git a/src/ports/SkScalerContext_win_dw.cpp b/src/ports/SkScalerContext_wi
 index 68eb71e26f..fe08919c7c 100644
 --- a/src/ports/SkScalerContext_win_dw.cpp
 +++ b/src/ports/SkScalerContext_win_dw.cpp
-@@ -50,9 +50,56 @@
+@@ -50,9 +50,67 @@
  #include <dwrite_1.h>
  #include <dwrite_3.h>
  
@@ -472,14 +505,25 @@ index 68eb71e26f..fe08919c7c 100644
 +            std::strcmp(value, "on") == 0);
 +}
 +
++static bool environment_variable_disabled(const char* value) {
++    return value != nullptr &&
++           (std::strcmp(value, "0") == 0 ||
++            std::strcmp(value, "false") == 0 ||
++            std::strcmp(value, "FALSE") == 0 ||
++            std::strcmp(value, "no") == 0 ||
++            std::strcmp(value, "off") == 0);
++}
++
 +static bool use_qt_like_integer_metrics() {
-+    constexpr bool kUseQtLikeIntegerMetricsByDefault = true;
-+    if (kUseQtLikeIntegerMetricsByDefault) {
-+        return true;
-+    }
 +    const char* value = std::getenv("FLUTTER_QT_LINE_METRICS");
 +    if (value == nullptr || *value == '\0') {
 +        value = std::getenv("FLUTTER_INTEGER_TEXT_METRICS");
++    }
++    if (value == nullptr || *value == '\0') {
++        return true;
++    }
++    if (environment_variable_disabled(value)) {
++        return false;
 +    }
 +    return environment_variable_enabled(value);
 +}
@@ -509,7 +553,7 @@ index 68eb71e26f..fe08919c7c 100644
  /* Note:
   * In versions 8 and 8.1 of Windows, some calls in DWrite are not thread safe.
   * The mutex returned from maybe_dw_mutex protects the calls that are
-@@ -1496,25 +1543,41 @@ bool SkScalerContext_DW::setAdvance(const SkGlyph& glyph, SkVector* advance) {
+@@ -1496,25 +1554,41 @@ bool SkScalerContext_DW::setAdvance(const SkGlyph& glyph, SkVector* advance) {
          return false;
      }
  
@@ -560,7 +604,7 @@ index 68eb71e26f..fe08919c7c 100644
               "Could not get design metrics.");
      }
  
-@@ -1523,16 +1586,24 @@ bool SkScalerContext_DW::setAdvance(const SkGlyph& glyph, SkVector* advance) {
+@@ -1523,16 +1597,24 @@ bool SkScalerContext_DW::setAdvance(const SkGlyph& glyph, SkVector* advance) {
          Shared l(maybe_dw_mutex(*typeface));
          typeface->fDWriteFontFace->GetMetrics(&dwfm);
      }
@@ -593,7 +637,7 @@ index 68eb71e26f..fe08919c7c 100644
      *advance = fSkXform.mapVector(*advance);
      return true;
  }
-@@ -1868,9 +1939,24 @@ void SkScalerContext_DW::generateFontMetrics(SkFontMetrics* metrics) {
+@@ -1868,9 +1950,24 @@ void SkScalerContext_DW::generateFontMetrics(SkFontMetrics* metrics) {
  
      SkScalar upem = SkIntToScalar(dwfm.designUnitsPerEm);
  

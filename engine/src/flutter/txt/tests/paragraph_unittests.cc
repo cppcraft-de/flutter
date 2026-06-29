@@ -323,6 +323,18 @@ TEST_F(PainterTest, AlternativeLineHeightEnvKeepsSignedPitch) {
                              std::max(0.0, line.raw_leading)));
 }
 
+TEST_F(PainterTest, QtLikeIntegerLineMetricsCanOptOutToVanilla) {
+  ScopedEnvironmentVariable environment("FLUTTER_QT_LINE_METRICS", "false");
+  auto style = makeStyle();
+  style.font_size = 19;
+  auto paragraph = layoutText(style, u"HHHH");
+  const auto& metrics = paragraph->GetLineMetrics();
+
+  ASSERT_EQ(metrics.size(), 1u);
+  const txt::LineMetrics& line = metrics.front();
+  EXPECT_DOUBLE_EQ(line.line_height_branch, 0);
+}
+
 TEST_F(PainterTest, DrawsSolidLineSkia) {
   PretendImpellerIsEnabled(false);
 

@@ -38,7 +38,11 @@ class ParagraphBuilderSkia : public ParagraphBuilder {
  private:
   friend class SkiaParagraphBuilderTests_ParagraphStrutStyle_Test;
   friend class SkiaParagraphBuilderTests_SubpixelTracksEnvironment_Test;
+  friend class SkiaParagraphBuilderTests_SubpixelCanOptOutToVanilla_Test;
+  friend class
+      SkiaParagraphBuilderTests_ExplicitSubpixelPatchValueStillWorks_Test;
   friend class SkiaParagraphBuilderTests_HintingTracksEnvironment_Test;
+  friend class SkiaParagraphBuilderTests_HintingCanOptOutToVanilla_Test;
 
   skia::textlayout::ParagraphPainter::PaintID CreatePaintID(
       const flutter::DlPaint& dl_paint);
