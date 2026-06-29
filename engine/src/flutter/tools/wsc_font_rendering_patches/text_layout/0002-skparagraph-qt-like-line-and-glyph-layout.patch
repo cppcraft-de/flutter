@@ -485,7 +485,7 @@ diff --git a/src/ports/SkScalerContext_win_dw.cpp b/src/ports/SkScalerContext_wi
 index 68eb71e26f..fe08919c7c 100644
 --- a/src/ports/SkScalerContext_win_dw.cpp
 +++ b/src/ports/SkScalerContext_win_dw.cpp
-@@ -50,9 +50,67 @@
+@@ -50,9 +50,92 @@
  #include <dwrite_1.h>
  #include <dwrite_3.h>
  
@@ -529,14 +529,25 @@ index 68eb71e26f..fe08919c7c 100644
 +}
 +
 +enum class DWriteAdvancePolicy {
++    kAuto,
 +    kDesign,
 +    kGdi,
 +    kMin,
 +};
 +
++enum class DWriteGdiMeasuringPolicy {
++    kAuto,
++    kClassic,
++    kNatural,
++};
++
 +static DWriteAdvancePolicy dwrite_advance_policy() {
 +    const char* value = std::getenv("FLUTTER_DWRITE_ADVANCE_POLICY");
 +    if (value != nullptr && *value != '\0') {
++        if (std::strcmp(value, "DESIGN") == 0 ||
++            std::strcmp(value, "design") == 0) {
++            return DWriteAdvancePolicy::kDesign;
++        }
 +        if (std::strcmp(value, "GDI") == 0 ||
 +            std::strcmp(value, "gdi") == 0) {
 +            return DWriteAdvancePolicy::kGdi;
@@ -545,15 +556,29 @@ index 68eb71e26f..fe08919c7c 100644
 +            std::strcmp(value, "min") == 0) {
 +            return DWriteAdvancePolicy::kMin;
 +        }
-+        return DWriteAdvancePolicy::kDesign;
 +    }
-+    return DWriteAdvancePolicy::kDesign;
++    return DWriteAdvancePolicy::kAuto;
++}
++
++static DWriteGdiMeasuringPolicy dwrite_gdi_measuring_policy() {
++    const char* value = std::getenv("FLUTTER_DWRITE_GDI_MEASURING");
++    if (value != nullptr && *value != '\0') {
++        if (std::strcmp(value, "CLASSIC") == 0 ||
++            std::strcmp(value, "classic") == 0) {
++            return DWriteGdiMeasuringPolicy::kClassic;
++        }
++        if (std::strcmp(value, "NATURAL") == 0 ||
++            std::strcmp(value, "natural") == 0) {
++            return DWriteGdiMeasuringPolicy::kNatural;
++        }
++    }
++    return DWriteGdiMeasuringPolicy::kAuto;
 +}
 +
  /* Note:
   * In versions 8 and 8.1 of Windows, some calls in DWrite are not thread safe.
   * The mutex returned from maybe_dw_mutex protects the calls that are
-@@ -1496,25 +1554,41 @@ bool SkScalerContext_DW::setAdvance(const SkGlyph& glyph, SkVector* advance) {
+@@ -1496,25 +1579,50 @@ bool SkScalerContext_DW::setAdvance(const SkGlyph& glyph, SkVector* advance) {
          return false;
      }
  
@@ -565,13 +590,22 @@ index 68eb71e26f..fe08919c7c 100644
 -        DWRITE_MEASURING_MODE_GDI_NATURAL == fMeasuringMode)
 -    {
 +    const DWriteAdvancePolicy advancePolicy = dwrite_advance_policy();
++    const bool measuringModeUsesGdi =
++        DWRITE_MEASURING_MODE_GDI_CLASSIC == fMeasuringMode ||
++        DWRITE_MEASURING_MODE_GDI_NATURAL == fMeasuringMode;
 +    const bool useGdiCompatibleAdvanceMetrics =
++        (advancePolicy == DWriteAdvancePolicy::kAuto && measuringModeUsesGdi) ||
 +        advancePolicy == DWriteAdvancePolicy::kGdi ||
 +        advancePolicy == DWriteAdvancePolicy::kMin;
 +    const bool useDesignAdvanceMetrics =
++        (advancePolicy == DWriteAdvancePolicy::kAuto && !measuringModeUsesGdi) ||
 +        advancePolicy == DWriteAdvancePolicy::kDesign ||
 +        advancePolicy == DWriteAdvancePolicy::kMin;
-+    const bool useGdiNatural = DWRITE_MEASURING_MODE_GDI_NATURAL == fMeasuringMode;
++    const DWriteGdiMeasuringPolicy gdiMeasuringPolicy = dwrite_gdi_measuring_policy();
++    const bool useGdiNatural =
++        gdiMeasuringPolicy == DWriteGdiMeasuringPolicy::kNatural ||
++        (gdiMeasuringPolicy == DWriteGdiMeasuringPolicy::kAuto &&
++         DWRITE_MEASURING_MODE_GDI_NATURAL == fMeasuringMode);
 +    SkScalar gdiAdvanceTextSize = fTextSizeMeasure;
 +    if (useGdiCompatibleAdvanceMetrics) {
 +        gdiAdvanceTextSize = SkScalarRoundToScalar(gdiAdvanceTextSize * 64.0f) / 64.0f;
@@ -604,7 +638,7 @@ index 68eb71e26f..fe08919c7c 100644
               "Could not get design metrics.");
      }
  
-@@ -1523,16 +1597,24 @@ bool SkScalerContext_DW::setAdvance(const SkGlyph& glyph, SkVector* advance) {
+@@ -1523,16 +1631,25 @@ bool SkScalerContext_DW::setAdvance(const SkGlyph& glyph, SkVector* advance) {
          Shared l(maybe_dw_mutex(*typeface));
          typeface->fDWriteFontFace->GetMetrics(&dwfm);
      }
@@ -623,7 +657,8 @@ index 68eb71e26f..fe08919c7c 100644
 -        // the end result is not always an integer as it would be with GDI.
 -        advance->fX = SkScalarRoundToScalar(advance->fX);
 +    SkScalar advanceX = designAdvanceX;
-+    if (advancePolicy == DWriteAdvancePolicy::kGdi) {
++    if ((advancePolicy == DWriteAdvancePolicy::kAuto && measuringModeUsesGdi) ||
++        advancePolicy == DWriteAdvancePolicy::kGdi) {
 +        advanceX = gdiAdvanceX;
 +    } else if (advancePolicy == DWriteAdvancePolicy::kMin) {
 +        if (designAdvanceX <= 0) {
@@ -637,7 +672,7 @@ index 68eb71e26f..fe08919c7c 100644
      *advance = fSkXform.mapVector(*advance);
      return true;
  }
-@@ -1868,9 +1950,24 @@ void SkScalerContext_DW::generateFontMetrics(SkFontMetrics* metrics) {
+@@ -1868,9 +1985,24 @@ void SkScalerContext_DW::generateFontMetrics(SkFontMetrics* metrics) {
  
      SkScalar upem = SkIntToScalar(dwfm.designUnitsPerEm);
  
