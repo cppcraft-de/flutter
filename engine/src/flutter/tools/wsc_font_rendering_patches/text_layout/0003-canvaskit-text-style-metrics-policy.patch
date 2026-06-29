@@ -1,64 +1,15 @@
-diff --git a/modules/canvaskit/npm_build/types/index.d.ts b/modules/canvaskit/npm_build/types/index.d.ts
-index d8c2c5885b..8bc143308a 100644
---- a/modules/canvaskit/npm_build/types/index.d.ts
-+++ b/modules/canvaskit/npm_build/types/index.d.ts
-@@ -3290,6 +3290,7 @@ export interface TextStyle {
-     decorationStyle?: DecorationStyle;
-     fontFamilies?: string[];
-     fontFeatures?: TextFontFeatures[];
-+    fontHinting?: FontHinting;
-     fontSize?: number;
-     fontStyle?: FontStyle;
-     fontVariations?: TextFontVariations[];
-@@ -3300,6 +3301,7 @@ export interface TextStyle {
-     letterSpacing?: number;
-     locale?: string;
-     shadows?: TextShadow[];
-+    subpixel?: boolean;
-     textBaseline?: TextBaseline;
-     wordSpacing?: number;
- }
-diff --git a/modules/canvaskit/paragraph.js b/modules/canvaskit/paragraph.js
-index 9c93a89f71..be138339f0 100644
---- a/modules/canvaskit/paragraph.js
-+++ b/modules/canvaskit/paragraph.js
-@@ -152,6 +152,8 @@
-         s['heightMultiplier'] = -1
-       }
-       s['halfLeading'] = s['halfLeading'] || false;
-+      s['subpixel'] = s['subpixel'] !== false;
-+      s['fontHinting'] = s['fontHinting'] || CanvasKit.FontHinting.Slight;
-       s['fontStyle'] = fontStyle(s['fontStyle']);
+diff --git a/modules/skparagraph/include/TextStyle.h b/modules/skparagraph/include/TextStyle.h
+index 9a65834b8e..0fc7bbca57 100644
+--- a/modules/skparagraph/include/TextStyle.h
++++ b/modules/skparagraph/include/TextStyle.h
+@@ -315,8 +315,8 @@ private:
  
-       // Properties which need to be Malloc'ed are set in `copyArrays`.
-diff --git a/modules/canvaskit/paragraph_bindings.cpp b/modules/canvaskit/paragraph_bindings.cpp
-index f5d80b3476..148e03d6e9 100644
---- a/modules/canvaskit/paragraph_bindings.cpp
-+++ b/modules/canvaskit/paragraph_bindings.cpp
-@@ -75,6 +75,8 @@ struct SimpleTextStyle {
-     SkScalar wordSpacing;
-     SkScalar heightMultiplier;
-     bool halfLeading;
-+    bool subpixel;
-+    SkFontHinting fontHinting;
-     WASMPointerU8 localePtr;
-     int localeLen;
-     SimpleFontStyle fontStyle;
-@@ -178,6 +180,8 @@ para::TextStyle toTextStyle(const SimpleTextStyle& s) {
-     }
- 
-     ts.setHalfLeading(s.halfLeading);
-+    ts.setSubpixel(s.subpixel);
-+    ts.setFontHinting(s.fontHinting);
- 
-     ts.setDecoration(para::TextDecoration(s.decoration));
-     ts.setDecorationStyle(s.decorationStyle);
-@@ -831,6 +835,8 @@ EMSCRIPTEN_BINDINGS(Paragraph) {
-         .field("wordSpacing",           &SimpleTextStyle::wordSpacing)
-         .field("heightMultiplier",      &SimpleTextStyle::heightMultiplier)
-         .field("halfLeading",           &SimpleTextStyle::halfLeading)
-+        .field("subpixel",              &SimpleTextStyle::subpixel)
-+        .field("fontHinting",           &SimpleTextStyle::fontHinting)
-         .field("_localePtr",            &SimpleTextStyle::localePtr)
-         .field("_localeLen",            &SimpleTextStyle::localeLen)
-         .field("fontStyle",             &SimpleTextStyle::fontStyle)
+     SkScalar fFontSize = 14.0;
+     SkFont::Edging fEdging = SkFont::Edging::kAntiAlias;
+-    bool fSubpixel = true;
+-    SkFontHinting fHinting = SkFontHinting::kSlight;
++    bool fSubpixel = false;
++    SkFontHinting fHinting = SkFontHinting::kFull;
+     SkScalar fHeight = 1.0;
+     bool fHeightOverride = false;
+     SkScalar fBaselineShift = 0.0f;

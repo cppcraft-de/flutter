@@ -28,7 +28,7 @@ GROUP_MARKERS = {
         'modules/skparagraph/src/Run.h': 'environmentVariableDisabled',
         'modules/skparagraph/src/Run.cpp': 'Run::commit()',
         'modules/skparagraph/src/TextLine.cpp': 'fNextLineBaselinePitch',
-        'modules/canvaskit/paragraph_bindings.cpp': 'ts.setFontHinting(s.fontHinting)',
+        'modules/skparagraph/include/TextStyle.h': 'SkFontHinting fHinting = SkFontHinting::kFull',
         'src/ports/SkFontHost_FreeType.cpp': 'FT_Size_Metrics& sizeMetrics',
         'src/ports/SkScalerContext_win_dw.cpp': 'qtLineHeight',
         'src/ports/SkScalerContext_mac_ct.cpp': 'SkOTTableHorizontalHeader',

@@ -66,7 +66,6 @@ extension type CanvasKit(JSObject _) implements JSObject {
   external SkTextDirectionEnum get TextDirection;
   external SkFontWeightEnum get FontWeight;
   external SkFontSlantEnum get FontSlant;
-  external SkFontHintingEnum get FontHinting;
 
   @JS('MakeAnimatedImageFromEncoded')
   external SkAnimatedImage? _MakeAnimatedImageFromEncoded(JSUint8Array imageData);
@@ -253,17 +252,6 @@ extension type SkFontSlantEnum(JSObject _) implements JSObject {
 
 @JS('window.flutterCanvasKit.FontSlant')
 extension type SkFontSlant(JSObject _) implements JSObject {
-  external double get value;
-}
-
-extension type SkFontHintingEnum(JSObject _) implements JSObject {
-  external SkFontHinting get None;
-  external SkFontHinting get Slight;
-  external SkFontHinting get Normal;
-  external SkFontHinting get Full;
-}
-
-extension type SkFontHinting(JSObject _) implements JSObject {
   external double get value;
 }
 
@@ -2067,8 +2055,6 @@ extension type SkTextStyleProperties._(JSObject _) implements JSObject {
   external set wordSpacing(double? value);
   external set heightMultiplier(double? value);
   external set halfLeading(bool? value);
-  external set subpixel(bool? value);
-  external set fontHinting(SkFontHinting? value);
   external set locale(String? value);
 
   @JS('fontFamilies')
