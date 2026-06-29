@@ -85,6 +85,8 @@ class CkParagraphStyle implements ui.ParagraphStyle {
     ui.FontStyle? fontStyle,
   ) {
     final skTextStyle = SkTextStyleProperties();
+    skTextStyle.subpixel = false;
+    skTextStyle.fontHinting = canvasKit.FontHinting.Full;
     if (fontWeight != null || fontStyle != null) {
       skTextStyle.fontStyle = toSkFontStyle(fontWeight, fontStyle);
     }
@@ -486,6 +488,8 @@ class CkTextStyle implements ui.TextStyle {
     final List<ui.FontVariation>? fontVariations = this.fontVariations;
 
     final properties = SkTextStyleProperties();
+    properties.subpixel = false;
+    properties.fontHinting = canvasKit.FontHinting.Full;
 
     if (background != null) {
       properties.backgroundColor = makeFreshSkColor(background.color);
