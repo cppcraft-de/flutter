@@ -17,6 +17,15 @@ declare_args() {
 }
 
 em_config_path = "$emsdk_dir/.emscripten"
+emscripten_tool_prefix = ""
+emscripten_tool_suffix = ""
+if (host_os == "win") {
+  emscripten_tool_prefix = "$emsdk_dir/python/3.9.2-nuget_64bit/python.exe "
+  emscripten_tool_suffix = ".py"
+  win_tool_wrapper_path =
+      rebase_path("//build/toolchain/win/tool_wrapper.py", root_build_dir)
+}
+emscripten_bin_dir = "$emsdk_dir/upstream/emscripten"
 
 if (use_ccache) {
   # ccache only supports compilation, not linking.
@@ -34,10 +43,18 @@ template("wasm_toolchain") {
     }
 
     # emsdk_dir and em_config are defined in wasm.gni.
-    ar = "$emsdk_dir/upstream/emscripten/emar --em-config $em_config_path"
-    cc = "$compiler_prefix$emsdk_dir/upstream/emscripten/emcc --em-config $em_config_path"
-    cxx = "$compiler_prefix$emsdk_dir/upstream/emscripten/em++ --em-config $em_config_path"
-    asm = "$emsdk_dir/upstream/emscripten/emcc --em-config $em_config_path"
+    ar = "$emscripten_tool_prefix$emscripten_bin_dir/emar$emscripten_tool_suffix --em-config $em_config_path"
+    cc = "$compiler_prefix$emscripten_tool_prefix$emscripten_bin_dir/emcc$emscripten_tool_suffix --em-config $em_config_path"
+    cxx = "$compiler_prefix$emscripten_tool_prefix$emscripten_bin_dir/em++$emscripten_tool_suffix --em-config $em_config_path"
+    asm = "$emscripten_tool_prefix$emscripten_bin_dir/emcc$emscripten_tool_suffix --em-config $em_config_path"
+    if (host_os == "win") {
+      alink_pre_command =
+          "cmd.exe /c \"if exist {{output}} del /f /q {{output}} &"
+      alink_post_command = "\""
+      stamp_command = "cmd.exe /c type nul > {{output}}"
+      copy_command =
+          "$python_path $win_tool_wrapper_path recursive-mirror {{source}} {{output}}"
+    }
 
     # emscripten emits this .worker.js file conditionally depending on whether
     # pthreads are on or not. Unfortunately, there is no way to conditionally
@@ -47,7 +64,7 @@ template("wasm_toolchain") {
     # dummy file. If the target does use pthreads, this dummy file will be
     # overwritten. If the target does not, the dummy file will satisfy the
     # toolchain's requirement that it has this as an output.
-    ld = "$emsdk_dir/upstream/emscripten/em++ --em-config $em_config_path"
+    ld = "$emscripten_tool_prefix$emscripten_bin_dir/em++$emscripten_tool_suffix --em-config $em_config_path"
     readelf = "readelf"
     nm = "nm"
 

@@ -41,6 +41,12 @@ class GNTestCase(unittest.TestCase):
     )
     self.assertEqual(self._gn_args(['--ios'])['target_cpu'], 'arm64')
 
+  def test_web_sets_current_os_to_wasm(self):
+    gn_args = self._gn_args(['--web'])
+    self.assertEqual(gn_args['target_os'], 'wasm')
+    self.assertEqual(gn_args['target_cpu'], 'wasm')
+    self.assertEqual(gn_args['current_os'], 'wasm')
+
   def test_cannot_use_android_and_enable_unittests(self):
     with self.assertRaises(Exception):
       self._gn_args(['--android', '--enable-unittests'])
