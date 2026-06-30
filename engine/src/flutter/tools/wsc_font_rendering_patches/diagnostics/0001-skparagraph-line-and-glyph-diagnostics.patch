@@ -39,7 +39,7 @@ index a7112c8f39..8b494b4f58 100644
  #include "include/core/SkPath.h"
  #include "modules/skparagraph/include/FontCollection.h"
  #include "modules/skparagraph/include/Metrics.h"
-@@ -112,6 +113,24 @@ public:
+@@ -112,6 +113,26 @@ public:
      using ExtendedVisitor = std::function<void(int lineNumber, const ExtendedVisitorInfo*)>;
      virtual void extendedVisit(const ExtendedVisitor&) = 0;
  
@@ -50,6 +50,8 @@ index a7112c8f39..8b494b4f58 100644
 +        SkFontMetrics fFontMetrics;
 +        SkGlyphID fGlyph;
 +        uint32_t fUtf8Cluster;
++        SkPoint fRawShapePosition;
++        SkVector fRawAdvance;
 +        SkPoint fShapePosition;
 +        SkPoint fOffset;
 +        SkVector fAdvance;
@@ -68,7 +70,7 @@ diff --git a/modules/skparagraph/src/ParagraphImpl.cpp b/modules/skparagraph/src
 index 9ea8267545..831e622fa4 100644
 --- a/modules/skparagraph/src/ParagraphImpl.cpp
 +++ b/modules/skparagraph/src/ParagraphImpl.cpp
-@@ -1239,6 +1239,51 @@ void ParagraphImpl::visit(const Visitor& visitor) {
+@@ -1239,6 +1239,56 @@ void ParagraphImpl::visit(const Visitor& visitor) {
      }
  }
  
@@ -87,6 +89,9 @@ index 9ea8267545..831e622fa4 100644
 +            SkTextBlob::Iter::ExperimentalRun blobRun;
 +            while (iter.experimentalNext(&blobRun)) {
 +                for (int i = 0; i < blobRun.count; ++i, ++sourceIndex) {
++                    const SkPoint rawShapePosition = sourceRun->rawPosition(sourceIndex);
++                    const SkVector rawAdvance =
++                            sourceRun->rawPosition(sourceIndex + 1) - rawShapePosition;
 +                    const SkPoint shapePosition = sourceRun->fPositions[sourceIndex];
 +                    const SkPoint offset = sourceRun->fOffsets[sourceIndex];
 +                    const SkVector advance =
@@ -102,6 +107,8 @@ index 9ea8267545..831e622fa4 100644
 +                            fontMetrics,
 +                            blobRun.glyphs[i],
 +                            SkToU32(sourceRun->globalClusterIndex(sourceIndex)),
++                            rawShapePosition,
++                            rawAdvance,
 +                            shapePosition,
 +                            offset,
 +                            advance,
@@ -132,10 +139,59 @@ index 0fb0ba9a8e..c63c6799bf 100644
      int getPath(int lineNumber, SkPath* dest) override;
      bool containsColorFontOrBitmap(SkTextBlob* textBlob) override;
      bool containsEmoji(SkTextBlob* textBlob) override;
+diff --git a/modules/skparagraph/src/Run.cpp b/modules/skparagraph/src/Run.cpp
+index 4f2e8f0627..4e3d020a98 100644
+--- a/modules/skparagraph/src/Run.cpp
++++ b/modules/skparagraph/src/Run.cpp
+@@ -30,6 +30,7 @@ Run::Run(ParagraphImpl* owner,
+     , fGlyphData(std::make_shared<GlyphData>())
+     , fGlyphs(fGlyphData->glyphs)
+     , fPositions(fGlyphData->positions)
++    , fRawPositions(fGlyphData->rawPositions)
+     , fOffsets(fGlyphData->offsets)
+     , fClusterIndexes(fGlyphData->clusterIndexes)
+     , fHeightMultiplier(heightMultiplier)
+@@ -94,6 +95,10 @@ void Run::commit() {
+         return;
+     }
+ 
++    if (fRawPositions.empty()) {
++        fRawPositions = fPositions;
++    }
++
+     SkScalar originalX = fPositions.empty() ? 0.0f : fPositions[0].fX;
+     SkScalar x = originalX;
+     SkScalar width = 0.0f;
 diff --git a/modules/skparagraph/src/Run.h b/modules/skparagraph/src/Run.h
 index 2dc5bae737..bfe849e677 100644
 --- a/modules/skparagraph/src/Run.h
 +++ b/modules/skparagraph/src/Run.h
+@@ -155,6 +155,9 @@ public:
+     SkSpan<const SkPoint> positions() const {
+         return SkSpan<const SkPoint>(fPositions.begin(), fPositions.size());
+     }
++    SkPoint rawPosition(size_t index) const {
++        return fRawPositions.empty() ? fPositions[index] : fRawPositions[index];
++    }
+     SkSpan<const SkPoint> offsets() const {
+         return SkSpan<const SkPoint>(fOffsets.begin(), fOffsets.size());
+     }
+@@ -195,6 +198,7 @@ private:
+     struct GlyphData {
+         skia_private::STArray<64, SkGlyphID, true> glyphs;
+         skia_private::STArray<64, SkPoint, true> positions;
++        skia_private::STArray<64, SkPoint, true> rawPositions;
+         skia_private::STArray<64, SkPoint, true> offsets;
+         skia_private::STArray<64, uint32_t, true> clusterIndexes;
+     };
+@@ -202,6 +206,7 @@ private:
+     std::shared_ptr<GlyphData> fGlyphData;
+     skia_private::STArray<64, SkGlyphID, true>& fGlyphs;
+     skia_private::STArray<64, SkPoint, true>& fPositions;
++    skia_private::STArray<64, SkPoint, true>& fRawPositions;
+     skia_private::STArray<64, SkPoint, true>& fOffsets;
+     skia_private::STArray<64, uint32_t, true>& fClusterIndexes;
+ 
 @@ -390,6 +390,7 @@ public:
          fRawAscent = a;
          fRawDescent = d;

@@ -119,6 +119,8 @@ class DiagnosticGlyphMetrics {
     required this.fontMetricsLeading,
     required this.glyphId,
     required this.utf8Cluster,
+    required this.rawShapePosition,
+    required this.rawAdvance,
     required this.shapePosition,
     required this.offset,
     required this.advance,
@@ -174,6 +176,12 @@ class DiagnosticGlyphMetrics {
 
   /// The UTF-8 cluster offset associated with this glyph.
   final int utf8Cluster;
+
+  /// The shaping position before local Qt-like integer adjustments.
+  final Offset rawShapePosition;
+
+  /// The advance to the next raw shaping position.
+  final Offset rawAdvance;
 
   /// The position stored by the shaping/layout run.
   final Offset shapePosition;
@@ -2022,9 +2030,17 @@ class TextPainter {
     // locally patched diagnostic method.
     // ignore: undefined_method
     final List<Object?> encoded = layout.paragraph.computeGlyphMetricsForDiagnostics();
-    return <DiagnosticGlyphMetrics>[
-      for (final Object? value in encoded)
-        if (value case final List<Object?> record when record.length == 32)
+    final result = <DiagnosticGlyphMetrics>[];
+    for (final Object? value in encoded) {
+      if (value case final List<Object?> record when record.length >= 32) {
+        final bool hasRawShaping = record.length >= 36;
+        final int shapePositionIndex = hasRawShaping ? 20 : 16;
+        final int offsetIndex = hasRawShaping ? 22 : 18;
+        final int advanceIndex = hasRawShaping ? 24 : 20;
+        final int finalOriginIndex = hasRawShaping ? 26 : 22;
+        final int boundsIndex = hasRawShaping ? 28 : 24;
+        final int inkBoundsIndex = hasRawShaping ? 32 : 28;
+        result.add(
           DiagnosticGlyphMetrics(
             lineNumber: (record[0]! as num).toInt(),
             runIndex: (record[1]! as num).toInt(),
@@ -2042,24 +2058,51 @@ class TextPainter {
             fontMetricsLeading: (record[13]! as num).toDouble(),
             glyphId: (record[14]! as num).toInt(),
             utf8Cluster: (record[15]! as num).toInt(),
-            shapePosition: Offset((record[16]! as num).toDouble(), (record[17]! as num).toDouble()),
-            offset: Offset((record[18]! as num).toDouble(), (record[19]! as num).toDouble()),
-            advance: Offset((record[20]! as num).toDouble(), (record[21]! as num).toDouble()),
-            finalOrigin: Offset((record[22]! as num).toDouble(), (record[23]! as num).toDouble()),
+            rawShapePosition: hasRawShaping
+                ? Offset((record[16]! as num).toDouble(), (record[17]! as num).toDouble())
+                : Offset(
+                    (record[shapePositionIndex]! as num).toDouble(),
+                    (record[shapePositionIndex + 1]! as num).toDouble(),
+                  ),
+            rawAdvance: hasRawShaping
+                ? Offset((record[18]! as num).toDouble(), (record[19]! as num).toDouble())
+                : Offset(
+                    (record[advanceIndex]! as num).toDouble(),
+                    (record[advanceIndex + 1]! as num).toDouble(),
+                  ),
+            shapePosition: Offset(
+              (record[shapePositionIndex]! as num).toDouble(),
+              (record[shapePositionIndex + 1]! as num).toDouble(),
+            ),
+            offset: Offset(
+              (record[offsetIndex]! as num).toDouble(),
+              (record[offsetIndex + 1]! as num).toDouble(),
+            ),
+            advance: Offset(
+              (record[advanceIndex]! as num).toDouble(),
+              (record[advanceIndex + 1]! as num).toDouble(),
+            ),
+            finalOrigin: Offset(
+              (record[finalOriginIndex]! as num).toDouble(),
+              (record[finalOriginIndex + 1]! as num).toDouble(),
+            ),
             bounds: Rect.fromLTRB(
-              (record[24]! as num).toDouble(),
-              (record[25]! as num).toDouble(),
-              (record[26]! as num).toDouble(),
-              (record[27]! as num).toDouble(),
+              (record[boundsIndex]! as num).toDouble(),
+              (record[boundsIndex + 1]! as num).toDouble(),
+              (record[boundsIndex + 2]! as num).toDouble(),
+              (record[boundsIndex + 3]! as num).toDouble(),
             ),
             inkBounds: Rect.fromLTRB(
-              (record[28]! as num).toDouble(),
-              (record[29]! as num).toDouble(),
-              (record[30]! as num).toDouble(),
-              (record[31]! as num).toDouble(),
+              (record[inkBoundsIndex]! as num).toDouble(),
+              (record[inkBoundsIndex + 1]! as num).toDouble(),
+              (record[inkBoundsIndex + 2]! as num).toDouble(),
+              (record[inkBoundsIndex + 3]! as num).toDouble(),
             ),
           ),
-    ];
+        );
+      }
+    }
+    return result;
   }
 
   bool _disposed = false;

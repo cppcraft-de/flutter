@@ -244,7 +244,7 @@ Dart_Handle Paragraph::computeGlyphMetricsForDiagnostics() const {
   Dart_Handle result = Dart_NewList(glyphs.size());
   for (intptr_t i = 0; i < static_cast<intptr_t>(glyphs.size()); ++i) {
     const auto& glyph = glyphs[i];
-    Dart_Handle record = Dart_NewList(32);
+    Dart_Handle record = Dart_NewList(36);
     intptr_t position = 0;
     auto add_double = [&](double value) {
       tonic::CheckAndHandleError(
@@ -273,6 +273,10 @@ Dart_Handle Paragraph::computeGlyphMetricsForDiagnostics() const {
     add_double(glyph.fFontMetrics.fLeading);
     add_double(glyph.fGlyph);
     add_double(glyph.fUtf8Cluster);
+    add_double(glyph.fRawShapePosition.fX);
+    add_double(glyph.fRawShapePosition.fY);
+    add_double(glyph.fRawAdvance.fX);
+    add_double(glyph.fRawAdvance.fY);
     add_double(glyph.fShapePosition.fX);
     add_double(glyph.fShapePosition.fY);
     add_double(glyph.fOffset.fX);
