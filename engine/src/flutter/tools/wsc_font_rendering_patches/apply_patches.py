@@ -46,9 +46,7 @@ GROUP_MARKERS = {
         ('skia', 'modules/canvaskit/paragraph_bindings.cpp'): 'fPlatformGdiCompatibleAdvance',
         ('skia', 'include/core/SkTypeface.h'): 'fGdiCompatibleAdvance',
     },
-    'freetype': {
-        ('freetype2', 'BUILD.gn'): 'qt_compatible_freetype_dir = "../freetype_2.13.0"',
-    },
+    'freetype': {('freetype2', 'BUILD.gn'): 'qt_compatible_freetype_dir = "../freetype_2.13.0"',},
     'pdf': {
         ('skia', 'modules/canvaskit/canvaskit_bindings.cpp'): 'MakePdf(JSArray pictures',
         ('skia', 'modules/canvaskit/compile.sh'): 'skia_enable_pdf=true',
