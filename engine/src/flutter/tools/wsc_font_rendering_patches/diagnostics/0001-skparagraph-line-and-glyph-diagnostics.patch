@@ -301,10 +301,10 @@ index 0fb0ba9a8e..c63c6799bf 100644
      bool containsColorFontOrBitmap(SkTextBlob* textBlob) override;
      bool containsEmoji(SkTextBlob* textBlob) override;
 diff --git a/modules/skparagraph/src/Run.cpp b/modules/skparagraph/src/Run.cpp
-index eb44146775..5fecc667d9 100644
+index 899920da0e..5496d8557c 100644
 --- a/modules/skparagraph/src/Run.cpp
 +++ b/modules/skparagraph/src/Run.cpp
-@@ -30,6 +30,7 @@ Run::Run(ParagraphImpl* owner,
+@@ -31,6 +31,7 @@ Run::Run(ParagraphImpl* owner,
      , fGlyphData(std::make_shared<GlyphData>())
      , fGlyphs(fGlyphData->glyphs)
      , fPositions(fGlyphData->positions)
@@ -312,7 +312,7 @@ index eb44146775..5fecc667d9 100644
      , fOffsets(fGlyphData->offsets)
      , fClusterIndexes(fGlyphData->clusterIndexes)
      , fHeightMultiplier(heightMultiplier)
-@@ -39,6 +40,8 @@ Run::Run(ParagraphImpl* owner,
+@@ -40,6 +41,8 @@ Run::Run(ParagraphImpl* owner,
      fBidiLevel = info.fBidiLevel;
      fScript = info.fScript;
      fLanguage = info.fLanguage;
@@ -321,6 +321,24 @@ index eb44146775..5fecc667d9 100644
      fAdvance = info.fAdvance;
      fIndex = index;
      fUtf8Range = info.utf8Range;
+@@ -93,13 +96,15 @@ void Run::commit() {
+         return;
+     }
+ 
+-    const auto rawPositions = fPositions;
++    if (fRawPositions.empty()) {
++        fRawPositions = fPositions;
++    }
+ 
+     SkScalar x = fPositions.empty() ? 0.0f : fPositions[0].fX;
+     SkScalar width = 0.0f;
+     for (size_t i = 0; i < this->size(); ++i) {
+         SkScalar advance =
+-                SkScalarRoundToInt(rawPositions[i + 1].fX - rawPositions[i].fX);
++                SkScalarRoundToInt(fRawPositions[i + 1].fX - fRawPositions[i].fX);
+         if (SkTypeface* typeface = fFont.getTypeface()) {
+             SkTypeface::QtLikeGlyphAdvanceDiagnostics diagnostics;
+             if (typeface->getQtLikeGlyphAdvanceDiagnostics(
 diff --git a/modules/skparagraph/src/Run.h b/modules/skparagraph/src/Run.h
 index 73918ac060..e3102e2a1e 100644
 --- a/modules/skparagraph/src/Run.h

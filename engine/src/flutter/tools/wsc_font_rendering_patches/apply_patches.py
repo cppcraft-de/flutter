@@ -40,9 +40,10 @@ GROUP_MARKERS = {
     },
     'diagnostics': {
         ('skia', 'modules/skparagraph/src/ParagraphImpl.cpp'):
-            ('ParagraphImpl::getGlyphDiagnostics'),
-        ('skia', 'modules/skparagraph/include/Paragraph.h'): 'struct GlyphDiagnostic',
-        ('skia', 'modules/canvaskit/paragraph_bindings.cpp'): 'getGlyphDiagnostics',
+            ('diagnosticTableChecksum'),
+        ('skia', 'modules/skparagraph/include/Paragraph.h'): 'fAdvanceProbeBackend',
+        ('skia', 'modules/canvaskit/paragraph_bindings.cpp'): 'fPlatformGdiCompatibleAdvance',
+        ('skia', 'include/core/SkTypeface.h'): 'fGdiCompatibleAdvance',
     },
     'pdf': {
         ('skia', 'modules/canvaskit/canvaskit_bindings.cpp'): 'MakePdf(JSArray pictures',

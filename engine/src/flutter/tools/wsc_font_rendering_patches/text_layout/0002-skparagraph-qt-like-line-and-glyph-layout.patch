@@ -1,31 +1,52 @@
 diff --git a/include/core/SkTypeface.h b/include/core/SkTypeface.h
-index 1bc8e706e4..1fa6cf9776 100644
+index 1bc8e706e4..80ac91150e 100644
 --- a/include/core/SkTypeface.h
 +++ b/include/core/SkTypeface.h
-@@ -252,6 +252,8 @@ public:
+@@ -252,6 +252,17 @@ public:
      bool getKerningPairAdjustments(SkSpan<const SkGlyphID> glyphs,
                                     SkSpan<int32_t> adjustments) const;
  
++    struct QtLikeGlyphAdvanceDiagnostics {
++        bool fAvailable = false;
++        SkScalar fAdvance = 0;
++        SkScalar fDesignAdvance = 0;
++    };
++
 +    bool getQtLikeGlyphAdvance(SkGlyphID glyph, SkScalar textSize, SkScalar* advance) const;
++    bool getQtLikeGlyphAdvanceDiagnostics(SkGlyphID glyph,
++                                          SkScalar textSize,
++                                          QtLikeGlyphAdvanceDiagnostics* diagnostics) const;
 +
      struct LocalizedString {
          SkString fString;
          SkString fLanguage;
-@@ -413,6 +415,9 @@ protected:
+@@ -413,6 +424,13 @@ protected:
      virtual int onGetUPEM() const = 0;
      virtual bool onGetKerningPairAdjustments(SkSpan<const SkGlyphID>,
                                               SkSpan<int32_t> adjustments) const;
 +    virtual bool onGetQtLikeGlyphAdvance(SkGlyphID glyph,
 +                                         SkScalar textSize,
 +                                         SkScalar* advance) const;
++    virtual bool onGetQtLikeGlyphAdvanceDiagnostics(
++            SkGlyphID glyph,
++            SkScalar textSize,
++            QtLikeGlyphAdvanceDiagnostics* diagnostics) const;
  
      /** Returns the family name of the typeface as known by its font manager.
       *  This name may or may not be produced by the family name iterator.
 diff --git a/modules/skparagraph/src/Run.cpp b/modules/skparagraph/src/Run.cpp
-index a1cfc403f8..eb44146775 100644
+index a1cfc403f8..899920da0e 100644
 --- a/modules/skparagraph/src/Run.cpp
 +++ b/modules/skparagraph/src/Run.cpp
-@@ -87,6 +87,28 @@ SkShaper::RunHandler::Buffer Run::newRunBuffer() {
+@@ -1,6 +1,7 @@
+ // Copyright 2019 Google LLC
+ #include "include/core/SkFontMetrics.h"
+ #include "include/core/SkTextBlob.h"
++#include "include/core/SkTypeface.h"
+ #include "include/private/base/SkFloatingPoint.h"
+ #include "include/private/base/SkMalloc.h"
+ #include "include/private/base/SkTo.h"
+@@ -87,6 +88,39 @@ SkShaper::RunHandler::Buffer Run::newRunBuffer() {
      return {fGlyphs.data(), fPositions.data(), fOffsets.data(), fClusterIndexes.data(), fOffset};
  }
  
@@ -39,8 +60,19 @@ index a1cfc403f8..eb44146775 100644
 +    SkScalar x = fPositions.empty() ? 0.0f : fPositions[0].fX;
 +    SkScalar width = 0.0f;
 +    for (size_t i = 0; i < this->size(); ++i) {
-+        const SkScalar advance =
++        SkScalar advance =
 +                SkScalarRoundToInt(rawPositions[i + 1].fX - rawPositions[i].fX);
++        if (SkTypeface* typeface = fFont.getTypeface()) {
++            SkTypeface::QtLikeGlyphAdvanceDiagnostics diagnostics;
++            if (typeface->getQtLikeGlyphAdvanceDiagnostics(
++                        fGlyphs[i], fFont.getSize(), &diagnostics) &&
++                diagnostics.fAvailable &&
++                !SkScalarNearlyZero(diagnostics.fDesignAdvance)) {
++                const SkScalar selectedAdvance = SkScalarRoundToInt(diagnostics.fAdvance);
++                const SkScalar designAdvance = SkScalarRoundToInt(diagnostics.fDesignAdvance);
++                advance += selectedAdvance - designAdvance;
++            }
++        }
 +        fPositions[i].fX = x;
 +        x += advance;
 +        width += advance;
@@ -303,10 +335,10 @@ index bb60d70f9c..4aaae6816a 100644
  
      // Fill out the style parts
 diff --git a/src/core/SkTypeface.cpp b/src/core/SkTypeface.cpp
-index 038b7be2fe..e5a1a9de40 100644
+index 038b7be2fe..83ac50d05d 100644
 --- a/src/core/SkTypeface.cpp
 +++ b/src/core/SkTypeface.cpp
-@@ -457,6 +457,12 @@ bool SkTypeface::getKerningPairAdjustments(SkSpan<const SkGlyphID> glyphs,
+@@ -457,6 +457,19 @@ bool SkTypeface::getKerningPairAdjustments(SkSpan<const SkGlyphID> glyphs,
      return this->onGetKerningPairAdjustments(glyphs.first(n + 1), adjustments.first(n));
  }
  
@@ -316,14 +348,28 @@ index 038b7be2fe..e5a1a9de40 100644
 +    return this->onGetQtLikeGlyphAdvance(glyph, textSize, advance);
 +}
 +
++bool SkTypeface::getQtLikeGlyphAdvanceDiagnostics(
++        SkGlyphID glyph,
++        SkScalar textSize,
++        QtLikeGlyphAdvanceDiagnostics* diagnostics) const {
++    return this->onGetQtLikeGlyphAdvanceDiagnostics(glyph, textSize, diagnostics);
++}
++
  SkTypeface::LocalizedStrings* SkTypeface::createFamilyNameIterator() const {
      return this->onCreateFamilyNameIterator();
  }
-@@ -539,6 +545,10 @@ bool SkTypeface::onGetKerningPairAdjustments(SkSpan<const SkGlyphID>, SkSpan<int
+@@ -539,6 +552,17 @@ bool SkTypeface::onGetKerningPairAdjustments(SkSpan<const SkGlyphID>, SkSpan<int
      return false;
  }
  
 +bool SkTypeface::onGetQtLikeGlyphAdvance(SkGlyphID, SkScalar, SkScalar*) const {
++    return false;
++}
++
++bool SkTypeface::onGetQtLikeGlyphAdvanceDiagnostics(
++        SkGlyphID,
++        SkScalar,
++        QtLikeGlyphAdvanceDiagnostics*) const {
 +    return false;
 +}
 +
