@@ -1,11 +1,11 @@
-﻿diff --git a/modules/skparagraph/include/Metrics.h b/modules/skparagraph/include/Metrics.h
+diff --git a/modules/skparagraph/include/Metrics.h b/modules/skparagraph/include/Metrics.h
 index 2c9821ae28..b254d7d74d 100644
 --- a/modules/skparagraph/include/Metrics.h
 +++ b/modules/skparagraph/include/Metrics.h
 @@ -86,6 +86,24 @@ public:
      // Zero indexed line number
      size_t fLineNumber = 0;
-
+ 
 +    // Diagnostic metrics from the final laid-out line's InternalLineMetrics.
 +    double fRawAscent = 0.0;
 +    double fRawDescent = 0.0;
@@ -28,10 +28,10 @@ index 2c9821ae28..b254d7d74d 100644
      // them. The first run will be keyed under start_index. The metrics here
      // are before layout and are the base values we calculate from.
 diff --git a/modules/skparagraph/include/Paragraph.h b/modules/skparagraph/include/Paragraph.h
-index a7112c8f39..8b494b4f58 100644
+index a7112c8f39..ffcba9ebad 100644
 --- a/modules/skparagraph/include/Paragraph.h
 +++ b/modules/skparagraph/include/Paragraph.h
-@@ -2,6 +2,8 @@
+@@ -2,7 +2,9 @@
  #ifndef Paragraph_DEFINED
  #define Paragraph_DEFINED
  
@@ -40,6 +40,7 @@ index a7112c8f39..8b494b4f58 100644
 +#include "include/core/SkString.h"
  #include "modules/skparagraph/include/FontCollection.h"
  #include "modules/skparagraph/include/Metrics.h"
+ #include "modules/skparagraph/include/ParagraphStyle.h"
 @@ -112,6 +114,37 @@ public:
      using ExtendedVisitor = std::function<void(int lineNumber, const ExtendedVisitorInfo*)>;
      virtual void extendedVisit(const ExtendedVisitor&) = 0;
@@ -165,7 +166,7 @@ index e33f9d1414..a531379fd2 100644
      // TODO: Something that is not thead-safe since we don't need it
      std::shared_ptr<Run> fCurrentRun;
 diff --git a/modules/skparagraph/src/ParagraphImpl.cpp b/modules/skparagraph/src/ParagraphImpl.cpp
-index 9ea8267545..5af0332ba6 100644
+index 9ea8267545..dfa296145c 100644
 --- a/modules/skparagraph/src/ParagraphImpl.cpp
 +++ b/modules/skparagraph/src/ParagraphImpl.cpp
 @@ -47,6 +47,36 @@ SkScalar littleRound(SkScalar a) {
@@ -300,7 +301,7 @@ index 0fb0ba9a8e..c63c6799bf 100644
      bool containsColorFontOrBitmap(SkTextBlob* textBlob) override;
      bool containsEmoji(SkTextBlob* textBlob) override;
 diff --git a/modules/skparagraph/src/Run.cpp b/modules/skparagraph/src/Run.cpp
-index 4f2e8f0627..4e3d020a98 100644
+index eb44146775..5fecc667d9 100644
 --- a/modules/skparagraph/src/Run.cpp
 +++ b/modules/skparagraph/src/Run.cpp
 @@ -30,6 +30,7 @@ Run::Run(ParagraphImpl* owner,
@@ -321,10 +322,10 @@ index 4f2e8f0627..4e3d020a98 100644
      fIndex = index;
      fUtf8Range = info.utf8Range;
 diff --git a/modules/skparagraph/src/Run.h b/modules/skparagraph/src/Run.h
-index 2dc5bae737..bfe849e677 100644
+index 73918ac060..e3102e2a1e 100644
 --- a/modules/skparagraph/src/Run.h
 +++ b/modules/skparagraph/src/Run.h
-@@ -155,6 +155,9 @@ public:
+@@ -156,6 +156,9 @@ public:
      SkSpan<const SkPoint> positions() const {
          return SkSpan<const SkPoint>(fPositions.begin(), fPositions.size());
      }
@@ -334,7 +335,7 @@ index 2dc5bae737..bfe849e677 100644
      SkSpan<const SkPoint> offsets() const {
          return SkSpan<const SkPoint>(fOffsets.begin(), fOffsets.size());
      }
-@@ -195,6 +198,7 @@ private:
+@@ -194,12 +197,14 @@ private:
      struct GlyphData {
          skia_private::STArray<64, SkGlyphID, true> glyphs;
          skia_private::STArray<64, SkPoint, true> positions;
@@ -342,7 +343,6 @@ index 2dc5bae737..bfe849e677 100644
          skia_private::STArray<64, SkPoint, true> offsets;
          skia_private::STArray<64, uint32_t, true> clusterIndexes;
      };
-@@ -202,6 +206,7 @@ private:
      std::shared_ptr<GlyphData> fGlyphData;
      skia_private::STArray<64, SkGlyphID, true>& fGlyphs;
      skia_private::STArray<64, SkPoint, true>& fPositions;
@@ -350,7 +350,7 @@ index 2dc5bae737..bfe849e677 100644
      skia_private::STArray<64, SkPoint, true>& fOffsets;
      skia_private::STArray<64, uint32_t, true>& fClusterIndexes;
  
-@@ -216,6 +221,8 @@ private:
+@@ -218,6 +223,8 @@ private:
      uint8_t fBidiLevel;
      SkFourByteTag fScript;
      SkString fLanguage;
@@ -359,7 +359,7 @@ index 2dc5bae737..bfe849e677 100644
  };
  
  template<typename Visitor>
-@@ -390,6 +390,7 @@ public:
+@@ -390,6 +397,7 @@ public:
          fRawAscent = a;
          fRawDescent = d;
          fRawLeading = l;
@@ -367,7 +367,7 @@ index 2dc5bae737..bfe849e677 100644
          fHeightInputAscent = a;
          fHeightInputDescent = d;
          fHeightInputLeading = l;
-@@ -403,6 +404,7 @@ public:
+@@ -403,6 +411,7 @@ public:
          fRawAscent = ra;
          fRawDescent = rd;
          fRawLeading = rl;
@@ -375,7 +375,7 @@ index 2dc5bae737..bfe849e677 100644
          fHeightInputAscent = ra;
          fHeightInputDescent = rd;
          fHeightInputLeading = rl;
-@@ -418,6 +420,7 @@ public:
+@@ -418,6 +427,7 @@ public:
          fRawAscent = metrics.fAscent;
          fRawDescent = metrics.fDescent;
          fRawLeading = metrics.fLeading;
@@ -383,7 +383,7 @@ index 2dc5bae737..bfe849e677 100644
          fHeightInputAscent = metrics.fAscent;
          fHeightInputDescent = metrics.fDescent;
          fHeightInputLeading = metrics.fLeading;
-@@ -435,6 +438,7 @@ public:
+@@ -435,6 +445,7 @@ public:
          fRawAscent = std::min(fRawAscent, run->ascent());
          fRawDescent = std::max(fRawDescent, run->descent());
          fRawLeading = std::max(fRawLeading, run->leading());
@@ -391,7 +391,7 @@ index 2dc5bae737..bfe849e677 100644
          fHeightInputAscent = std::min(fHeightInputAscent, run->ascent());
          fHeightInputDescent = std::max(fHeightInputDescent, run->descent());
          fHeightInputLeading = std::max(fHeightInputLeading, run->leading());
-@@ -447,6 +451,7 @@ public:
+@@ -447,6 +458,7 @@ public:
          fRawAscent = std::min(fRawAscent, other.fRawAscent);
          fRawDescent = std::max(fRawDescent, other.fRawDescent);
          fRawLeading = std::max(fRawLeading, other.fRawLeading);
@@ -399,7 +399,7 @@ index 2dc5bae737..bfe849e677 100644
          fHeightInputAscent = std::min(fHeightInputAscent, other.fHeightInputAscent);
          fHeightInputDescent = std::max(fHeightInputDescent, other.fHeightInputDescent);
          fHeightInputLeading = std::max(fHeightInputLeading, other.fHeightInputLeading);
-@@ -459,6 +464,7 @@ public:
+@@ -459,6 +471,7 @@ public:
          fRawAscent = SK_ScalarMax;
          fRawDescent = SK_ScalarMin;
          fRawLeading = 0;
@@ -407,7 +407,7 @@ index 2dc5bae737..bfe849e677 100644
          fHeightInputAscent = SK_ScalarMax;
          fHeightInputDescent = SK_ScalarMin;
          fHeightInputLeading = SK_ScalarMin;
-@@ -504,6 +510,7 @@ public:
+@@ -515,6 +528,7 @@ public:
              metrics.fRawAscent = fRawAscent;
              metrics.fRawDescent = fRawDescent;
              metrics.fRawLeading = fRawLeading;
@@ -415,7 +415,7 @@ index 2dc5bae737..bfe849e677 100644
              metrics.fHeightInputAscent = fHeightInputAscent;
              metrics.fHeightInputDescent = fHeightInputDescent;
              metrics.fHeightInputLeading = fHeightInputLeading;
-@@ -591,6 +598,9 @@ private:
+@@ -602,6 +616,9 @@ private:
      SkScalar fRawAscent;
      SkScalar fRawDescent;
      SkScalar fRawLeading;

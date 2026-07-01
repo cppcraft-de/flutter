@@ -1,42 +1,46 @@
+diff --git a/include/core/SkTypeface.h b/include/core/SkTypeface.h
+index 1bc8e706e4..1fa6cf9776 100644
+--- a/include/core/SkTypeface.h
++++ b/include/core/SkTypeface.h
+@@ -252,6 +252,8 @@ public:
+     bool getKerningPairAdjustments(SkSpan<const SkGlyphID> glyphs,
+                                    SkSpan<int32_t> adjustments) const;
+ 
++    bool getQtLikeGlyphAdvance(SkGlyphID glyph, SkScalar textSize, SkScalar* advance) const;
++
+     struct LocalizedString {
+         SkString fString;
+         SkString fLanguage;
+@@ -413,6 +415,9 @@ protected:
+     virtual int onGetUPEM() const = 0;
+     virtual bool onGetKerningPairAdjustments(SkSpan<const SkGlyphID>,
+                                              SkSpan<int32_t> adjustments) const;
++    virtual bool onGetQtLikeGlyphAdvance(SkGlyphID glyph,
++                                         SkScalar textSize,
++                                         SkScalar* advance) const;
+ 
+     /** Returns the family name of the typeface as known by its font manager.
+      *  This name may or may not be produced by the family name iterator.
 diff --git a/modules/skparagraph/src/Run.cpp b/modules/skparagraph/src/Run.cpp
-index a1cfc403f8..acfdf311cb 100644
+index a1cfc403f8..eb44146775 100644
 --- a/modules/skparagraph/src/Run.cpp
 +++ b/modules/skparagraph/src/Run.cpp
-@@ -30,6 +30,7 @@ Run::Run(ParagraphImpl* owner,
-     , fGlyphData(std::make_shared<GlyphData>())
-     , fGlyphs(fGlyphData->glyphs)
-     , fPositions(fGlyphData->positions)
-+    , fRawPositions(fGlyphData->rawPositions)
-     , fOffsets(fGlyphData->offsets)
-     , fClusterIndexes(fGlyphData->clusterIndexes)
-     , fHeightMultiplier(heightMultiplier)
-@@ -39,6 +40,8 @@ Run::Run(ParagraphImpl* owner,
-     fBidiLevel = info.fBidiLevel;
-     fScript = info.fScript;
-     fLanguage = info.fLanguage;
-+    fShapingFeatureCount = 0;
-+    fShapingFeatureMask = 0;
-     fAdvance = info.fAdvance;
-     fIndex = index;
-     fUtf8Range = info.utf8Range;
-@@ -87,6 +90,30 @@ SkShaper::RunHandler::Buffer Run::newRunBuffer() {
+@@ -87,6 +87,28 @@ SkShaper::RunHandler::Buffer Run::newRunBuffer() {
      return {fGlyphs.data(), fPositions.data(), fOffsets.data(), fClusterIndexes.data(), fOffset};
  }
-
+ 
 +void Run::commit() {
 +    if (!InternalLineMetrics::useQtLikeIntegerMetrics() || this->isPlaceholder()) {
 +        return;
 +    }
 +
-+    if (fRawPositions.empty()) {
-+        fRawPositions = fPositions;
-+    }
++    const auto rawPositions = fPositions;
 +
 +    SkScalar x = fPositions.empty() ? 0.0f : fPositions[0].fX;
 +    SkScalar width = 0.0f;
 +    for (size_t i = 0; i < this->size(); ++i) {
 +        const SkScalar advance =
-+                SkScalarRoundToInt(fRawPositions[i + 1].fX - fRawPositions[i].fX);
++                SkScalarRoundToInt(rawPositions[i + 1].fX - rawPositions[i].fX);
 +        fPositions[i].fX = x;
 +        x += advance;
 +        width += advance;
@@ -51,13 +55,13 @@ index a1cfc403f8..acfdf311cb 100644
      SkASSERT(pos + size <= this->size());
      const auto& blobBuffer = builder.allocRunPos(fFont, SkToInt(size));
 diff --git a/modules/skparagraph/src/Run.h b/modules/skparagraph/src/Run.h
-index 8f5d709c8b..2dc5bae737 100644
+index 8f5d709c8b..73918ac060 100644
 --- a/modules/skparagraph/src/Run.h
 +++ b/modules/skparagraph/src/Run.h
 @@ -14,6 +14,8 @@
  #include "modules/skparagraph/include/TextStyle.h"
  #include "modules/skshaper/include/SkShaper.h"
-
+ 
 +#include <cstdlib>
 +#include <cstring>
  #include <math.h>
@@ -66,10 +70,10 @@ index 8f5d709c8b..2dc5bae737 100644
 @@ -161,7 +163,7 @@ public:
          return SkSpan<const uint32_t>(fClusterIndexes.begin(), fClusterIndexes.size());
      }
-
+ 
 -    void commit() { }
 +    void commit();
-
+ 
      void resetJustificationShifts() {
          fJustificationShifts.clear();
 @@ -388,6 +390,9 @@ public:
@@ -81,7 +85,7 @@ index 8f5d709c8b..2dc5bae737 100644
 +        fHeightInputLeading = l;
          fForceStrut = false;
      }
-
+ 
 @@ -398,6 +403,9 @@ public:
          fRawAscent = ra;
          fRawDescent = rd;
@@ -91,7 +95,7 @@ index 8f5d709c8b..2dc5bae737 100644
 +        fHeightInputLeading = rl;
          fForceStrut = false;
      }
-
+ 
 @@ -410,6 +418,9 @@ public:
          fRawAscent = metrics.fAscent;
          fRawDescent = metrics.fDescent;
@@ -101,7 +105,7 @@ index 8f5d709c8b..2dc5bae737 100644
 +        fHeightInputLeading = metrics.fLeading;
          fForceStrut = forceStrut;
      }
-
+ 
 @@ -424,6 +435,9 @@ public:
          fRawAscent = std::min(fRawAscent, run->ascent());
          fRawDescent = std::max(fRawDescent, run->descent());
@@ -110,7 +114,7 @@ index 8f5d709c8b..2dc5bae737 100644
 +        fHeightInputDescent = std::max(fHeightInputDescent, run->descent());
 +        fHeightInputLeading = std::max(fHeightInputLeading, run->leading());
      }
-
+ 
      void add(InternalLineMetrics other) {
 @@ -433,6 +447,9 @@ public:
          fRawAscent = std::min(fRawAscent, other.fRawAscent);
@@ -120,7 +124,7 @@ index 8f5d709c8b..2dc5bae737 100644
 +        fHeightInputDescent = std::max(fHeightInputDescent, other.fHeightInputDescent);
 +        fHeightInputLeading = std::max(fHeightInputLeading, other.fHeightInputLeading);
      }
-
+ 
      void clean() {
 @@ -442,6 +459,9 @@ public:
          fRawAscent = SK_ScalarMax;
@@ -130,12 +134,12 @@ index 8f5d709c8b..2dc5bae737 100644
 +        fHeightInputDescent = SK_ScalarMin;
 +        fHeightInputLeading = SK_ScalarMin;
      }
-
+ 
      bool isClean() {
 @@ -455,6 +475,38 @@ public:
-
+ 
      SkScalar delta() const { return height() - ideographicBaseline(); }
-
+ 
 +    static bool environmentVariableEnabled(const char* value) {
 +        return value != nullptr &&
 +               (std::strcmp(value, "1") == 0 ||
@@ -171,7 +175,7 @@ index 8f5d709c8b..2dc5bae737 100644
      void updateLineMetrics(InternalLineMetrics& metrics) {
          if (metrics.fForceStrut) {
              metrics.fAscent = fAscent;
-@@ -463,6 +504,9 @@ public:
+@@ -463,6 +515,9 @@ public:
              metrics.fRawAscent = fRawAscent;
              metrics.fRawDescent = fRawDescent;
              metrics.fRawLeading = fRawLeading;
@@ -181,16 +185,16 @@ index 8f5d709c8b..2dc5bae737 100644
          } else {
              // This is another of those flutter changes. To be removed...
              metrics.fAscent = std::min(metrics.fAscent, fAscent - fLeading / 2.0f);
-@@ -478,9 +522,27 @@ public:
+@@ -478,9 +533,27 @@ public:
      }
-
+ 
      SkScalar height() const {
 +        if (useQtLikeIntegerMetrics()) {
 +            return this->nextLineBaselinePitch();
 +        }
          return ::round((double)fDescent - fAscent + fLeading);
      }
-
+ 
 +    SkScalar nextLineBaselinePitch() const {
 +        return ::ceil((double)-fHeightInputAscent + fHeightInputDescent + fHeightInputLeading);
 +    }
@@ -209,10 +213,10 @@ index 8f5d709c8b..2dc5bae737 100644
      void update(SkScalar a, SkScalar d, SkScalar l) {
          fAscent = a;
          fDescent = d;
-@@ -492,15 +554,27 @@ public:
+@@ -492,15 +565,27 @@ public:
          fRawDescent = rd;
      }
-
+ 
 -    SkScalar alphabeticBaseline() const { return fLeading / 2 - fAscent; }
 +    SkScalar alphabeticBaseline() const { return baseline(); }
      SkScalar ideographicBaseline() const { return fDescent - fAscent + fLeading; }
@@ -240,15 +244,15 @@ index 8f5d709c8b..2dc5bae737 100644
 +    }
      void setForceStrut(bool value) { fForceStrut = value; }
      bool getForceStrut() const { return fForceStrut; }
-
-@@ -517,6 +591,9 @@ private:
+ 
+@@ -517,6 +602,9 @@ private:
      SkScalar fRawAscent;
      SkScalar fRawDescent;
      SkScalar fRawLeading;
 +    SkScalar fHeightInputAscent;
 +    SkScalar fHeightInputDescent;
 +    SkScalar fHeightInputLeading;
-
+ 
      bool fForceStrut;
  };
 diff --git a/modules/skparagraph/src/TextLine.cpp b/modules/skparagraph/src/TextLine.cpp
@@ -296,31 +300,8 @@ index bb60d70f9c..4aaae6816a 100644
 +            ? this->baseline()
 +            : this->height() - this->sizes().descent());
      result.fLineNumber = this - fOwner->lines().data();
-
+ 
      // Fill out the style parts
-diff --git a/include/core/SkTypeface.h b/include/core/SkTypeface.h
-index 1bc8e706e4..1fa6cf9776 100644
---- a/include/core/SkTypeface.h
-+++ b/include/core/SkTypeface.h
-@@ -252,6 +252,8 @@ public:
-     bool getKerningPairAdjustments(SkSpan<const SkGlyphID> glyphs,
-                                    SkSpan<int32_t> adjustments) const;
-
-+    bool getQtLikeGlyphAdvance(SkGlyphID glyph, SkScalar textSize, SkScalar* advance) const;
-+
-     struct LocalizedString {
-         SkString fString;
-         SkString fLanguage;
-@@ -413,6 +415,9 @@ protected:
-     virtual int onGetUPEM() const = 0;
-     virtual bool onGetKerningPairAdjustments(SkSpan<const SkGlyphID>,
-                                              SkSpan<int32_t> adjustments) const;
-+    virtual bool onGetQtLikeGlyphAdvance(SkGlyphID glyph,
-+                                         SkScalar textSize,
-+                                         SkScalar* advance) const;
-
-     /** Returns the family name of the typeface as known by its font manager.
-      *  This name may or may not be produced by the family name iterator.
 diff --git a/src/core/SkTypeface.cpp b/src/core/SkTypeface.cpp
 index 038b7be2fe..e5a1a9de40 100644
 --- a/src/core/SkTypeface.cpp
@@ -328,7 +309,7 @@ index 038b7be2fe..e5a1a9de40 100644
 @@ -457,6 +457,12 @@ bool SkTypeface::getKerningPairAdjustments(SkSpan<const SkGlyphID> glyphs,
      return this->onGetKerningPairAdjustments(glyphs.first(n + 1), adjustments.first(n));
  }
-
+ 
 +bool SkTypeface::getQtLikeGlyphAdvance(SkGlyphID glyph,
 +                                       SkScalar textSize,
 +                                       SkScalar* advance) const {
@@ -341,7 +322,7 @@ index 038b7be2fe..e5a1a9de40 100644
 @@ -539,6 +545,10 @@ bool SkTypeface::onGetKerningPairAdjustments(SkSpan<const SkGlyphID>, SkSpan<int
      return false;
  }
-
+ 
 +bool SkTypeface::onGetQtLikeGlyphAdvance(SkGlyphID, SkScalar, SkScalar*) const {
 +    return false;
 +}
@@ -350,7 +331,7 @@ index 038b7be2fe..e5a1a9de40 100644
      return this->onOpenStream(ttcIndex);
  }
 diff --git a/src/ports/SkFontHost_FreeType.cpp b/src/ports/SkFontHost_FreeType.cpp
-index c229c444e6..d46edd8fed 100644
+index c229c444e6..e35ec2a217 100644
 --- a/src/ports/SkFontHost_FreeType.cpp
 +++ b/src/ports/SkFontHost_FreeType.cpp
 @@ -46,6 +46,8 @@
@@ -359,11 +340,11 @@ index c229c444e6..d46edd8fed 100644
  #include <tuple>
 +#include <cstdlib>
 +#include <cstring>
-
+ 
  #include <ft2build.h>
  #include <freetype/ftadvanc.h>
 @@ -72,6 +74,38 @@ namespace {
-
+ 
  using SkUniqueFTFace = std::unique_ptr<FT_FaceRec, SkFunctionObject<FT_Done_Face>>;
  using SkUniqueFTSize = std::unique_ptr<FT_SizeRec, SkFunctionObject<FT_Done_Size>>;
 +
@@ -399,12 +380,12 @@ index c229c444e6..d46edd8fed 100644
 +    return environment_variable_enabled(value);
 +}
  }
-
+ 
  // SK_FREETYPE_MINIMUM_RUNTIME_VERSION 0x<major><minor><patch><flags>
 @@ -894,6 +928,76 @@ bool SkTypeface_FreeType::onGetKerningPairAdjustments(SkSpan<const SkGlyphID> gl
      return true;
  }
-
+ 
 +bool SkTypeface_FreeType::onGetQtLikeGlyphAdvance(SkGlyphID glyph,
 +                                                  SkScalar textSize,
 +                                                  SkScalar* advance) const {
@@ -493,7 +474,7 @@ index c229c444e6..d46edd8fed 100644
 @@ -1653,6 +1762,16 @@ void SkScalerContext_FreeType::generateFontMetrics(SkFontMetrics* metrics) {
          return;
      }
-
+ 
 +    if (useQtLikeMetrics) {
 +        const FT_Size_Metrics& sizeMetrics = face->size->metrics;
 +        qtAscent = -SkFDot6ToScalar(sizeMetrics.ascender);
@@ -509,13 +490,13 @@ index c229c444e6..d46edd8fed 100644
          x_height = -ascent * fScale.y();
 @@ -1665,15 +1784,15 @@ void SkScalerContext_FreeType::generateFontMetrics(SkFontMetrics* metrics) {
      }
-
+ 
      // disallow negative linespacing
 -    if (leading < 0.0f) {
 +    if (!useQtLikeSizeMetrics && leading < 0.0f) {
          leading = 0.0f;
      }
-
+ 
      metrics->fTop = ymax * fScale.y();
 -    metrics->fAscent = ascent * fScale.y();
 -    metrics->fDescent = descent * fScale.y();
@@ -527,22 +508,8 @@ index c229c444e6..d46edd8fed 100644
      metrics->fAvgCharWidth = avgCharWidth * fScale.y();
      metrics->fXMin = xmin * fScale.y();
      metrics->fXMax = xmax * fScale.y();
-diff --git a/src/ports/SkTypeface_FreeType.h b/src/ports/SkTypeface_FreeType.h
-index 690763eed1..c7d4d8b0ff 100644
---- a/src/ports/SkTypeface_FreeType.h
-+++ b/src/ports/SkTypeface_FreeType.h
-@@ -62,6 +62,9 @@ protected:
-     int onGetUPEM() const override;
-     bool onGetKerningPairAdjustments(SkSpan<const SkGlyphID>,
-                                      SkSpan<int32_t> adjustments) const override;
-+    bool onGetQtLikeGlyphAdvance(SkGlyphID glyph,
-+                                 SkScalar textSize,
-+                                 SkScalar* advance) const override;
-     void onCharsToGlyphs(SkSpan<const SkUnichar>, SkSpan<SkGlyphID>) const override;
-     int onCountGlyphs() const override;
-
 diff --git a/src/ports/SkScalerContext_mac_ct.cpp b/src/ports/SkScalerContext_mac_ct.cpp
-index 0670b7615a..6e57595f32 100644
+index 0670b7615a..fc885a6df6 100644
 --- a/src/ports/SkScalerContext_mac_ct.cpp
 +++ b/src/ports/SkScalerContext_mac_ct.cpp
 @@ -44,6 +44,8 @@
@@ -556,15 +523,15 @@ index 0670b7615a..6e57595f32 100644
  #include "src/utils/mac/SkCTFont.h"
 @@ -51,12 +53,47 @@
  #include "src/utils/mac/SkUniqueCFRef.h"
-
+ 
  #include <algorithm>
 +#include <cmath>
 +#include <cstdlib>
 +#include <cstring>
-
+ 
  class SkDescriptor;
-
-
+ 
+ 
  namespace {
  static inline const constexpr bool kSkShowTextBlitCoverage = false;
 +
@@ -600,12 +567,12 @@ index 0670b7615a..6e57595f32 100644
 +    return environment_variable_enabled(value);
 +}
  }
-
+ 
  static void sk_memset_rect32(uint32_t* ptr, uint32_t value,
 @@ -700,6 +737,39 @@ void SkScalerContext_Mac::generateFontMetrics(SkFontMetrics* metrics) {
      metrics->fStrikeoutThickness = 0;
      metrics->fStrikeoutPosition = 0;
-
+ 
 +    if (use_qt_like_integer_metrics()) {
 +        sk_sp<SkData> head = this->getTypeface()->copyTableData(
 +                SkTEndian_SwapBE32(SkOTTableHead::TAG));
@@ -643,20 +610,20 @@ index 0670b7615a..6e57595f32 100644
      metrics->fFlags |= SkFontMetrics::kUnderlineThicknessIsValid_Flag;
      metrics->fFlags |= SkFontMetrics::kUnderlinePositionIsValid_Flag;
 diff --git a/src/ports/SkScalerContext_win_dw.cpp b/src/ports/SkScalerContext_win_dw.cpp
-index 68eb71e26f..fe08919c7c 100644
+index 68eb71e26f..7f4733183e 100644
 --- a/src/ports/SkScalerContext_win_dw.cpp
 +++ b/src/ports/SkScalerContext_win_dw.cpp
 @@ -50,9 +50,92 @@
  #include <dwrite_1.h>
  #include <dwrite_3.h>
-
+ 
 +#include <cmath>
 +#include <cstdlib>
 +#include <cstring>
 +
  namespace {
  static inline const constexpr bool kSkShowTextBlitCoverage = false;
-
+ 
 +static bool environment_variable_enabled(const char* value) {
 +    return value != nullptr &&
 +           (std::strcmp(value, "1") == 0 ||
@@ -742,14 +709,15 @@ index 68eb71e26f..fe08919c7c 100644
 @@ -1496,25 +1579,50 @@ bool SkScalerContext_DW::setAdvance(const SkGlyph& glyph, SkVector* advance) {
          return false;
      }
-
+ 
 -    DWRITE_GLYPH_METRICS gm;
-+    DWRITE_GLYPH_METRICS designMetrics = {};
-+    DWRITE_GLYPH_METRICS gdiMetrics = {};
-
+-
 -    if (DWRITE_MEASURING_MODE_GDI_CLASSIC == fMeasuringMode ||
 -        DWRITE_MEASURING_MODE_GDI_NATURAL == fMeasuringMode)
 -    {
++    DWRITE_GLYPH_METRICS designMetrics = {};
++    DWRITE_GLYPH_METRICS gdiMetrics = {};
++
 +    const DWriteAdvancePolicy advancePolicy = dwrite_advance_policy();
 +    const bool measuringModeUsesGdi =
 +        DWRITE_MEASURING_MODE_GDI_CLASSIC == fMeasuringMode ||
@@ -798,7 +766,7 @@ index 68eb71e26f..fe08919c7c 100644
 +        HRBM(typeface->fDWriteFontFace->GetDesignGlyphMetrics(&glyphId, 1, &designMetrics),
               "Could not get design metrics.");
      }
-
+ 
 @@ -1523,16 +1631,25 @@ bool SkScalerContext_DW::setAdvance(const SkGlyph& glyph, SkVector* advance) {
          Shared l(maybe_dw_mutex(*typeface));
          typeface->fDWriteFontFace->GetMetrics(&dwfm);
@@ -809,7 +777,7 @@ index 68eb71e26f..fe08919c7c 100644
 +    SkScalar gdiAdvanceX =
 +        gdiAdvanceTextSize * gdiMetrics.advanceWidth / dwfm.designUnitsPerEm;
 +    gdiAdvanceX = SkScalarRoundToScalar(gdiAdvanceX);
-
+ 
 -    *advance = { advanceX, 0 };
 -    if (DWRITE_MEASURING_MODE_GDI_CLASSIC == fMeasuringMode ||
 -        DWRITE_MEASURING_MODE_GDI_NATURAL == fMeasuringMode)
@@ -834,9 +802,9 @@ index 68eb71e26f..fe08919c7c 100644
      return true;
  }
 @@ -1868,9 +1985,24 @@ void SkScalerContext_DW::generateFontMetrics(SkFontMetrics* metrics) {
-
+ 
      SkScalar upem = SkIntToScalar(dwfm.designUnitsPerEm);
-
+ 
 -    metrics->fAscent = -fTextSizeRender * SkIntToScalar(dwfm.ascent) / upem;
 -    metrics->fDescent = fTextSizeRender * SkIntToScalar(dwfm.descent) / upem;
 -    metrics->fLeading = fTextSizeRender * SkIntToScalar(dwfm.lineGap) / upem;
@@ -861,3 +829,17 @@ index 68eb71e26f..fe08919c7c 100644
      metrics->fXHeight = fTextSizeRender * SkIntToScalar(dwfm.xHeight) / upem;
      metrics->fCapHeight = fTextSizeRender * SkIntToScalar(dwfm.capHeight) / upem;
      metrics->fUnderlineThickness = fTextSizeRender * SkIntToScalar(dwfm.underlineThickness) / upem;
+diff --git a/src/ports/SkTypeface_FreeType.h b/src/ports/SkTypeface_FreeType.h
+index 690763eed1..c7d4d8b0ff 100644
+--- a/src/ports/SkTypeface_FreeType.h
++++ b/src/ports/SkTypeface_FreeType.h
+@@ -62,6 +62,9 @@ protected:
+     int onGetUPEM() const override;
+     bool onGetKerningPairAdjustments(SkSpan<const SkGlyphID>,
+                                      SkSpan<int32_t> adjustments) const override;
++    bool onGetQtLikeGlyphAdvance(SkGlyphID glyph,
++                                 SkScalar textSize,
++                                 SkScalar* advance) const override;
+     void onCharsToGlyphs(SkSpan<const SkUnichar>, SkSpan<SkGlyphID>) const override;
+     int onCountGlyphs() const override;
+ 
