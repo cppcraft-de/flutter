@@ -21,3 +21,7 @@
 !txt/
 !web_locale_keymap/
 !web_test_fonts/
+
+# WSC/Qt parity: this is intentionally vendored by the Flutter wrapper repo.
+!freetype_2.13.0/
+!freetype_2.13.0/**

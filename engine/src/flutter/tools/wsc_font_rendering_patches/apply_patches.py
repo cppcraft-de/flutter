@@ -12,8 +12,10 @@ import sys
 
 EXPECTED_SKIA_REVISION = 'e9ed4fc9f1544c58d8a9347c1fc9471d8dd7c465'
 EXPECTED_HARFBUZZ_REVISION = '6f4c5cec306d31e6822303f5ba248a14293d588e'
+EXPECTED_FREETYPE2_REVISION = 'be4bcb57914154fc1b9e2900bf8e4b516057e2b8'
 
 PATCH_GROUP_ORDER = (
+    'freetype',
     'text_layout',
     'diagnostics',
     'pdf',
@@ -44,6 +46,9 @@ GROUP_MARKERS = {
         ('skia', 'modules/canvaskit/paragraph_bindings.cpp'): 'fPlatformGdiCompatibleAdvance',
         ('skia', 'include/core/SkTypeface.h'): 'fGdiCompatibleAdvance',
     },
+    'freetype': {
+        ('freetype2', 'BUILD.gn'): 'qt_compatible_freetype_dir = "../freetype_2.13.0"',
+    },
     'pdf': {
         ('skia', 'modules/canvaskit/canvaskit_bindings.cpp'): 'MakePdf(JSArray pictures',
         ('skia', 'modules/canvaskit/compile.sh'): 'skia_enable_pdf=true',
@@ -57,6 +62,7 @@ PATCH_SUBDIRS = {
 }
 
 EXPECTED_REVISIONS = {
+    'freetype2': EXPECTED_FREETYPE2_REVISION,
     'skia': EXPECTED_SKIA_REVISION,
     'harfbuzz': EXPECTED_HARFBUZZ_REVISION,
 }
@@ -123,6 +129,11 @@ def apply_patch(repo_dir, patch_file):
 def selected_patch_files(patch_dir, groups):
   patch_files = []
   for group in groups:
+    if group == 'freetype':
+      subdir = patch_dir / 'freetype'
+      patch_files.extend(('freetype2', patch_file) for patch_file in sorted(subdir.glob('*.patch')))
+      continue
+
     for repo_name, subdir_template in PATCH_SUBDIRS.items():
       subdir = patch_dir / subdir_template.format(group=group)
       patch_files.extend((repo_name, patch_file) for patch_file in sorted(subdir.glob('*.patch')))
@@ -145,15 +156,25 @@ def main(argv):
       help='Path to the HarfBuzz checkout to patch.',
   )
   parser.add_argument(
+      '--freetype2-dir',
+      type=Path,
+      default=default_flutter_dir / 'third_party' / 'freetype2',
+      help='Path to the FreeType checkout to patch.',
+  )
+  parser.add_argument(
       '--groups',
       nargs='+',
       default=['all'],
       metavar='GROUP',
-      help='Patch groups to apply: all, text_layout, diagnostics, pdf. Diagnostics includes text_layout.',
+      help=(
+          'Patch groups to apply: all, freetype, text_layout, diagnostics, pdf. '
+          'Diagnostics includes text_layout.'
+      ),
   )
   args = parser.parse_args(argv[1:])
 
   repo_dirs = {
+      'freetype2': args.freetype2_dir.resolve(),
       'skia': args.skia_dir.resolve(),
       'harfbuzz': args.harfbuzz_dir.resolve(),
   }
