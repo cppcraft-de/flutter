@@ -39,8 +39,7 @@ GROUP_MARKERS = {
         ('harfbuzz', 'src/hb-ot-shape.cc'): 'plan.apply_fallback_kern = true;',
     },
     'diagnostics': {
-        ('skia', 'modules/skparagraph/src/ParagraphImpl.cpp'):
-            ('diagnosticTableChecksum'),
+        ('skia', 'modules/skparagraph/src/ParagraphImpl.cpp'): ('diagnosticTableChecksum'),
         ('skia', 'modules/skparagraph/include/Paragraph.h'): 'fAdvanceProbeBackend',
         ('skia', 'modules/canvaskit/paragraph_bindings.cpp'): 'fPlatformGdiCompatibleAdvance',
         ('skia', 'include/core/SkTypeface.h'): 'fGdiCompatibleAdvance',
