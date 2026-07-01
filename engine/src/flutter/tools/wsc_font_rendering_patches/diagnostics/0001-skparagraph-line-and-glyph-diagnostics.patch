@@ -1,11 +1,11 @@
-diff --git a/modules/skparagraph/include/Metrics.h b/modules/skparagraph/include/Metrics.h
+﻿diff --git a/modules/skparagraph/include/Metrics.h b/modules/skparagraph/include/Metrics.h
 index 2c9821ae28..b254d7d74d 100644
 --- a/modules/skparagraph/include/Metrics.h
 +++ b/modules/skparagraph/include/Metrics.h
 @@ -86,6 +86,24 @@ public:
      // Zero indexed line number
      size_t fLineNumber = 0;
- 
+
 +    // Diagnostic metrics from the final laid-out line's InternalLineMetrics.
 +    double fRawAscent = 0.0;
 +    double fRawDescent = 0.0;
@@ -31,15 +31,16 @@ diff --git a/modules/skparagraph/include/Paragraph.h b/modules/skparagraph/inclu
 index a7112c8f39..8b494b4f58 100644
 --- a/modules/skparagraph/include/Paragraph.h
 +++ b/modules/skparagraph/include/Paragraph.h
-@@ -2,6 +2,7 @@
+@@ -2,6 +2,8 @@
  #ifndef Paragraph_DEFINED
  #define Paragraph_DEFINED
  
 +#include "include/core/SkFontMetrics.h"
  #include "include/core/SkPath.h"
++#include "include/core/SkString.h"
  #include "modules/skparagraph/include/FontCollection.h"
  #include "modules/skparagraph/include/Metrics.h"
-@@ -112,6 +113,26 @@ public:
+@@ -112,6 +114,37 @@ public:
      using ExtendedVisitor = std::function<void(int lineNumber, const ExtendedVisitorInfo*)>;
      virtual void extendedVisit(const ExtendedVisitor&) = 0;
  
@@ -50,8 +51,19 @@ index a7112c8f39..8b494b4f58 100644
 +        SkFontMetrics fFontMetrics;
 +        SkGlyphID fGlyph;
 +        uint32_t fUtf8Cluster;
++        uint32_t fUtf8RangeBegin;
++        uint32_t fUtf8RangeEnd;
++        uint32_t fBidiLevel;
++        uint32_t fScript;
++        SkString fLanguage;
++        uint32_t fShapingFeatureCount;
++        uint32_t fShapingFeatureMask;
 +        SkPoint fRawShapePosition;
 +        SkVector fRawAdvance;
++        SkScalar fLegacyPairKerningX;
++        bool fLegacyPairKerningAvailable;
++        SkScalar fQtLikeAdvanceX;
++        bool fQtLikeAdvanceAvailable;
 +        SkPoint fShapePosition;
 +        SkPoint fOffset;
 +        SkVector fAdvance;
@@ -66,11 +78,134 @@ index a7112c8f39..8b494b4f58 100644
      /* Returns path for a given line
       *
       * @param lineNumber  a line number
+diff --git a/modules/skparagraph/src/OneLineShaper.cpp b/modules/skparagraph/src/OneLineShaper.cpp
+index d36dfd86cb..89d3c16a33 100644
+--- a/modules/skparagraph/src/OneLineShaper.cpp
++++ b/modules/skparagraph/src/OneLineShaper.cpp
+@@ -14,6 +14,28 @@ using namespace skia_private;
+ namespace skia {
+ namespace textlayout {
+ 
++uint32_t OneLineShaper::shapingFeatureMask(SkSpan<const SkShaper::Feature> features) const {
++    uint32_t mask = 0;
++    for (const SkShaper::Feature& feature : features) {
++        if (feature.tag == SkSetFourByteTag('k', 'e', 'r', 'n')) {
++            mask |= 1u << 0;
++        } else if (feature.tag == SkSetFourByteTag('l', 'i', 'g', 'a')) {
++            mask |= 1u << 1;
++        } else if (feature.tag == SkSetFourByteTag('c', 'l', 'i', 'g')) {
++            mask |= 1u << 2;
++        } else if (feature.tag == SkSetFourByteTag('d', 'l', 'i', 'g')) {
++            mask |= 1u << 3;
++        } else if (feature.tag == SkSetFourByteTag('h', 'l', 'i', 'g')) {
++            mask |= 1u << 4;
++        } else if (feature.tag == SkSetFourByteTag('c', 'a', 'l', 't')) {
++            mask |= 1u << 5;
++        } else {
++            mask |= 1u << 31;
++        }
++    }
++    return mask;
++}
++
+ void OneLineShaper::commitRunBuffer(const RunInfo&) {
+ 
+     fCurrentRun->commit();
+@@ -710,6 +732,10 @@ bool OneLineShaper::shape() {
+                         }
+                     }
+ 
++                    fCurrentFeatureCount = static_cast<uint32_t>(adjustedFeatures.size());
++                    fCurrentFeatureMask = this->shapingFeatureMask(
++                            SkSpan<const SkShaper::Feature>(adjustedFeatures.data(),
++                                                            adjustedFeatures.size()));
+                     shaper->shape(unresolvedText.data(), unresolvedText.size(),
+                             fontIter, bidiIter,*scriptIter, langIter,
+                             adjustedFeatures.data(), adjustedFeatures.size(),
+diff --git a/modules/skparagraph/src/OneLineShaper.h b/modules/skparagraph/src/OneLineShaper.h
+index e33f9d1414..a531379fd2 100644
+--- a/modules/skparagraph/src/OneLineShaper.h
++++ b/modules/skparagraph/src/OneLineShaper.h
+@@ -22,7 +22,9 @@ public:
+         , fBaselineShift(0.0f)
+         , fAdvance(SkPoint::Make(0.0f, 0.0f))
+         , fUnresolvedGlyphs(0)
+-        , fUniqueRunId(paragraph->fRuns.size()){ }
++        , fUniqueRunId(paragraph->fRuns.size())
++        , fCurrentFeatureCount(0)
++        , fCurrentFeatureMask(0){ }
+ 
+     bool shape();
+ 
+@@ -88,6 +90,8 @@ private:
+     void commitRunInfo() override {}
+     void commitLine() override {}
+ 
++    uint32_t shapingFeatureMask(SkSpan<const SkShaper::Feature> features) const;
++
+     Buffer runBuffer(const RunInfo& info) override {
+         fCurrentRun = std::make_shared<Run>(fParagraph,
+                                            info,
+@@ -97,6 +101,8 @@ private:
+                                            fBaselineShift,
+                                            ++fUniqueRunId,
+                                            fAdvance.fX);
++        fCurrentRun->fShapingFeatureCount = fCurrentFeatureCount;
++        fCurrentRun->fShapingFeatureMask = fCurrentFeatureMask;
+         return fCurrentRun->newRunBuffer();
+     }
+ 
+@@ -120,6 +126,8 @@ private:
+     SkVector fAdvance;
+     size_t fUnresolvedGlyphs;
+     size_t fUniqueRunId;
++    uint32_t fCurrentFeatureCount;
++    uint32_t fCurrentFeatureMask;
+ 
+     // TODO: Something that is not thead-safe since we don't need it
+     std::shared_ptr<Run> fCurrentRun;
 diff --git a/modules/skparagraph/src/ParagraphImpl.cpp b/modules/skparagraph/src/ParagraphImpl.cpp
-index 9ea8267545..831e622fa4 100644
+index 9ea8267545..5af0332ba6 100644
 --- a/modules/skparagraph/src/ParagraphImpl.cpp
 +++ b/modules/skparagraph/src/ParagraphImpl.cpp
-@@ -1239,6 +1239,56 @@ void ParagraphImpl::visit(const Visitor& visitor) {
+@@ -47,6 +47,36 @@ SkScalar littleRound(SkScalar a) {
+         return SkScalarFloorToScalar(a);
+     }
+ }
++
++bool getLegacyPairKerningX(const SkFont& font,
++                           SkGlyphID firstGlyph,
++                           SkGlyphID secondGlyph,
++                           SkScalar* kerning) {
++    SkASSERT(kerning);
++    *kerning = 0;
++
++    SkTypeface* typeface = font.getTypeface();
++    if (!typeface) {
++        return false;
++    }
++
++    SkGlyphID glyphs[2] = {firstGlyph, secondGlyph};
++    int32_t adjustment = 0;
++    if (!typeface->getKerningPairAdjustments({glyphs, 2}, {&adjustment, 1})) {
++        return false;
++    }
++
++    int unitsPerEm = typeface->getUnitsPerEm();
++    if (unitsPerEm <= 0) {
++        return false;
++    }
++
++    *kerning = SkIntToScalar(adjustment) * font.getSize() / SkIntToScalar(unitsPerEm);
++    if (!font.isSubpixel()) {
++        *kerning = SkScalarRoundToInt(*kerning);
++    }
++    return true;
++}
+ }  // namespace
+ 
+ TextRange operator*(const TextRange& a, const TextRange& b) {
+@@ -1239,6 +1269,81 @@ void ParagraphImpl::visit(const Visitor& visitor) {
      }
  }
  
@@ -98,6 +233,20 @@ index 9ea8267545..831e622fa4 100644
 +                            sourceRun->fPositions[sourceIndex + 1] - shapePosition;
 +                    const SkPoint finalOrigin = blobRun.positions[i] + rec.fOffset;
 +                    const SkRect bounds = blobRun.font.getBounds(blobRun.glyphs[i], nullptr);
++                    SkScalar legacyPairKerningX = 0;
++                    const bool legacyPairKerningAvailable =
++                            i + 1 < blobRun.count &&
++                            getLegacyPairKerningX(blobRun.font,
++                                                  blobRun.glyphs[i],
++                                                  blobRun.glyphs[i + 1],
++                                                  &legacyPairKerningX);
++                    SkScalar qtLikeAdvanceX = 0;
++                    SkTypeface* typeface = blobRun.font.getTypeface();
++                    const bool qtLikeAdvanceAvailable =
++                            typeface != nullptr &&
++                            typeface->getQtLikeGlyphAdvance(blobRun.glyphs[i],
++                                                            blobRun.font.getSize(),
++                                                            &qtLikeAdvanceX);
 +                    SkFontMetrics fontMetrics;
 +                    blobRun.font.getMetrics(&fontMetrics);
 +                    result.push_back({
@@ -107,8 +256,19 @@ index 9ea8267545..831e622fa4 100644
 +                            fontMetrics,
 +                            blobRun.glyphs[i],
 +                            SkToU32(sourceRun->globalClusterIndex(sourceIndex)),
++                            SkToU32(sourceRun->fUtf8Range.begin()),
++                            SkToU32(sourceRun->fUtf8Range.end()),
++                            sourceRun->fBidiLevel,
++                            sourceRun->fScript,
++                            sourceRun->fLanguage,
++                            sourceRun->fShapingFeatureCount,
++                            sourceRun->fShapingFeatureMask,
 +                            rawShapePosition,
 +                            rawAdvance,
++                            legacyPairKerningX,
++                            legacyPairKerningAvailable,
++                            qtLikeAdvanceX,
++                            qtLikeAdvanceAvailable,
 +                            shapePosition,
 +                            offset,
 +                            advance,
@@ -151,17 +311,15 @@ index 4f2e8f0627..4e3d020a98 100644
      , fOffsets(fGlyphData->offsets)
      , fClusterIndexes(fGlyphData->clusterIndexes)
      , fHeightMultiplier(heightMultiplier)
-@@ -94,6 +95,10 @@ void Run::commit() {
-         return;
-     }
- 
-+    if (fRawPositions.empty()) {
-+        fRawPositions = fPositions;
-+    }
-+
-     SkScalar originalX = fPositions.empty() ? 0.0f : fPositions[0].fX;
-     SkScalar x = originalX;
-     SkScalar width = 0.0f;
+@@ -39,6 +40,8 @@ Run::Run(ParagraphImpl* owner,
+     fBidiLevel = info.fBidiLevel;
+     fScript = info.fScript;
+     fLanguage = info.fLanguage;
++    fShapingFeatureCount = 0;
++    fShapingFeatureMask = 0;
+     fAdvance = info.fAdvance;
+     fIndex = index;
+     fUtf8Range = info.utf8Range;
 diff --git a/modules/skparagraph/src/Run.h b/modules/skparagraph/src/Run.h
 index 2dc5bae737..bfe849e677 100644
 --- a/modules/skparagraph/src/Run.h
@@ -192,6 +350,15 @@ index 2dc5bae737..bfe849e677 100644
      skia_private::STArray<64, SkPoint, true>& fOffsets;
      skia_private::STArray<64, uint32_t, true>& fClusterIndexes;
  
+@@ -216,6 +221,8 @@ private:
+     uint8_t fBidiLevel;
+     SkFourByteTag fScript;
+     SkString fLanguage;
++    uint32_t fShapingFeatureCount;
++    uint32_t fShapingFeatureMask;
+ };
+ 
+ template<typename Visitor>
 @@ -390,6 +390,7 @@ public:
          fRawAscent = a;
          fRawDescent = d;

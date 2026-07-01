@@ -1,0 +1,97 @@
+diff --git a/modules/skshaper/src/SkShaper_harfbuzz.cpp b/modules/skshaper/src/SkShaper_harfbuzz.cpp
+index af8969c28c..a6e9762121 100644
+--- a/modules/skshaper/src/SkShaper_harfbuzz.cpp
++++ b/modules/skshaper/src/SkShaper_harfbuzz.cpp
+@@ -44,6 +44,7 @@
+ #include <hb.h>
+ 
+ #include <cstdint>
++#include <cstdlib>
+ #include <cstring>
+ #include <memory>
+ #include <type_traits>
+@@ -74,6 +75,44 @@ hb_position_t skhb_position(SkScalar value) {
+     return SkScalarRoundToInt(value * kHbPosition1);
+ }
+ 
++bool skhb_environment_variable_enabled(const char* value) {
++    return value != nullptr &&
++           (std::strcmp(value, "1") == 0 ||
++            std::strcmp(value, "true") == 0 ||
++            std::strcmp(value, "TRUE") == 0 ||
++            std::strcmp(value, "yes") == 0 ||
++            std::strcmp(value, "on") == 0);
++}
++
++bool skhb_environment_variable_disabled(const char* value) {
++    return value != nullptr &&
++           (std::strcmp(value, "0") == 0 ||
++            std::strcmp(value, "false") == 0 ||
++            std::strcmp(value, "FALSE") == 0 ||
++            std::strcmp(value, "no") == 0 ||
++            std::strcmp(value, "off") == 0);
++}
++
++bool skhb_use_qt_like_integer_metrics() {
++    const char* value = std::getenv("FLUTTER_QT_LINE_METRICS");
++    if (value == nullptr || *value == '\0') {
++        value = std::getenv("FLUTTER_INTEGER_TEXT_METRICS");
++    }
++    if (value == nullptr || *value == '\0') {
++        return true;
++    }
++    if (skhb_environment_variable_disabled(value)) {
++        return false;
++    }
++    return skhb_environment_variable_enabled(value);
++}
++
++bool skhb_qt_like_glyph_h_advance(const SkFont& font, SkGlyphID glyph, SkScalar* advance) {
++    SkTypeface* typeface = font.getTypeface();
++    return typeface != nullptr &&
++           typeface->getQtLikeGlyphAdvance(glyph, font.getSize(), advance);
++}
++
+ // TODO: SkFont::unicharToGlyph to take variation selectors
+ //hb_bool_t skhb_variation_glyph(hb_font_t* hb_font,
+ //                               void* font_data,
+@@ -131,6 +170,12 @@ hb_position_t skhb_glyph_h_advance(hb_font_t* hb_font,
+                                    void* user_data) {
+     SkFont& font = *reinterpret_cast<SkFont*>(font_data);
+ 
++    SkScalar qtLikeAdvance = 0;
++    if (skhb_use_qt_like_integer_metrics() &&
++        skhb_qt_like_glyph_h_advance(font, SkTo<SkGlyphID>(hbGlyph), &qtLikeAdvance)) {
++        return skhb_position(qtLikeAdvance);
++    }
++
+     SkScalar advance = font.getWidth(SkTo<SkGlyphID>(hbGlyph));
+ 
+     if (!font.isSubpixel()) {
+@@ -205,11 +250,22 @@ void skhb_glyph_h_advances(hb_font_t* hb_font,
+         glyphs = SkTAddOffset<const hb_codepoint_t>(glyphs, glyph_stride);
+     }
+     AutoSTMalloc<256, SkScalar> advance(count);
+-    font.getWidths({glyph.data(), count}, {advance.data(), count});
+-
+-    if (!font.isSubpixel()) {
++    bool allQtLikeAdvances = skhb_use_qt_like_integer_metrics();
++    if (allQtLikeAdvances) {
+         for (unsigned i = 0; i < count; i++) {
+-            advance[i] = SkScalarRoundToInt(advance[i]);
++            if (!skhb_qt_like_glyph_h_advance(font, glyph[i], &advance[i])) {
++                allQtLikeAdvances = false;
++                break;
++            }
++        }
++    }
++    if (!allQtLikeAdvances) {
++        font.getWidths({glyph.data(), count}, {advance.data(), count});
++
++        if (!font.isSubpixel()) {
++            for (unsigned i = 0; i < count; i++) {
++                advance[i] = SkScalarRoundToInt(advance[i]);
++            }
+         }
+     }
+ 

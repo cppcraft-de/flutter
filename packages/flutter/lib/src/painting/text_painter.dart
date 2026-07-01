@@ -107,7 +107,17 @@ class DiagnosticGlyphMetrics {
     required this.runIndex,
     required this.fontFamily,
     required this.typefaceId,
+    required this.typefaceStyleWeight,
+    required this.typefaceStyleWidth,
+    required this.typefaceStyleSlant,
     required this.fontSize,
+    required this.shapingUtf8RangeStart,
+    required this.shapingUtf8RangeEnd,
+    required this.shapingBidiLevel,
+    required this.shapingScript,
+    required this.shapingLanguage,
+    required this.shapingFeatureCount,
+    required this.shapingFeatureMask,
     required this.subpixel,
     required this.linearMetrics,
     required this.hinting,
@@ -121,6 +131,34 @@ class DiagnosticGlyphMetrics {
     required this.utf8Cluster,
     required this.rawShapePosition,
     required this.rawAdvance,
+    required this.legacyPairKerningX,
+    required this.legacyPairKerningAvailable,
+    required this.qtLikeAdvanceX,
+    required this.qtLikeAdvanceAvailable,
+    required this.advanceProbeBackend,
+    required this.qtLikeAdvance26Dot6,
+    required this.qtLikeLinearHoriAdvance16Dot16,
+    required this.qtLikeMetricsHoriAdvance26Dot6,
+    required this.qtLikeLoadFlags,
+    required this.qtLikeXppem,
+    required this.qtLikeYppem,
+    required this.qtLikeXScale,
+    required this.qtLikeYScale,
+    required this.typefaceUnitsPerEm,
+    required this.typefaceGlyphCount,
+    required this.headTableChecksum,
+    required this.hheaTableChecksum,
+    required this.hmtxTableChecksum,
+    required this.os2TableChecksum,
+    required this.postTableChecksum,
+    required this.maxpTableChecksum,
+    required this.faceIndex,
+    required this.faceFlags,
+    required this.faceStyleFlags,
+    required this.platformDesignAdvance,
+    required this.platformGdiCompatibleAdvance,
+    required this.platformDesignUnitsPerEm,
+    required this.platformMeasuringMode,
     required this.shapePosition,
     required this.offset,
     required this.advance,
@@ -141,8 +179,38 @@ class DiagnosticGlyphMetrics {
   /// The process-local resolved SkTypeface identifier.
   final int typefaceId;
 
+  /// The resolved SkTypeface style weight.
+  final int typefaceStyleWeight;
+
+  /// The resolved SkTypeface style width.
+  final int typefaceStyleWidth;
+
+  /// The resolved SkTypeface style slant.
+  final int typefaceStyleSlant;
+
   /// The resolved font size.
   final double fontSize;
+
+  /// The UTF-8 start offset passed to the shaping run.
+  final int shapingUtf8RangeStart;
+
+  /// The UTF-8 end offset passed to the shaping run.
+  final int shapingUtf8RangeEnd;
+
+  /// The bidi level passed to the shaping run.
+  final int shapingBidiLevel;
+
+  /// The OpenType script tag passed to the shaping run.
+  final int shapingScript;
+
+  /// The language tag passed to the shaping run.
+  final String shapingLanguage;
+
+  /// Count of explicit OpenType features passed to shaping.
+  final int shapingFeatureCount;
+
+  /// Compact mask for common explicit OpenType features passed to shaping.
+  final int shapingFeatureMask;
 
   /// Whether the resolved SkFont requests subpixel positioning.
   final bool subpixel;
@@ -182,6 +250,90 @@ class DiagnosticGlyphMetrics {
 
   /// The advance to the next raw shaping position.
   final Offset rawAdvance;
+
+  /// Qt-style legacy `kern` adjustment to the next glyph, if Skia can resolve it.
+  final double legacyPairKerningX;
+
+  /// Whether [legacyPairKerningX] was available for this glyph pair.
+  final bool legacyPairKerningAvailable;
+
+  /// Qt-style FreeType glyph advance used by the local SkParagraph layout patch.
+  final double qtLikeAdvanceX;
+
+  /// Whether [qtLikeAdvanceX] was available for this glyph.
+  final bool qtLikeAdvanceAvailable;
+
+  /// Backend that produced the advance probe: 1 FreeType, 2 CoreText, 3 DirectWrite.
+  final int advanceProbeBackend;
+
+  /// The unrounded FreeType slot advance.x used by the Qt-like advance probe.
+  final double qtLikeAdvance26Dot6;
+
+  /// The FreeType slot linearHoriAdvance used by the Qt-like advance probe.
+  final double qtLikeLinearHoriAdvance16Dot16;
+
+  /// The FreeType slot metrics.horiAdvance used by the Qt-like advance probe.
+  final double qtLikeMetricsHoriAdvance26Dot6;
+
+  /// The FreeType FT_LOAD_* flags used by the Qt-like advance probe.
+  final int qtLikeLoadFlags;
+
+  /// The active FreeType size x_ppem used by the Qt-like advance probe.
+  final int qtLikeXppem;
+
+  /// The active FreeType size y_ppem used by the Qt-like advance probe.
+  final int qtLikeYppem;
+
+  /// The active FreeType size x_scale used by the Qt-like advance probe.
+  final double qtLikeXScale;
+
+  /// The active FreeType size y_scale used by the Qt-like advance probe.
+  final double qtLikeYScale;
+
+  /// The resolved typeface units-per-em.
+  final int typefaceUnitsPerEm;
+
+  /// The resolved typeface glyph count.
+  final int typefaceGlyphCount;
+
+  /// FNV-1a checksum of the resolved typeface `head` table.
+  final int headTableChecksum;
+
+  /// FNV-1a checksum of the resolved typeface `hhea` table.
+  final int hheaTableChecksum;
+
+  /// FNV-1a checksum of the resolved typeface `hmtx` table.
+  final int hmtxTableChecksum;
+
+  /// FNV-1a checksum of the resolved typeface `OS/2` table.
+  final int os2TableChecksum;
+
+  /// FNV-1a checksum of the resolved typeface `post` table.
+  final int postTableChecksum;
+
+  /// FNV-1a checksum of the resolved typeface `maxp` table.
+  final int maxpTableChecksum;
+
+  /// FreeType face index reported by the Qt-like advance probe.
+  final int faceIndex;
+
+  /// FreeType face_flags reported by the Qt-like advance probe.
+  final int faceFlags;
+
+  /// FreeType style_flags reported by the Qt-like advance probe.
+  final int faceStyleFlags;
+
+  /// Platform design-space advance converted to logical pixels, when available.
+  final double platformDesignAdvance;
+
+  /// Platform GDI-compatible advance converted to logical pixels, when available.
+  final double platformGdiCompatibleAdvance;
+
+  /// Platform font design units-per-em, when available.
+  final int platformDesignUnitsPerEm;
+
+  /// Platform measuring mode enum, when available.
+  final int platformMeasuringMode;
 
   /// The position stored by the shaping/layout run.
   final Offset shapePosition;
@@ -2034,19 +2186,36 @@ class TextPainter {
     for (final Object? value in encoded) {
       if (value case final List<Object?> record when record.length >= 32) {
         final bool hasRawShaping = record.length >= 36;
-        final int shapePositionIndex = hasRawShaping ? 20 : 16;
-        final int offsetIndex = hasRawShaping ? 22 : 18;
-        final int advanceIndex = hasRawShaping ? 24 : 20;
-        final int finalOriginIndex = hasRawShaping ? 26 : 22;
-        final int boundsIndex = hasRawShaping ? 28 : 24;
-        final int inkBoundsIndex = hasRawShaping ? 32 : 28;
+        final bool hasLegacyPairKerning = record.length >= 38;
+        final bool hasQtLikeAdvance = record.length >= 40;
+        final bool hasTypefaceStyle = record.length >= 43;
+        final bool hasShapingRun = record.length >= 50;
+        final bool hasQtLikeAdvanceDiagnostics = record.length >= 69;
+        final bool hasPlatformAdvanceDiagnostics = record.length >= 74;
+        final int rawExtraWidth = (hasLegacyPairKerning ? 2 : 0) + (hasQtLikeAdvance ? 2 : 0);
+        final int shapePositionIndex = hasRawShaping ? 20 + rawExtraWidth : 16;
+        final int offsetIndex = hasRawShaping ? 22 + rawExtraWidth : 18;
+        final int advanceIndex = hasRawShaping ? 24 + rawExtraWidth : 20;
+        final int finalOriginIndex = hasRawShaping ? 26 + rawExtraWidth : 22;
+        final int boundsIndex = hasRawShaping ? 28 + rawExtraWidth : 24;
+        final int inkBoundsIndex = hasRawShaping ? 32 + rawExtraWidth : 28;
         result.add(
           DiagnosticGlyphMetrics(
             lineNumber: (record[0]! as num).toInt(),
             runIndex: (record[1]! as num).toInt(),
             fontFamily: record[2]! as String,
             typefaceId: (record[3]! as num).toInt(),
+            typefaceStyleWeight: hasTypefaceStyle ? (record[40]! as num).toInt() : 0,
+            typefaceStyleWidth: hasTypefaceStyle ? (record[41]! as num).toInt() : 0,
+            typefaceStyleSlant: hasTypefaceStyle ? (record[42]! as num).toInt() : 0,
             fontSize: (record[4]! as num).toDouble(),
+            shapingUtf8RangeStart: hasShapingRun ? (record[43]! as num).toInt() : 0,
+            shapingUtf8RangeEnd: hasShapingRun ? (record[44]! as num).toInt() : 0,
+            shapingBidiLevel: hasShapingRun ? (record[45]! as num).toInt() : 0,
+            shapingScript: hasShapingRun ? (record[46]! as num).toInt() : 0,
+            shapingLanguage: hasShapingRun ? record[47]! as String : '',
+            shapingFeatureCount: hasShapingRun ? (record[48]! as num).toInt() : 0,
+            shapingFeatureMask: hasShapingRun ? (record[49]! as num).toInt() : 0,
             subpixel: (record[5]! as num) != 0,
             linearMetrics: (record[6]! as num) != 0,
             hinting: (record[7]! as num).toInt(),
@@ -2070,6 +2239,46 @@ class TextPainter {
                     (record[advanceIndex]! as num).toDouble(),
                     (record[advanceIndex + 1]! as num).toDouble(),
                   ),
+            legacyPairKerningX: hasLegacyPairKerning ? (record[20]! as num).toDouble() : 0.0,
+            legacyPairKerningAvailable: hasLegacyPairKerning && (record[21]! as num) != 0,
+            qtLikeAdvanceX: hasQtLikeAdvance ? (record[22]! as num).toDouble() : 0.0,
+            qtLikeAdvanceAvailable: hasQtLikeAdvance && (record[23]! as num) != 0,
+            advanceProbeBackend: hasQtLikeAdvanceDiagnostics ? (record[50]! as num).toInt() : 0,
+            qtLikeAdvance26Dot6: hasQtLikeAdvanceDiagnostics
+                ? (record[51]! as num).toDouble()
+                : 0.0,
+            qtLikeLinearHoriAdvance16Dot16: hasQtLikeAdvanceDiagnostics
+                ? (record[52]! as num).toDouble()
+                : 0.0,
+            qtLikeMetricsHoriAdvance26Dot6: hasQtLikeAdvanceDiagnostics
+                ? (record[53]! as num).toDouble()
+                : 0.0,
+            qtLikeLoadFlags: hasQtLikeAdvanceDiagnostics ? (record[54]! as num).toInt() : 0,
+            qtLikeXppem: hasQtLikeAdvanceDiagnostics ? (record[55]! as num).toInt() : 0,
+            qtLikeYppem: hasQtLikeAdvanceDiagnostics ? (record[56]! as num).toInt() : 0,
+            qtLikeXScale: hasQtLikeAdvanceDiagnostics ? (record[57]! as num).toDouble() : 0.0,
+            qtLikeYScale: hasQtLikeAdvanceDiagnostics ? (record[58]! as num).toDouble() : 0.0,
+            typefaceUnitsPerEm: hasQtLikeAdvanceDiagnostics ? (record[59]! as num).toInt() : 0,
+            typefaceGlyphCount: hasQtLikeAdvanceDiagnostics ? (record[60]! as num).toInt() : 0,
+            headTableChecksum: hasQtLikeAdvanceDiagnostics ? (record[61]! as num).toInt() : 0,
+            hheaTableChecksum: hasQtLikeAdvanceDiagnostics ? (record[62]! as num).toInt() : 0,
+            hmtxTableChecksum: hasQtLikeAdvanceDiagnostics ? (record[63]! as num).toInt() : 0,
+            os2TableChecksum: hasQtLikeAdvanceDiagnostics ? (record[64]! as num).toInt() : 0,
+            postTableChecksum: hasQtLikeAdvanceDiagnostics ? (record[65]! as num).toInt() : 0,
+            maxpTableChecksum: hasQtLikeAdvanceDiagnostics ? (record[66]! as num).toInt() : 0,
+            faceIndex: hasQtLikeAdvanceDiagnostics ? (record[67]! as num).toInt() : 0,
+            faceFlags: hasQtLikeAdvanceDiagnostics ? (record[68]! as num).toInt() : 0,
+            faceStyleFlags: hasQtLikeAdvanceDiagnostics ? (record[69]! as num).toInt() : 0,
+            platformDesignAdvance: hasPlatformAdvanceDiagnostics
+                ? (record[70]! as num).toDouble()
+                : 0.0,
+            platformGdiCompatibleAdvance: hasPlatformAdvanceDiagnostics
+                ? (record[71]! as num).toDouble()
+                : 0.0,
+            platformDesignUnitsPerEm: hasPlatformAdvanceDiagnostics
+                ? (record[72]! as num).toInt()
+                : 0,
+            platformMeasuringMode: hasPlatformAdvanceDiagnostics ? (record[73]! as num).toInt() : 0,
             shapePosition: Offset(
               (record[shapePositionIndex]! as num).toDouble(),
               (record[shapePositionIndex + 1]! as num).toDouble(),

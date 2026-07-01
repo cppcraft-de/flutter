@@ -20,10 +20,11 @@ em_config_path = "$emsdk_dir/.emscripten"
 emscripten_tool_prefix = ""
 emscripten_tool_suffix = ""
 if (host_os == "win") {
-  emscripten_tool_prefix = "$emsdk_dir/python/3.9.2-nuget_64bit/python.exe "
-  emscripten_tool_suffix = ".py"
   win_tool_wrapper_path =
       rebase_path("//build/toolchain/win/tool_wrapper.py", root_build_dir)
+  emscripten_tool_prefix =
+      "$python_path $win_tool_wrapper_path set-emscripten-cache-and-run $emsdk_dir/python/3.9.2-nuget_64bit/python.exe "
+  emscripten_tool_suffix = ".py"
 }
 emscripten_bin_dir = "$emsdk_dir/upstream/emscripten"
 
@@ -48,8 +49,7 @@ template("wasm_toolchain") {
     cxx = "$compiler_prefix$emscripten_tool_prefix$emscripten_bin_dir/em++$emscripten_tool_suffix --em-config $em_config_path"
     asm = "$emscripten_tool_prefix$emscripten_bin_dir/emcc$emscripten_tool_suffix --em-config $em_config_path"
     if (host_os == "win") {
-      alink_pre_command =
-          "cmd.exe /c \"if exist {{output}} del /f /q {{output}} &"
+      alink_pre_command = "cmd.exe /c \"del /f /q {{output}} 2>nul &"
       alink_post_command = "\""
       stamp_command = "cmd.exe /c type nul > {{output}}"
       copy_command =
