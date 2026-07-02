@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "third_party/skia/include/ports/SkTypeface_win.h"
+#include "txt/freetype_font_manager.h"
 #include "txt/platform.h"
 
 namespace txt {
@@ -12,7 +13,7 @@ std::vector<std::string> GetDefaultFontFamilies() {
 }
 
 sk_sp<SkFontMgr> GetDefaultFontManager(uint32_t font_initialization_data) {
-  return SkFontMgr_New_DirectWrite();
+  return MakeFreeTypeCanonicalFontManager(SkFontMgr_New_DirectWrite());
 }
 
 }  // namespace txt
