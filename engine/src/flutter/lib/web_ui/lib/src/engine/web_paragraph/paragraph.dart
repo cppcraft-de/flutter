@@ -997,12 +997,6 @@ class WebParagraph implements ui.Paragraph {
   }
 
   @override
-  Float64List computeDetailedLineMetricsForDiagnostics() => Float64List(0);
-
-  @override
-  List<Object?> computeGlyphMetricsForDiagnostics() => const <Object?>[];
-
-  @override
   ui.LineMetrics? getLineMetricsAt(int lineNumber) {
     if (lineNumber < 0 || lineNumber >= _layout.lines.length) {
       WebParagraphDebug.apiTrace('getLineMetricsAt("$text", $lineNumber): null (out of range)');

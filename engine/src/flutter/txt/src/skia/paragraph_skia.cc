@@ -244,19 +244,6 @@ std::vector<LineMetrics>& ParagraphSkia::GetLineMetrics() {
       txtm.left = skm.fLeft;
       txtm.baseline = skm.fBaseline;
       txtm.line_number = skm.fLineNumber;
-      txtm.raw_ascent = skm.fRawAscent;
-      txtm.raw_descent = skm.fRawDescent;
-      txtm.raw_leading = skm.fRawLeading;
-      txtm.effective_ascent = skm.fEffectiveAscent;
-      txtm.effective_descent = skm.fEffectiveDescent;
-      txtm.effective_leading = skm.fEffectiveLeading;
-      txtm.height_input_ascent = skm.fHeightInputAscent;
-      txtm.height_input_descent = skm.fHeightInputDescent;
-      txtm.height_input_leading = skm.fHeightInputLeading;
-      txtm.height_input_raw_leading = skm.fHeightInputRawLeading;
-      txtm.line_height_branch = skm.fLineHeightBranch;
-      txtm.next_line_baseline_pitch = skm.fNextLineBaselinePitch;
-      txtm.line_box_height = skm.fLineBoxHeight;
 
       for (const auto& sk_iter : skm.fLineMetrics) {
         const skt::StyleMetrics& sk_style_metrics = sk_iter.second;
@@ -271,11 +258,6 @@ std::vector<LineMetrics>& ParagraphSkia::GetLineMetrics() {
 
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   return line_metrics_.value();
-}
-
-std::vector<skt::Paragraph::GlyphDiagnostic>
-ParagraphSkia::GetGlyphDiagnostics() {
-  return paragraph_->getGlyphDiagnostics();
 }
 
 bool ParagraphSkia::GetLineMetricsAt(int lineNumber,

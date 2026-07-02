@@ -1023,36 +1023,6 @@ class CkParagraph implements ui.Paragraph {
   }
 
   @override
-  Float64List computeDetailedLineMetricsForDiagnostics() {
-    assert(!_disposed, 'Paragraph has been disposed.');
-    final List<SkLineMetrics> skLineMetrics = skiaObject.getLineMetrics();
-    final result = Float64List(skLineMetrics.length * 13);
-    var position = 0;
-    for (final metrics in skLineMetrics) {
-      result[position++] = metrics.rawAscent;
-      result[position++] = metrics.rawDescent;
-      result[position++] = metrics.rawLeading;
-      result[position++] = metrics.effectiveAscent;
-      result[position++] = metrics.effectiveDescent;
-      result[position++] = metrics.effectiveLeading;
-      result[position++] = metrics.heightInputAscent;
-      result[position++] = metrics.heightInputDescent;
-      result[position++] = metrics.heightInputLeading;
-      result[position++] = metrics.heightInputRawLeading;
-      result[position++] = metrics.lineHeightBranch;
-      result[position++] = metrics.nextLineBaselinePitch;
-      result[position++] = metrics.lineBoxHeight;
-    }
-    return result;
-  }
-
-  @override
-  List<Object?> computeGlyphMetricsForDiagnostics() {
-    assert(!_disposed, 'Paragraph has been disposed.');
-    return skiaObject.getGlyphDiagnostics();
-  }
-
-  @override
   ui.LineMetrics? getLineMetricsAt(int lineNumber) {
     assert(!_disposed, 'Paragraph has been disposed.');
     final SkLineMetrics? metrics = skiaObject.getLineMetricsAt(lineNumber.toDouble());

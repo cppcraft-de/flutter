@@ -51,8 +51,6 @@ class Paragraph : public RefCountedDartWrappable<Paragraph> {
   Dart_Handle getWordBoundary(unsigned offset);
   Dart_Handle getLineBoundary(unsigned offset);
   tonic::Float64List computeLineMetrics() const;
-  tonic::Float64List computeDetailedLineMetricsForDiagnostics() const;
-  Dart_Handle computeGlyphMetricsForDiagnostics() const;
   Dart_Handle getLineMetricsAt(int lineNumber, Dart_Handle constructor) const;
   size_t getNumberOfLines() const;
   int getLineNumberAt(size_t utf16Offset) const;

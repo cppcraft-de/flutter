@@ -3146,18 +3146,6 @@ abstract class Paragraph {
   /// to repeatedly call this. Instead, cache the results.
   List<LineMetrics> computeLineMetrics();
 
-  /// Returns engine-specific detailed line metrics for diagnostics.
-  ///
-  /// Each line is encoded as raw ascent/descent/leading, effective
-  /// ascent/descent/leading, height input ascent/descent/leading/raw-leading,
-  /// line-height branch, next-line baseline pitch, and line-box height.
-  /// Branch values are 0 for normal and 2 for Qt/FreeType size-metric baseline
-  /// pitch. Backends that do not expose these values return an empty list.
-  Float64List computeDetailedLineMetricsForDiagnostics() => Float64List(0);
-
-  /// Returns engine-specific glyph metrics from the final laid-out paragraph.
-  List<Object?> computeGlyphMetricsForDiagnostics() => const <Object?>[];
-
   /// Returns the [LineMetrics] for the line at `lineNumber`, or null if the
   /// given `lineNumber` is greater than or equal to [numberOfLines].
   LineMetrics? getLineMetricsAt(int lineNumber);
@@ -3387,16 +3375,6 @@ base class _NativeParagraph extends NativeFieldWrapperClass1 implements Paragrap
 
   @Native<Handle Function(Pointer<Void>)>(symbol: 'Paragraph::computeLineMetrics')
   external Float64List _computeLineMetrics();
-
-  @override
-  @Native<Handle Function(Pointer<Void>)>(
-    symbol: 'Paragraph::computeDetailedLineMetricsForDiagnostics',
-  )
-  external Float64List computeDetailedLineMetricsForDiagnostics();
-
-  @override
-  @Native<Handle Function(Pointer<Void>)>(symbol: 'Paragraph::computeGlyphMetricsForDiagnostics')
-  external List<Object?> computeGlyphMetricsForDiagnostics();
 
   @override
   LineMetrics? getLineMetricsAt(int lineNumber) => _getLineMetricsAt(lineNumber, LineMetrics._);
