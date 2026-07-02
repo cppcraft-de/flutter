@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "txt/platform.h"
 #include "txt/freetype_font_manager.h"
+#include "txt/platform.h"
 
 #if defined(SK_FONTMGR_FONTCONFIG_AVAILABLE)
 #include "third_party/skia/include/ports/SkFontMgr_fontconfig.h"
@@ -27,13 +27,11 @@ std::vector<std::string> GetDefaultFontFamilies() {
 
 sk_sp<SkFontMgr> GetDefaultFontManager(uint32_t font_initialization_data) {
 #if defined(SK_FONTMGR_FONTCONFIG_AVAILABLE)
-  static sk_sp<SkFontMgr> mgr =
-      MakeFreeTypeCanonicalFontManager(
-          SkFontMgr_New_FontConfig(nullptr, SkFontScanner_Make_FreeType()));
+  static sk_sp<SkFontMgr> mgr = MakeFreeTypeCanonicalFontManager(
+      SkFontMgr_New_FontConfig(nullptr, SkFontScanner_Make_FreeType()));
 #elif defined(SK_FONTMGR_FREETYPE_DIRECTORY_AVAILABLE)
-  static sk_sp<SkFontMgr> mgr =
-      MakeFreeTypeCanonicalFontManager(
-          SkFontMgr_New_Custom_Directory("/usr/share/fonts/"));
+  static sk_sp<SkFontMgr> mgr = MakeFreeTypeCanonicalFontManager(
+      SkFontMgr_New_Custom_Directory("/usr/share/fonts/"));
 #elif defined(SK_FONTMGR_FREETYPE_EMPTY_AVAILABLE)
   static sk_sp<SkFontMgr> mgr =
       MakeFreeTypeCanonicalFontManager(SkFontMgr_New_Custom_Empty());

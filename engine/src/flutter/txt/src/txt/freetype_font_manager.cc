@@ -225,9 +225,8 @@ class FreeTypeCanonicalFontMgr final : public SkFontMgr {
     return MakeFreeTypeTypefaceFromData(std::move(data), ttc_index);
   }
 
-  sk_sp<SkTypeface> onMakeFromStreamIndex(
-      std::unique_ptr<SkStreamAsset> stream,
-      int ttc_index) const override {
+  sk_sp<SkTypeface> onMakeFromStreamIndex(std::unique_ptr<SkStreamAsset> stream,
+                                          int ttc_index) const override {
     SkFontArguments arguments;
     arguments.setCollectionIndex(ttc_index);
     return MakeFreeTypeTypefaceFromStream(std::move(stream), arguments);
@@ -244,9 +243,8 @@ class FreeTypeCanonicalFontMgr final : public SkFontMgr {
     return MakeFreeTypeTypefaceFromFile(path, ttc_index);
   }
 
-  sk_sp<SkTypeface> onLegacyMakeTypeface(
-      const char family_name[],
-      SkFontStyle style) const override {
+  sk_sp<SkTypeface> onLegacyMakeTypeface(const char family_name[],
+                                         SkFontStyle style) const override {
     return canonicalizer_->Canonicalize(
         delegate_->legacyMakeTypeface(family_name, style));
   }
@@ -256,8 +254,8 @@ class FreeTypeCanonicalFontMgr final : public SkFontMgr {
     if (style_set == nullptr) {
       return nullptr;
     }
-    return sk_make_sp<FreeTypeCanonicalFontStyleSet>(
-        std::move(style_set), canonicalizer_);
+    return sk_make_sp<FreeTypeCanonicalFontStyleSet>(std::move(style_set),
+                                                     canonicalizer_);
   }
 
   sk_sp<SkFontMgr> delegate_;

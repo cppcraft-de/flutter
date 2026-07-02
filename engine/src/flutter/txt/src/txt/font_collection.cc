@@ -57,7 +57,8 @@ void FontCollection::SetDynamicFontManager(sk_sp<SkFontMgr> font_manager) {
 }
 
 void FontCollection::SetTestFontManager(sk_sp<SkFontMgr> font_manager) {
-  test_font_manager_ = MakeFreeTypeCanonicalFontManager(std::move(font_manager));
+  test_font_manager_ =
+      MakeFreeTypeCanonicalFontManager(std::move(font_manager));
   skt_collection_.reset();
 }
 
