@@ -62,9 +62,7 @@ EXPECTED_REVISIONS = {
     'harfbuzz': EXPECTED_HARFBUZZ_REVISION,
 }
 
-STALE_GCLIENT_ENTRIES = (
-    "'engine/src/flutter/third_party/freetype2':",
-)
+STALE_GCLIENT_ENTRIES = ("'engine/src/flutter/third_party/freetype2':",)
 
 
 def run_git(repo_dir, args, *, check=True, capture_output=False):
@@ -249,8 +247,7 @@ def remove_stale_gclient_entries(flutter_dir):
 
   lines = gclient_entries.read_text(encoding='utf-8').splitlines(keepends=True)
   filtered_lines = [
-      line for line in lines
-      if not any(entry in line for entry in STALE_GCLIENT_ENTRIES)
+      line for line in lines if not any(entry in line for entry in STALE_GCLIENT_ENTRIES)
   ]
   if filtered_lines == lines:
     return
