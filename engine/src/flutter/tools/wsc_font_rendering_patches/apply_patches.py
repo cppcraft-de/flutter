@@ -15,13 +15,10 @@ EXPECTED_HARFBUZZ_REVISION = '6f4c5cec306d31e6822303f5ba248a14293d588e'
 
 PATCH_GROUP_ORDER = (
     'text_layout',
-    'diagnostics',
     'pdf',
 )
 
-GROUP_DEPENDENCIES = {
-    'diagnostics': ('text_layout',),
-}
+GROUP_DEPENDENCIES = {}
 
 GROUP_MARKERS = {
     'text_layout': {
@@ -36,11 +33,6 @@ GROUP_MARKERS = {
         ('skia', 'modules/skshaper/src/SkShaper_harfbuzz.cpp'): 'skhb_qt_style_script',
         ('skia', 'src/ports/SkFontHost_FreeType.cpp'): 'FT_Size_Metrics& sizeMetrics',
         ('harfbuzz', 'src/hb-ot-shape.cc'): 'plan.apply_fallback_kern = true;',
-    },
-    'diagnostics': {
-        ('skia', 'modules/skparagraph/src/ParagraphImpl.cpp'): ('getLegacyPairKerningX'),
-        ('skia', 'modules/skparagraph/include/Paragraph.h'): 'fRawShapePosition',
-        ('skia', 'modules/canvaskit/paragraph_bindings.cpp'): 'getGlyphDiagnostics',
     },
     'pdf': {
         ('skia', 'modules/canvaskit/canvaskit_bindings.cpp'): 'MakePdf(JSArray pictures',
@@ -304,10 +296,7 @@ def main(argv):
       nargs='+',
       default=['all'],
       metavar='GROUP',
-      help=(
-          'Patch groups to apply: all, text_layout, diagnostics, pdf. '
-          'Diagnostics includes text_layout.'
-      ),
+      help=('Patch groups to apply: all, text_layout, pdf.'),
   )
   args = parser.parse_args(argv[1:])
 

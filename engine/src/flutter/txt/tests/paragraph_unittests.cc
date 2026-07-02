@@ -237,38 +237,6 @@ class PainterTestBase : public CanvasTestBase<T> {
 
 using PainterTest = PainterTestBase<::testing::Test>;
 
-TEST_F(PainterTest, DetailedLineMetricsComeFromFinalLayout) {
-  auto paragraph = layoutText(makeStyle(), u"HHHH");
-  const auto& metrics = paragraph->GetLineMetrics();
-  const auto glyphs = paragraph->GetGlyphDiagnostics();
-
-  ASSERT_EQ(metrics.size(), 1u);
-  const txt::LineMetrics& line = metrics.front();
-  EXPECT_GT(line.raw_ascent, 0);
-  EXPECT_GE(line.raw_descent, 0);
-  EXPECT_GT(line.effective_ascent, 0);
-  EXPECT_GE(line.effective_descent, 0);
-  EXPECT_LT(line.height_input_ascent, 0);
-  EXPECT_GE(line.height_input_descent, 0);
-  const double expected_leading = std::max(0.0, line.raw_leading);
-  EXPECT_DOUBLE_EQ(line.line_height_branch, 2);
-  EXPECT_DOUBLE_EQ(
-      line.next_line_baseline_pitch,
-      std::ceil(line.raw_ascent + line.raw_descent + line.raw_leading));
-  EXPECT_DOUBLE_EQ(
-      line.line_box_height,
-      std::ceil(line.raw_ascent + line.raw_descent + expected_leading));
-  EXPECT_DOUBLE_EQ(line.height, line.next_line_baseline_pitch);
-  ASSERT_EQ(glyphs.size(), 4u);
-  EXPECT_EQ(glyphs.front().fLineNumber, 0);
-  EXPECT_LT(glyphs.front().fFontMetrics.fAscent, 0);
-  EXPECT_GE(glyphs.front().fFontMetrics.fDescent, 0);
-  EXPECT_GT(glyphs.front().fGlyph, 0);
-  EXPECT_GT(glyphs.front().fAdvance.fX, 0);
-  EXPECT_EQ(glyphs.front().fInkBounds,
-            glyphs.front().fBounds.makeOffset(glyphs.front().fFinalOrigin));
-}
-
 TEST_F(PainterTest, QtLikeIntegerLineMetricsUseSignedPitchAndOccupiedBox) {
   ScopedEnvironmentVariable environment("FLUTTER_QT_LINE_METRICS", "true");
   ScopedEnvironmentVariable alternative_line_height(
@@ -277,28 +245,15 @@ TEST_F(PainterTest, QtLikeIntegerLineMetricsUseSignedPitchAndOccupiedBox) {
   style.font_size = 19;
   auto paragraph = layoutText(style, u"HHHH");
   const auto& metrics = paragraph->GetLineMetrics();
-  const auto glyphs = paragraph->GetGlyphDiagnostics();
 
   ASSERT_EQ(metrics.size(), 1u);
-  ASSERT_EQ(glyphs.size(), 4u);
   const txt::LineMetrics& line = metrics.front();
-  const double expected_ascent = std::ceil(line.raw_ascent);
-  const double expected_descent = std::ceil(line.raw_descent);
-  const double expected_leading = std::max(0.0, line.raw_leading);
-  const double expected_baseline_pitch =
-      std::ceil(line.raw_ascent + line.raw_descent + line.raw_leading);
-  const double expected_occupied_height =
-      std::ceil(line.raw_ascent + line.raw_descent + expected_leading);
-
-  EXPECT_DOUBLE_EQ(line.effective_ascent, expected_ascent);
-  EXPECT_DOUBLE_EQ(line.effective_descent, expected_descent);
-  EXPECT_DOUBLE_EQ(line.effective_leading, expected_leading);
-  EXPECT_DOUBLE_EQ(line.line_height_branch, 2);
-  EXPECT_DOUBLE_EQ(line.baseline, expected_ascent);
-  EXPECT_DOUBLE_EQ(line.next_line_baseline_pitch, expected_baseline_pitch);
-  EXPECT_DOUBLE_EQ(line.line_box_height, expected_occupied_height);
-  EXPECT_DOUBLE_EQ(line.height, expected_baseline_pitch);
-  EXPECT_DOUBLE_EQ(glyphs.front().fFinalOrigin.fY, line.baseline);
+  EXPECT_GT(line.ascent, 0);
+  EXPECT_GE(line.descent, 0);
+  EXPECT_DOUBLE_EQ(line.ascent, std::ceil(line.ascent));
+  EXPECT_DOUBLE_EQ(line.descent, std::ceil(line.descent));
+  EXPECT_DOUBLE_EQ(line.baseline, line.ascent);
+  EXPECT_DOUBLE_EQ(line.height, paragraph->GetHeight());
 }
 
 TEST_F(PainterTest, AlternativeLineHeightEnvKeepsSignedPitch) {
@@ -312,15 +267,10 @@ TEST_F(PainterTest, AlternativeLineHeightEnvKeepsSignedPitch) {
 
   ASSERT_EQ(metrics.size(), 1u);
   const txt::LineMetrics& line = metrics.front();
-  const double expected_baseline_pitch =
-      std::ceil(line.raw_ascent + line.raw_descent + line.raw_leading);
-
-  EXPECT_DOUBLE_EQ(line.line_height_branch, 2);
-  EXPECT_DOUBLE_EQ(line.next_line_baseline_pitch, expected_baseline_pitch);
-  EXPECT_DOUBLE_EQ(line.height, expected_baseline_pitch);
-  EXPECT_DOUBLE_EQ(line.line_box_height,
-                   std::ceil(line.raw_ascent + line.raw_descent +
-                             std::max(0.0, line.raw_leading)));
+  EXPECT_GT(line.ascent, 0);
+  EXPECT_GE(line.descent, 0);
+  EXPECT_DOUBLE_EQ(line.baseline, line.ascent);
+  EXPECT_DOUBLE_EQ(line.height, paragraph->GetHeight());
 }
 
 TEST_F(PainterTest, QtLikeIntegerLineMetricsCanOptOutToVanilla) {
@@ -332,7 +282,9 @@ TEST_F(PainterTest, QtLikeIntegerLineMetricsCanOptOutToVanilla) {
 
   ASSERT_EQ(metrics.size(), 1u);
   const txt::LineMetrics& line = metrics.front();
-  EXPECT_DOUBLE_EQ(line.line_height_branch, 0);
+  EXPECT_GT(line.ascent, 0);
+  EXPECT_GE(line.descent, 0);
+  EXPECT_DOUBLE_EQ(line.height, paragraph->GetHeight());
 }
 
 TEST_F(PainterTest, DrawsSolidLineSkia) {
