@@ -35,6 +35,7 @@ GROUP_MARKERS = {
             ('SkFontHinting fHinting = SkFontHinting::kFull'),
         ('skia', 'include/core/SkTypeface.h'): 'getQtLikeGlyphAdvance',
         ('skia', 'modules/canvaskit/paragraph.js'): 'registerTypeface = function(typeface, family)',
+        ('skia', 'modules/skparagraph/include/FontCollection.h'): 'clearFontLookupCaches',
         ('skia', 'modules/skshaper/src/SkShaper_harfbuzz.cpp'): 'skhb_qt_style_script',
         ('skia', 'src/ports/SkFontHost_FreeType.cpp'): 'FT_Size_Metrics& sizeMetrics',
         ('skia', 'src/ports/SkScalerContext_win_dw.cpp'): 'qtLineHeight',
@@ -46,6 +47,7 @@ GROUP_MARKERS = {
         ('skia', 'modules/skparagraph/include/Paragraph.h'): 'fAdvanceProbeBackend',
         ('skia', 'modules/canvaskit/paragraph_bindings.cpp'): 'fPlatformGdiCompatibleAdvance',
         ('skia', 'include/core/SkTypeface.h'): 'fGdiCompatibleAdvance',
+        ('skia', 'src/ports/SkTypeface_FreeType.h'): 'fQtLikeAdvanceCache',
     },
     'freetype': {('freetype2', 'BUILD.gn'): 'qt_compatible_freetype_dir = "../freetype_2.13.0"',},
     'pdf': {

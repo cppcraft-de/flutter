@@ -1,0 +1,74 @@
+diff --git a/modules/canvaskit/externs.js b/modules/canvaskit/externs.js
+index bb9671ee0a..2dc939bef9 100644
+--- a/modules/canvaskit/externs.js
++++ b/modules/canvaskit/externs.js
+@@ -492,6 +492,7 @@ var CanvasKit = {
+     Make: function() {},
+     setDefaultFontManager: function() {},
+     enableFontFallback: function() {},
++    clearFontLookupCaches: function() {},
+   },
+ 
+   Image: {
+diff --git a/modules/canvaskit/npm_build/types/index.d.ts b/modules/canvaskit/npm_build/types/index.d.ts
+index e3f3ebd0e7..37363e629f 100644
+--- a/modules/canvaskit/npm_build/types/index.d.ts
++++ b/modules/canvaskit/npm_build/types/index.d.ts
+@@ -3334,6 +3334,11 @@ export interface FontCollection extends EmbindObject<"FontCollection"> {
+      * Set the default provider used to locate fonts.
+      */
+     setDefaultFontManager(fontManager: TypefaceFontProvider | null): void;
++
++    /**
++     * Clear cached family and paragraph lookups after registering fonts.
++     */
++    clearFontLookupCaches(): void;
+ }
+ 
+ export interface URange {
+diff --git a/modules/canvaskit/paragraph_bindings.cpp b/modules/canvaskit/paragraph_bindings.cpp
+index f5d80b3476..bcff594a64 100644
+--- a/modules/canvaskit/paragraph_bindings.cpp
++++ b/modules/canvaskit/paragraph_bindings.cpp
+@@ -779,7 +779,8 @@ EMSCRIPTEN_BINDINGS(Paragraph) {
+                                                               const sk_sp<para::TypefaceFontProvider>& fontManager) {
+         self.setDefaultFontManager(fontManager);
+       }), allow_raw_pointers())
+-      .function("enableFontFallback", &para::FontCollection::enableFontFallback);
++      .function("enableFontFallback", &para::FontCollection::enableFontFallback)
++      .function("clearFontLookupCaches", &para::FontCollection::clearFontLookupCaches);
+ 
+     // These value objects make it easier to send data across the wire.
+     value_object<para::PositionWithAffinity>("PositionWithAffinity")
+diff --git a/modules/skparagraph/include/FontCollection.h b/modules/skparagraph/include/FontCollection.h
+index ce297c224f..89c5277139 100644
+--- a/modules/skparagraph/include/FontCollection.h
++++ b/modules/skparagraph/include/FontCollection.h
+@@ -48,6 +48,7 @@ public:
+ 
+     ParagraphCache* getParagraphCache() { return &fParagraphCache; }
+ 
++    void clearFontLookupCaches();
+     void clearCaches();
+ 
+ private:
+diff --git a/modules/skparagraph/src/FontCollection.cpp b/modules/skparagraph/src/FontCollection.cpp
+index c8cc98b99d..84ec5dd863 100644
+--- a/modules/skparagraph/src/FontCollection.cpp
++++ b/modules/skparagraph/src/FontCollection.cpp
+@@ -285,10 +285,14 @@ sk_sp<SkTypeface> FontCollection::cloneTypeface(const sk_sp<SkTypeface>& typefac
+ void FontCollection::disableFontFallback() { fEnableFontFallback = false; }
+ void FontCollection::enableFontFallback() { fEnableFontFallback = true; }
+ 
+-void FontCollection::clearCaches() {
++void FontCollection::clearFontLookupCaches() {
+     fParagraphCache.reset();
+     fFaceCache->fTypefaces.reset();
+     fVariationCache->fTypefaces.reset();
++}
++
++void FontCollection::clearCaches() {
++    this->clearFontLookupCaches();
+     SkShapers::HB::PurgeCaches();
+ }
+ 

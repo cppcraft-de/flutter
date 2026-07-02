@@ -2171,6 +2171,7 @@ extension type TypefaceFontProvider(JSObject _) implements SkFontMgr {
 extension type SkFontCollection(JSObject _) implements JSObject {
   external void enableFontFallback();
   external void setDefaultFontManager(TypefaceFontProvider? fontManager);
+  external void clearFontLookupCaches();
   external void delete();
 }
 
