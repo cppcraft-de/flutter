@@ -220,7 +220,7 @@ def apply_selected_patches(repo_dirs, patch_dir, patch_files):
   return True
 
 
-def reset_patch_owned_repos(repo_dirs, patch_files):
+def reset_patch_owned_repos(repo_dirs, patch_files, *, strict_unknown_dirty):
   allowed_paths_by_repo = {}
   for repo_name, patch_file in patch_files:
     allowed_paths_by_repo.setdefault(repo_name, set()).update(patch_touched_paths(patch_file))
@@ -242,8 +242,16 @@ def reset_patch_owned_repos(repo_dirs, patch_files):
       print(f'{repo_name} checkout has non-WSC changes:', file=sys.stderr)
       for path in unknown:
         print(f'  {path}', file=sys.stderr)
-      print('Resolve those nested checkout changes before running gclient sync.', file=sys.stderr)
-      return False
+      if strict_unknown_dirty:
+        print('Resolve those nested checkout changes before running gclient sync.', file=sys.stderr)
+        return False
+
+      print(
+          'Leaving this checkout dirty so gclient can report the managed-dependency '
+          'state normally.',
+          file=sys.stderr,
+      )
+      continue
 
     print(f'Resetting {repo_name} WSC patch-owned changes before sync.')
     run_git(repo_dir, ['reset', '--hard', 'HEAD'])
@@ -290,6 +298,11 @@ def main(argv):
       help='Reset WSC patch-owned nested checkout changes before gclient sync.',
   )
   parser.add_argument(
+      '--gclient-pre-deps-hook',
+      action='store_true',
+      help='Run in best-effort mode for gclient pre_deps_hooks.',
+  )
+  parser.add_argument(
       '--groups',
       nargs='+',
       default=['all'],
@@ -334,7 +347,11 @@ def main(argv):
     return 0
 
   if args.reverse:
-    if not reset_patch_owned_repos(repo_dirs, patch_files):
+    if not reset_patch_owned_repos(
+        repo_dirs,
+        patch_files,
+        strict_unknown_dirty=not args.gclient_pre_deps_hook,
+    ):
       return 1
     print('Selected WSC font-rendering patches are reset for sync.')
   else:

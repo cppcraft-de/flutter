@@ -849,6 +849,7 @@ pre_deps_hooks = [
       'python3',
       'engine/src/flutter/tools/wsc_font_rendering_patches/apply_patches.py',
       '--reverse',
+      '--gclient-pre-deps-hook',
     ],
   },
 ]
