@@ -18,11 +18,10 @@ index 84afa4b32e..ba3982d507 100644
      AutoFTAccess fta(this);
      FT_Face face = fta.face();
      if (!face || !FT_IS_SCALABLE(face)) {
-@@ -1024,9 +1033,14 @@ bool SkTypeface_FreeType::onGetQtLikeGlyphAdvanceDiagnostics(
+@@ -1024,9 +1033,13 @@ bool SkTypeface_FreeType::onGetQtLikeGlyphAdvanceDiagnostics(
      diagnostics->fFaceFlags = static_cast<int>(face->face_flags);
      diagnostics->fStyleFlags = static_cast<int>(face->style_flags);
      diagnostics->fNumGlyphs = static_cast<int>(face->num_glyphs);
-+    diagnostics->fDesignAdvance = SkFDot6ToScalar(qtLinearAdvance26Dot6);
  
      FT_Activate_Size(oldSize);
      FT_Set_Transform(face, &oldTransform, &oldDelta);
