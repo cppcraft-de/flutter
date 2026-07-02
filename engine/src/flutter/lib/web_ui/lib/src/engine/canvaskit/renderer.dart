@@ -157,6 +157,48 @@ class CanvasKitRenderer extends Renderer {
   ui.SceneBuilder createSceneBuilder() => LayerSceneBuilder();
 
   @override
+  Uint8List createPdfDocument(List<ui.PdfPage> pages, {required ui.Size pageSize}) {
+    final pictures = <SkPicture>[];
+    final flattenedPictures = <ui.Picture>[];
+    final sourceSizes = Float32List(pages.length * 2);
+
+    try {
+      for (var i = 0; i < pages.length; i += 1) {
+        final ui.PdfPage page = pages[i];
+        final ui.Scene scene = page.scene;
+        if (scene is! LayerScene) {
+          throw UnsupportedError('PDF generation requires Flutter web scenes.');
+        }
+
+        final ui.Picture picture = scene.layerTree.flatten(page.size);
+        flattenedPictures.add(picture);
+        if (picture is! CkPicture) {
+          throw UnsupportedError('PDF generation is only supported by CanvasKit.');
+        }
+
+        pictures.add(picture.skiaObject);
+        sourceSizes[i * 2] = page.size.width;
+        sourceSizes[i * 2 + 1] = page.size.height;
+      }
+
+      final Uint8List? bytes = canvasKit.MakePdf(
+        pictures,
+        sourceSizes,
+        pageSize.width,
+        pageSize.height,
+      );
+      if (bytes == null) {
+        throw StateError('CanvasKit PDF generation failed.');
+      }
+      return bytes;
+    } finally {
+      for (final picture in flattenedPictures) {
+        picture.dispose();
+      }
+    }
+  }
+
+  @override
   ui.ImageFilter createBlurImageFilter({
     double sigmaX = 0.0,
     double sigmaY = 0.0,

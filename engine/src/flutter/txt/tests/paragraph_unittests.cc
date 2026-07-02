@@ -2,7 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <algorithm>
+#include <cmath>
+#include <cstdlib>
 #include <memory>
+#include <optional>
 #include "display_list/dl_color.h"
 #include "display_list/dl_paint.h"
 #include "display_list/dl_tile_mode.h"
@@ -18,6 +22,41 @@
 
 namespace flutter {
 namespace testing {
+
+namespace {
+
+class ScopedEnvironmentVariable {
+ public:
+  ScopedEnvironmentVariable(const char* key, const char* value) : key_(key) {
+    const char* original = std::getenv(key);
+    if (original != nullptr) {
+      original_ = original;
+    }
+    Set(value);
+  }
+
+  ~ScopedEnvironmentVariable() {
+    Set(original_ ? original_->c_str() : nullptr);
+  }
+
+ private:
+  void Set(const char* value) {
+#ifdef _WIN32
+    _putenv_s(key_.c_str(), value == nullptr ? "" : value);
+#else
+    if (value == nullptr) {
+      unsetenv(key_.c_str());
+    } else {
+      setenv(key_.c_str(), value, 1);
+    }
+#endif
+  }
+
+  std::string key_;
+  std::optional<std::string> original_;
+};
+
+}  // namespace
 
 [[maybe_unused]]
 static const std::string kEmojiFontFile =
@@ -154,6 +193,18 @@ class PainterTestBase : public CanvasTestBase<T> {
     return builder.Build();
   }
 
+  std::unique_ptr<txt::Paragraph> layoutText(const txt::TextStyle& style,
+                                             const std::u16string& text) const {
+    auto pb_skia = makeParagraphBuilder();
+    pb_skia.PushStyle(style);
+    pb_skia.AddText(text);
+    pb_skia.Pop();
+
+    auto paragraph = pb_skia.Build();
+    paragraph->Layout(10000);
+    return paragraph;
+  }
+
  private:
   std::shared_ptr<txt::FontCollection> makeFontCollection() const {
     auto f_collection = std::make_shared<txt::FontCollection>();
@@ -185,6 +236,104 @@ class PainterTestBase : public CanvasTestBase<T> {
 };
 
 using PainterTest = PainterTestBase<::testing::Test>;
+
+TEST_F(PainterTest, DetailedLineMetricsComeFromFinalLayout) {
+  auto paragraph = layoutText(makeStyle(), u"HHHH");
+  const auto& metrics = paragraph->GetLineMetrics();
+  const auto glyphs = paragraph->GetGlyphDiagnostics();
+
+  ASSERT_EQ(metrics.size(), 1u);
+  const txt::LineMetrics& line = metrics.front();
+  EXPECT_GT(line.raw_ascent, 0);
+  EXPECT_GE(line.raw_descent, 0);
+  EXPECT_GT(line.effective_ascent, 0);
+  EXPECT_GE(line.effective_descent, 0);
+  EXPECT_LT(line.height_input_ascent, 0);
+  EXPECT_GE(line.height_input_descent, 0);
+  const double expected_leading = std::max(0.0, line.raw_leading);
+  EXPECT_DOUBLE_EQ(line.line_height_branch, 2);
+  EXPECT_DOUBLE_EQ(
+      line.next_line_baseline_pitch,
+      std::ceil(line.raw_ascent + line.raw_descent + line.raw_leading));
+  EXPECT_DOUBLE_EQ(
+      line.line_box_height,
+      std::ceil(line.raw_ascent + line.raw_descent + expected_leading));
+  EXPECT_DOUBLE_EQ(line.height, line.next_line_baseline_pitch);
+  ASSERT_EQ(glyphs.size(), 4u);
+  EXPECT_EQ(glyphs.front().fLineNumber, 0);
+  EXPECT_LT(glyphs.front().fFontMetrics.fAscent, 0);
+  EXPECT_GE(glyphs.front().fFontMetrics.fDescent, 0);
+  EXPECT_GT(glyphs.front().fGlyph, 0);
+  EXPECT_GT(glyphs.front().fAdvance.fX, 0);
+  EXPECT_EQ(glyphs.front().fInkBounds,
+            glyphs.front().fBounds.makeOffset(glyphs.front().fFinalOrigin));
+}
+
+TEST_F(PainterTest, QtLikeIntegerLineMetricsUseSignedPitchAndOccupiedBox) {
+  ScopedEnvironmentVariable environment("FLUTTER_QT_LINE_METRICS", "true");
+  ScopedEnvironmentVariable alternative_line_height(
+      "FLUTTER_USE_ALTERNATIVE_LINE_HEIGHT", nullptr);
+  auto style = makeStyle();
+  style.font_size = 19;
+  auto paragraph = layoutText(style, u"HHHH");
+  const auto& metrics = paragraph->GetLineMetrics();
+  const auto glyphs = paragraph->GetGlyphDiagnostics();
+
+  ASSERT_EQ(metrics.size(), 1u);
+  ASSERT_EQ(glyphs.size(), 4u);
+  const txt::LineMetrics& line = metrics.front();
+  const double expected_ascent = std::ceil(line.raw_ascent);
+  const double expected_descent = std::ceil(line.raw_descent);
+  const double expected_leading = std::max(0.0, line.raw_leading);
+  const double expected_baseline_pitch =
+      std::ceil(line.raw_ascent + line.raw_descent + line.raw_leading);
+  const double expected_occupied_height =
+      std::ceil(line.raw_ascent + line.raw_descent + expected_leading);
+
+  EXPECT_DOUBLE_EQ(line.effective_ascent, expected_ascent);
+  EXPECT_DOUBLE_EQ(line.effective_descent, expected_descent);
+  EXPECT_DOUBLE_EQ(line.effective_leading, expected_leading);
+  EXPECT_DOUBLE_EQ(line.line_height_branch, 2);
+  EXPECT_DOUBLE_EQ(line.baseline, expected_ascent);
+  EXPECT_DOUBLE_EQ(line.next_line_baseline_pitch, expected_baseline_pitch);
+  EXPECT_DOUBLE_EQ(line.line_box_height, expected_occupied_height);
+  EXPECT_DOUBLE_EQ(line.height, expected_baseline_pitch);
+  EXPECT_DOUBLE_EQ(glyphs.front().fFinalOrigin.fY, line.baseline);
+}
+
+TEST_F(PainterTest, AlternativeLineHeightEnvKeepsSignedPitch) {
+  ScopedEnvironmentVariable environment("FLUTTER_QT_LINE_METRICS", "true");
+  ScopedEnvironmentVariable alternative_line_height(
+      "FLUTTER_USE_ALTERNATIVE_LINE_HEIGHT", "true");
+  auto style = makeStyle();
+  style.font_size = 19;
+  auto paragraph = layoutText(style, u"HHHH");
+  const auto& metrics = paragraph->GetLineMetrics();
+
+  ASSERT_EQ(metrics.size(), 1u);
+  const txt::LineMetrics& line = metrics.front();
+  const double expected_baseline_pitch =
+      std::ceil(line.raw_ascent + line.raw_descent + line.raw_leading);
+
+  EXPECT_DOUBLE_EQ(line.line_height_branch, 2);
+  EXPECT_DOUBLE_EQ(line.next_line_baseline_pitch, expected_baseline_pitch);
+  EXPECT_DOUBLE_EQ(line.height, expected_baseline_pitch);
+  EXPECT_DOUBLE_EQ(line.line_box_height,
+                   std::ceil(line.raw_ascent + line.raw_descent +
+                             std::max(0.0, line.raw_leading)));
+}
+
+TEST_F(PainterTest, QtLikeIntegerLineMetricsCanOptOutToVanilla) {
+  ScopedEnvironmentVariable environment("FLUTTER_QT_LINE_METRICS", "false");
+  auto style = makeStyle();
+  style.font_size = 19;
+  auto paragraph = layoutText(style, u"HHHH");
+  const auto& metrics = paragraph->GetLineMetrics();
+
+  ASSERT_EQ(metrics.size(), 1u);
+  const txt::LineMetrics& line = metrics.front();
+  EXPECT_DOUBLE_EQ(line.line_height_branch, 0);
+}
 
 TEST_F(PainterTest, DrawsSolidLineSkia) {
   PretendImpellerIsEnabled(false);

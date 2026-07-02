@@ -47,6 +47,8 @@ source_set("txt") {
     "src/txt/font_features.h",
     "src/txt/font_style.h",
     "src/txt/font_weight.h",
+    "src/txt/freetype_font_manager.cc",
+    "src/txt/freetype_font_manager.h",
     "src/txt/line_metrics.h",
     "src/txt/paragraph.h",
     "src/txt/paragraph_builder.cc",

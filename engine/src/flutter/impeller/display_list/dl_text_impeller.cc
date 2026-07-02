@@ -15,11 +15,17 @@ std::shared_ptr<DlTextImpeller> DlTextImpeller::Make(
 
 std::shared_ptr<DlTextImpeller> DlTextImpeller::MakeFromBlob(
     const sk_sp<SkTextBlob>& blob) {
-  return DlTextImpeller::Make(impeller::MakeTextFrameFromTextBlobSkia(blob));
+  return std::make_shared<DlTextImpeller>(
+      impeller::MakeTextFrameFromTextBlobSkia(blob), blob);
 }
 
 DlTextImpeller::DlTextImpeller(
-    const std::shared_ptr<impeller::TextFrame>& frame)
-    : frame_(frame) {}
+    const std::shared_ptr<impeller::TextFrame>& frame,
+    sk_sp<SkTextBlob> blob)
+    : frame_(frame), blob_(std::move(blob)) {}
+
+fml::StatusOr<DlPath> DlTextImpeller::GetPath() const {
+  return frame_->GetPath();
+}
 
 }  // namespace flutter

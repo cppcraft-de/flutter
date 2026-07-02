@@ -657,6 +657,8 @@ abstract class Paragraph {
   TextRange getLineBoundary(TextPosition position);
   List<TextBox> getBoxesForPlaceholders();
   List<LineMetrics> computeLineMetrics();
+  Float64List computeDetailedLineMetricsForDiagnostics();
+  List<Object?> computeGlyphMetricsForDiagnostics();
   LineMetrics? getLineMetricsAt(int lineNumber);
   int get numberOfLines;
   int? getLineNumberAt(int codeUnitOffset);

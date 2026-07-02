@@ -2,7 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'dart:ui' as ui show BoxHeightStyle, BoxWidthStyle, Paragraph, TextBox;
+import 'dart:ui'
+    as ui
+    show BoxHeightStyle, BoxWidthStyle, GlyphInfo, LineMetrics, Paragraph, TextBox;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
@@ -123,6 +125,46 @@ void main() {
 
     final double height5 = paragraph.getFullHeightForCaret(const TextPosition(offset: 5));
     expect(height5, equals(10.0));
+  });
+
+  test('read-only paragraph diagnostics expose the painted layout', () {
+    final paragraph = RenderParagraph(
+      const TextSpan(text: 'AB', style: TextStyle(fontSize: 20.0)),
+      textDirection: TextDirection.ltr,
+    );
+    layout(paragraph);
+
+    final List<ui.LineMetrics> lines = paragraph.computeLineMetricsForDiagnostics();
+    final List<DiagnosticLineMetrics> detailedLines = paragraph
+        .computeDetailedLineMetricsForDiagnostics();
+    final List<DiagnosticGlyphMetrics> glyphMetrics = paragraph.computeGlyphMetricsForDiagnostics();
+    final ui.GlyphInfo? glyph = paragraph.getGlyphInfoAtForDiagnostics(0);
+
+    expect(lines, hasLength(1));
+    expect(detailedLines, hasLength(1));
+    expect(detailedLines.single.lineMetrics.lineNumber, lines.single.lineNumber);
+    expect(detailedLines.single.rawAscent, greaterThan(0.0));
+    expect(detailedLines.single.rawDescent, greaterThanOrEqualTo(0.0));
+    expect(detailedLines.single.heightInputAscent, lessThan(0.0));
+    expect(detailedLines.single.heightInputDescent, greaterThanOrEqualTo(0.0));
+    expect(detailedLines.single.lineHeightBranch, 0);
+    expect(detailedLines.single.nextLineBaselinePitch, detailedLines.single.lineBoxHeight);
+    expect(lines.single.height, greaterThan(0.0));
+    expect(glyphMetrics, hasLength(2));
+    expect(glyphMetrics.first.lineNumber, 0);
+    expect(glyphMetrics.first.fontFamily, isNotEmpty);
+    expect(glyphMetrics.first.fontMetricsAscent, lessThan(0.0));
+    expect(glyphMetrics.first.fontMetricsDescent, greaterThanOrEqualTo(0.0));
+    expect(glyphMetrics.first.glyphId, greaterThan(0));
+    expect(glyphMetrics.first.advance.dx, greaterThan(0.0));
+    expect(
+      glyphMetrics.first.inkBounds,
+      glyphMetrics.first.bounds.shift(glyphMetrics.first.finalOrigin),
+    );
+    expect(lines.single.baseline, greaterThan(0.0));
+    expect(glyph, isNotNull);
+    expect(glyph!.graphemeClusterCodeUnitRange, const TextRange(start: 0, end: 1));
+    expect(glyph.graphemeClusterLayoutBounds.width, greaterThan(0.0));
   });
 
   test('getPositionForOffset control test', () {

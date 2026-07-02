@@ -1,0 +1,34 @@
+diff --git a/modules/skshaper/src/SkShaper_harfbuzz.cpp b/modules/skshaper/src/SkShaper_harfbuzz.cpp
+index 273e97f3eb..af8969c28c 100644
+--- a/modules/skshaper/src/SkShaper_harfbuzz.cpp
++++ b/modules/skshaper/src/SkShaper_harfbuzz.cpp
+@@ -185,6 +185,20 @@ hb_position_t skhb_glyph_h_kerning(hb_font_t* hb_font,
+     return skhb_position(kerning);
+ }
+ 
++hb_script_t skhb_qt_style_script(SkFourByteTag scriptTag) {
++    hb_script_t hbScript = hb_script_from_iso15924_tag((hb_tag_t)scriptTag);
++    switch (hbScript) {
++        case HB_SCRIPT_LATIN:
++        case HB_SCRIPT_HIRAGANA:
++        case HB_SCRIPT_KATAKANA:
++        case HB_SCRIPT_BOPOMOFO:
++        case HB_SCRIPT_HAN:
++            return HB_SCRIPT_COMMON;
++        default:
++            return hbScript;
++    }
++}
++
+ void skhb_glyph_h_advances(hb_font_t* hb_font,
+                            void* font_data,
+                            unsigned count,
+@@ -1384,7 +1398,7 @@ ShapedRun ShaperHarfBuzz::shape(char const * const utf8,
+ 
+     hb_direction_t direction = is_LTR(bidi.currentLevel()) ? HB_DIRECTION_LTR:HB_DIRECTION_RTL;
+     hb_buffer_set_direction(buffer, direction);
+-    hb_buffer_set_script(buffer, hb_script_from_iso15924_tag((hb_tag_t)script.currentScript()));
++    hb_buffer_set_script(buffer, skhb_qt_style_script(script.currentScript()));
+     // Buffers with HB_LANGUAGE_INVALID race since hb_language_get_default is not thread safe.
+     // The user must provide a language, but may provide data hb_language_from_string cannot use.
+     // Use "und" for the undefined language in this case (RFC5646 4.1 5).

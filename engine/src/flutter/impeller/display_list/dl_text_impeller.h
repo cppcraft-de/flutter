@@ -7,8 +7,7 @@
 
 #include "flutter/display_list/dl_text.h"
 #include "flutter/impeller/typographer/text_frame.h"
-
-class SkTextBlob;
+#include "third_party/skia/include/core/SkTextBlob.h"
 
 namespace flutter {
 class DlTextImpeller : public DlText {
@@ -20,16 +19,22 @@ class DlTextImpeller : public DlText {
 
   ~DlTextImpeller() = default;
 
-  explicit DlTextImpeller(const std::shared_ptr<impeller::TextFrame>& frame);
+  explicit DlTextImpeller(const std::shared_ptr<impeller::TextFrame>& frame,
+                          sk_sp<SkTextBlob> blob = nullptr);
 
-  DlRect GetBounds() const { return frame_->GetBounds(); }
+  DlRect GetBounds() const override { return frame_->GetBounds(); }
 
-  std::shared_ptr<impeller::TextFrame> GetTextFrame() const { return frame_; }
+  std::shared_ptr<impeller::TextFrame> GetTextFrame() const override {
+    return frame_;
+  }
 
-  const SkTextBlob* GetTextBlob() const { return nullptr; }
+  const SkTextBlob* GetTextBlob() const override { return blob_.get(); }
+
+  fml::StatusOr<DlPath> GetPath() const override;
 
  private:
   std::shared_ptr<impeller::TextFrame> frame_;
+  sk_sp<SkTextBlob> blob_;
 
   FML_DISALLOW_COPY_AND_ASSIGN(DlTextImpeller);
 };

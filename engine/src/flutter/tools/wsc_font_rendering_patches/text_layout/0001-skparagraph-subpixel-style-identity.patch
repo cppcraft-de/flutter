@@ -1,0 +1,38 @@
+diff --git a/modules/skparagraph/src/TextStyle.cpp b/modules/skparagraph/src/TextStyle.cpp
+index de2dee3116..6e73f8c16b 100644
+--- a/modules/skparagraph/src/TextStyle.cpp
++++ b/modules/skparagraph/src/TextStyle.cpp
+@@ -23,6 +23,7 @@ TextStyle TextStyle::cloneForPlaceholder() {
+     result.fIsPlaceholder = true;
+     result.fFontFeatures = fFontFeatures;
+     result.fHalfLeading = fHalfLeading;
++    result.fSubpixel = fSubpixel;
+     result.fBaselineShift = fBaselineShift;
+     result.fFontArguments = fFontArguments;
+     return result;
+@@ -43,6 +44,9 @@ bool TextStyle::equals(const TextStyle& other) const {
+     if (!(fFontStyle == other.fFontStyle)) {
+         return false;
+     }
++    if (fSubpixel != other.fSubpixel) {
++        return false;
++    }
+     if (fFontFamilies != other.fFontFamilies) {
+         return false;
+     }
+@@ -103,6 +107,7 @@ bool TextStyle::equalsByFonts(const TextStyle& that) const {
+ 
+     return !fIsPlaceholder && !that.fIsPlaceholder &&
+            fFontStyle == that.fFontStyle &&
++           fSubpixel == that.fSubpixel &&
+            fFontFamilies == that.fFontFamilies &&
+            fFontFeatures == that.fFontFeatures &&
+            fFontArguments == that.getFontArguments() &&
+@@ -154,6 +159,7 @@ bool TextStyle::matchOneAttribute(StyleType styleType, const TextStyle& other) c
+                    fLocale == other.fLocale &&
+                    fFontFamilies == other.fFontFamilies &&
+                    fFontSize == other.fFontSize &&
++                   fSubpixel == other.fSubpixel &&
+                    fHeight == other.fHeight &&
+                    fHalfLeading == other.fHalfLeading &&
+                    fBaselineShift == other.fBaselineShift &&

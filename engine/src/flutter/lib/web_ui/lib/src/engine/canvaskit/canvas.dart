@@ -12,6 +12,25 @@ import 'package:ui/ui.dart' as ui;
 /// every time we need it.
 final SkClipOp _clipOpIntersect = canvasKit.ClipOp.Intersect;
 
+double _ckCanvasProfileNow() => domWindow.performance.now();
+
+String _ckCanvasProfileMs(double value) => value.toStringAsFixed(2);
+
+int _ckParagraphPaintCount = 0;
+double _ckParagraphPaintMs = 0.0;
+
+void _recordCkParagraphPaint(double elapsedMs) {
+  _ckParagraphPaintCount += 1;
+  _ckParagraphPaintMs += elapsedMs;
+  if (elapsedMs < 4.0 && _ckParagraphPaintCount % 100 != 0) {
+    return;
+  }
+  domWindow.console.debug(
+    '[CanvasKitTextProfile] phase=paint last=${_ckCanvasProfileMs(elapsedMs)}ms '
+    'paints=$_ckParagraphPaintCount paintTotal=${_ckCanvasProfileMs(_ckParagraphPaintMs)}ms',
+  );
+}
+
 /// A Dart wrapper around Skia's [SkCanvas].
 ///
 /// This is intentionally not memory-managing the underlying [SkCanvas]. See
@@ -213,7 +232,9 @@ class CkCanvas implements LayerCanvas {
   void drawParagraph(ui.Paragraph paragraph, ui.Offset offset) {
     assert(offsetIsValid(offset));
     if (paragraph is CkParagraph) {
+      final double profileStart = _ckCanvasProfileNow();
       skCanvas.drawParagraph(paragraph.skiaObject, offset.dx, offset.dy);
+      _recordCkParagraphPaint(domWindow.performance.now() - profileStart);
     } else if (paragraph is WebParagraph) {
       paragraph.paint(this, offset);
     } else {

@@ -105,6 +105,20 @@ extension type CanvasKit(JSObject _) implements JSObject {
   external SkSurface MakeWebGLCanvasSurface(DomHTMLCanvasElement canvas);
   external SkSurface MakeSurface(double width, double height);
 
+  @JS('MakePdf')
+  external JSUint8Array? _MakePdf(
+    JSArray<SkPicture> pictures,
+    JSFloat32Array sourceSizes,
+    double pageWidth,
+    double pageHeight,
+  );
+  Uint8List? MakePdf(
+    List<SkPicture> pictures,
+    Float32List sourceSizes,
+    double pageWidth,
+    double pageHeight,
+  ) => _MakePdf(pictures.toJS, sourceSizes.toJS, pageWidth, pageHeight)?.toDart;
+
   @JS('getDataBytes')
   external JSUint8Array _getDataBytes(SkData skData);
   Uint8List getDataBytes(SkData skData) => _getDataBytes(skData).toDart;
@@ -2148,11 +2162,16 @@ extension type TypefaceFontProvider(JSObject _) implements SkFontMgr {
   @JS('registerFont')
   external void _registerFont(JSUint8Array font, String family);
   void registerFont(Uint8List font, String family) => _registerFont(font.toJS, family);
+
+  @JS('registerTypeface')
+  external void _registerTypeface(SkTypeface typeface, String family);
+  void registerTypeface(SkTypeface typeface, String family) => _registerTypeface(typeface, family);
 }
 
 extension type SkFontCollection(JSObject _) implements JSObject {
   external void enableFontFallback();
   external void setDefaultFontManager(TypefaceFontProvider? fontManager);
+  external void clearFontLookupCaches();
   external void delete();
 }
 
@@ -2169,6 +2188,19 @@ extension type SkLineMetrics(JSObject _) implements JSObject {
   external double get left;
   external double get baseline;
   external double get lineNumber;
+  external double get rawAscent;
+  external double get rawDescent;
+  external double get rawLeading;
+  external double get effectiveAscent;
+  external double get effectiveDescent;
+  external double get effectiveLeading;
+  external double get heightInputAscent;
+  external double get heightInputDescent;
+  external double get heightInputLeading;
+  external double get heightInputRawLeading;
+  external double get lineHeightBranch;
+  external double get nextLineBaselinePitch;
+  external double get lineBoxHeight;
 }
 
 extension type SkGlyphClusterInfo(JSObject _) implements JSObject {
@@ -2215,6 +2247,13 @@ extension type SkParagraph(JSObject _) implements JSObject {
   @JS('getLineMetrics')
   external JSArray<JSAny?> _getLineMetrics();
   List<SkLineMetrics> getLineMetrics() => _getLineMetrics().toDart.cast<SkLineMetrics>();
+
+  @JS('getGlyphDiagnostics')
+  external JSArray<JSAny?> _getGlyphDiagnostics();
+  List<Object?> getGlyphDiagnostics() => <Object?>[
+    for (final JSAny? record in _getGlyphDiagnostics().toDart)
+      if (record != null) record.dartify(),
+  ];
 
   external SkLineMetrics? getLineMetricsAt(double index);
   external double getNumberOfLines();

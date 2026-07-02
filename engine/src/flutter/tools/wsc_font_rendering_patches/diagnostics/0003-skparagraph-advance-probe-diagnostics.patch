@@ -1,0 +1,267 @@
+diff --git a/include/core/SkTypeface.h b/include/core/SkTypeface.h
+index 80ac91150e..9b1aab9d5d 100644
+--- a/include/core/SkTypeface.h
++++ b/include/core/SkTypeface.h
+@@ -254,8 +254,26 @@ public:
+ 
+     struct QtLikeGlyphAdvanceDiagnostics {
+         bool fAvailable = false;
++        // 1 = FreeType, 2 = CoreText, 3 = DirectWrite. 0 means unavailable.
++        int fBackend = 0;
+         SkScalar fAdvance = 0;
++        SkScalar fAdvance26Dot6 = 0;
++        SkScalar fLinearHoriAdvance16Dot16 = 0;
++        SkScalar fMetricsHoriAdvance26Dot6 = 0;
++        int fLoadFlags = 0;
++        int fUnitsPerEm = 0;
++        int fXppem = 0;
++        int fYppem = 0;
++        SkScalar fXScale = 0;
++        SkScalar fYScale = 0;
++        int fFaceIndex = 0;
++        int fFaceFlags = 0;
++        int fStyleFlags = 0;
++        int fNumGlyphs = 0;
+         SkScalar fDesignAdvance = 0;
++        SkScalar fGdiCompatibleAdvance = 0;
++        int fDesignUnitsPerEm = 0;
++        int fMeasuringMode = 0;
+     };
+ 
+     bool getQtLikeGlyphAdvance(SkGlyphID glyph, SkScalar textSize, SkScalar* advance) const;
+diff --git a/modules/canvaskit/paragraph_bindings.cpp b/modules/canvaskit/paragraph_bindings.cpp
+index b73d00bb50..70c4e75744 100644
+--- a/modules/canvaskit/paragraph_bindings.cpp
++++ b/modules/canvaskit/paragraph_bindings.cpp
+@@ -471,6 +471,30 @@ JSArray GetGlyphDiagnostics(para::Paragraph& self) {
+         record.call<void>("push", std::string(glyph.fLanguage.c_str()));
+         add_number(glyph.fShapingFeatureCount);
+         add_number(glyph.fShapingFeatureMask);
++        add_number(glyph.fAdvanceProbeBackend);
++        add_number(glyph.fQtLikeAdvance26Dot6);
++        add_number(glyph.fQtLikeLinearHoriAdvance16Dot16);
++        add_number(glyph.fQtLikeMetricsHoriAdvance26Dot6);
++        add_number(glyph.fQtLikeLoadFlags);
++        add_number(glyph.fQtLikeXppem);
++        add_number(glyph.fQtLikeYppem);
++        add_number(glyph.fQtLikeXScale);
++        add_number(glyph.fQtLikeYScale);
++        add_number(glyph.fTypefaceUnitsPerEm);
++        add_number(glyph.fTypefaceGlyphCount);
++        add_number(glyph.fHeadTableChecksum);
++        add_number(glyph.fHheaTableChecksum);
++        add_number(glyph.fHmtxTableChecksum);
++        add_number(glyph.fOs2TableChecksum);
++        add_number(glyph.fPostTableChecksum);
++        add_number(glyph.fMaxpTableChecksum);
++        add_number(glyph.fFaceIndex);
++        add_number(glyph.fFaceFlags);
++        add_number(glyph.fStyleFlags);
++        add_number(glyph.fPlatformDesignAdvance);
++        add_number(glyph.fPlatformGdiCompatibleAdvance);
++        add_number(glyph.fPlatformDesignUnitsPerEm);
++        add_number(glyph.fPlatformMeasuringMode);
+         result.call<void>("push", record);
+     }
+     return result;
+diff --git a/modules/skparagraph/include/Paragraph.h b/modules/skparagraph/include/Paragraph.h
+index ffcba9ebad..a7ca646fc7 100644
+--- a/modules/skparagraph/include/Paragraph.h
++++ b/modules/skparagraph/include/Paragraph.h
+@@ -134,6 +134,30 @@ public:
+         bool fLegacyPairKerningAvailable;
+         SkScalar fQtLikeAdvanceX;
+         bool fQtLikeAdvanceAvailable;
++        int fAdvanceProbeBackend;
++        SkScalar fQtLikeAdvance26Dot6;
++        SkScalar fQtLikeLinearHoriAdvance16Dot16;
++        SkScalar fQtLikeMetricsHoriAdvance26Dot6;
++        int fQtLikeLoadFlags;
++        int fQtLikeXppem;
++        int fQtLikeYppem;
++        SkScalar fQtLikeXScale;
++        SkScalar fQtLikeYScale;
++        int fTypefaceUnitsPerEm;
++        int fTypefaceGlyphCount;
++        uint32_t fHeadTableChecksum;
++        uint32_t fHheaTableChecksum;
++        uint32_t fHmtxTableChecksum;
++        uint32_t fOs2TableChecksum;
++        uint32_t fPostTableChecksum;
++        uint32_t fMaxpTableChecksum;
++        int fFaceIndex;
++        int fFaceFlags;
++        int fStyleFlags;
++        SkScalar fPlatformDesignAdvance;
++        SkScalar fPlatformGdiCompatibleAdvance;
++        int fPlatformDesignUnitsPerEm;
++        int fPlatformMeasuringMode;
+         SkPoint fShapePosition;
+         SkPoint fOffset;
+         SkVector fAdvance;
+diff --git a/modules/skparagraph/src/ParagraphImpl.cpp b/modules/skparagraph/src/ParagraphImpl.cpp
+index dfa296145c..c7ca8ffb64 100644
+--- a/modules/skparagraph/src/ParagraphImpl.cpp
++++ b/modules/skparagraph/src/ParagraphImpl.cpp
+@@ -1,5 +1,6 @@
+ // Copyright 2019 Google LLC
+ #include "include/core/SkCanvas.h"
++#include "include/core/SkData.h"
+ #include "include/core/SkFontMetrics.h"
+ #include "include/core/SkMatrix.h"
+ #include "include/core/SkPath.h"
+@@ -77,6 +78,27 @@ bool getLegacyPairKerningX(const SkFont& font,
+     }
+     return true;
+ }
++
++uint32_t diagnosticTableChecksum(SkTypeface* typeface, SkFontTableTag tag) {
++    if (!typeface) {
++        return 0;
++    }
++    sk_sp<SkData> data = typeface->copyTableData(tag);
++    if (!data) {
++        return 0;
++    }
++    uint32_t hash = 2166136261u;
++    const uint8_t* bytes = data->bytes();
++    for (size_t i = 0; i < data->size(); ++i) {
++        hash ^= bytes[i];
++        hash *= 16777619u;
++    }
++    return hash;
++}
++
++uint32_t diagnosticTableChecksum(SkTypeface* typeface, char a, char b, char c, char d) {
++    return diagnosticTableChecksum(typeface, SkSetFourByteTag(a, b, c, d));
++}
+ }  // namespace
+ 
+ TextRange operator*(const TextRange& a, const TextRange& b) {
+@@ -1302,11 +1324,16 @@ std::vector<Paragraph::GlyphDiagnostic> ParagraphImpl::getGlyphDiagnostics() {
+                                                   &legacyPairKerningX);
+                     SkScalar qtLikeAdvanceX = 0;
+                     SkTypeface* typeface = blobRun.font.getTypeface();
++                    SkTypeface::QtLikeGlyphAdvanceDiagnostics qtLikeAdvanceDiagnostics;
+                     const bool qtLikeAdvanceAvailable =
+                             typeface != nullptr &&
+-                            typeface->getQtLikeGlyphAdvance(blobRun.glyphs[i],
+-                                                            blobRun.font.getSize(),
+-                                                            &qtLikeAdvanceX);
++                            typeface->getQtLikeGlyphAdvanceDiagnostics(
++                                    blobRun.glyphs[i],
++                                    blobRun.font.getSize(),
++                                    &qtLikeAdvanceDiagnostics);
++                    if (qtLikeAdvanceAvailable) {
++                        qtLikeAdvanceX = qtLikeAdvanceDiagnostics.fAdvance;
++                    }
+                     SkFontMetrics fontMetrics;
+                     blobRun.font.getMetrics(&fontMetrics);
+                     result.push_back({
+@@ -1329,6 +1356,30 @@ std::vector<Paragraph::GlyphDiagnostic> ParagraphImpl::getGlyphDiagnostics() {
+                             legacyPairKerningAvailable,
+                             qtLikeAdvanceX,
+                             qtLikeAdvanceAvailable,
++                            qtLikeAdvanceDiagnostics.fBackend,
++                            qtLikeAdvanceDiagnostics.fAdvance26Dot6,
++                            qtLikeAdvanceDiagnostics.fLinearHoriAdvance16Dot16,
++                            qtLikeAdvanceDiagnostics.fMetricsHoriAdvance26Dot6,
++                            qtLikeAdvanceDiagnostics.fLoadFlags,
++                            qtLikeAdvanceDiagnostics.fXppem,
++                            qtLikeAdvanceDiagnostics.fYppem,
++                            qtLikeAdvanceDiagnostics.fXScale,
++                            qtLikeAdvanceDiagnostics.fYScale,
++                            typeface ? typeface->getUnitsPerEm() : 0,
++                            typeface ? typeface->countGlyphs() : 0,
++                            diagnosticTableChecksum(typeface, 'h', 'e', 'a', 'd'),
++                            diagnosticTableChecksum(typeface, 'h', 'h', 'e', 'a'),
++                            diagnosticTableChecksum(typeface, 'h', 'm', 't', 'x'),
++                            diagnosticTableChecksum(typeface, 'O', 'S', '/', '2'),
++                            diagnosticTableChecksum(typeface, 'p', 'o', 's', 't'),
++                            diagnosticTableChecksum(typeface, 'm', 'a', 'x', 'p'),
++                            qtLikeAdvanceDiagnostics.fFaceIndex,
++                            qtLikeAdvanceDiagnostics.fFaceFlags,
++                            qtLikeAdvanceDiagnostics.fStyleFlags,
++                            qtLikeAdvanceDiagnostics.fDesignAdvance,
++                            qtLikeAdvanceDiagnostics.fGdiCompatibleAdvance,
++                            qtLikeAdvanceDiagnostics.fDesignUnitsPerEm,
++                            qtLikeAdvanceDiagnostics.fMeasuringMode,
+                             shapePosition,
+                             offset,
+                             advance,
+diff --git a/src/ports/SkFontHost_FreeType.cpp b/src/ports/SkFontHost_FreeType.cpp
+index e35ec2a217..84afa4b32e 100644
+--- a/src/ports/SkFontHost_FreeType.cpp
++++ b/src/ports/SkFontHost_FreeType.cpp
+@@ -936,6 +936,24 @@ bool SkTypeface_FreeType::onGetQtLikeGlyphAdvance(SkGlyphID glyph,
+     }
+     *advance = 0;
+ 
++    SkTypeface::QtLikeGlyphAdvanceDiagnostics diagnostics;
++    if (!this->onGetQtLikeGlyphAdvanceDiagnostics(glyph, textSize, &diagnostics)) {
++        return false;
++    }
++
++    *advance = diagnostics.fAdvance;
++    return true;
++}
++
++bool SkTypeface_FreeType::onGetQtLikeGlyphAdvanceDiagnostics(
++        SkGlyphID glyph,
++        SkScalar textSize,
++        SkTypeface::QtLikeGlyphAdvanceDiagnostics* diagnostics) const {
++    if (!diagnostics) {
++        return false;
++    }
++    *diagnostics = {};
++
+     AutoFTAccess fta(this);
+     FT_Face face = fta.face();
+     if (!face || !FT_IS_SCALABLE(face)) {
+@@ -992,7 +1010,30 @@ bool SkTypeface_FreeType::onGetQtLikeGlyphAdvance(SkGlyphID glyph,
+         return false;
+     }
+ 
+-    *advance = SkIntToScalar(static_cast<int>((face->glyph->advance.x + 32) >> 6));
++    // The Qt Widgets reference keeps QTextDocument::useDesignMetrics false.
++    // QFontEngineFT::recalcAdvances(..., no DesignMetrics) returns the hinted
++    // slot advance; QTextEngine then rounds it because full hinting disables
++    // subpixel positions.
++    diagnostics->fAvailable = true;
++    diagnostics->fBackend = 1;
++    diagnostics->fAdvance =
++            SkIntToScalar(static_cast<int>((face->glyph->advance.x + 32) >> 6));
++    diagnostics->fAdvance26Dot6 = SkFDot6ToScalar(face->glyph->advance.x);
++    diagnostics->fLinearHoriAdvance16Dot16 =
++            SkFixedToScalar(face->glyph->linearHoriAdvance);
++    diagnostics->fMetricsHoriAdvance26Dot6 =
++            SkFDot6ToScalar(face->glyph->metrics.horiAdvance);
++    diagnostics->fLoadFlags = loadFlags;
++    diagnostics->fUnitsPerEm = face->units_per_EM;
++    diagnostics->fXppem = face->size ? face->size->metrics.x_ppem : 0;
++    diagnostics->fYppem = face->size ? face->size->metrics.y_ppem : 0;
++    diagnostics->fXScale = face->size ? SkFixedToScalar(face->size->metrics.x_scale) : 0;
++    diagnostics->fYScale = face->size ? SkFixedToScalar(face->size->metrics.y_scale) : 0;
++    diagnostics->fFaceIndex = static_cast<int>(face->face_index);
++    diagnostics->fFaceFlags = static_cast<int>(face->face_flags);
++    diagnostics->fStyleFlags = static_cast<int>(face->style_flags);
++    diagnostics->fNumGlyphs = static_cast<int>(face->num_glyphs);
++
+     FT_Activate_Size(oldSize);
+     FT_Set_Transform(face, &oldTransform, &oldDelta);
+     return true;
+diff --git a/src/ports/SkTypeface_FreeType.h b/src/ports/SkTypeface_FreeType.h
+index c7d4d8b0ff..e34d655017 100644
+--- a/src/ports/SkTypeface_FreeType.h
++++ b/src/ports/SkTypeface_FreeType.h
+@@ -65,6 +65,10 @@ protected:
+     bool onGetQtLikeGlyphAdvance(SkGlyphID glyph,
+                                  SkScalar textSize,
+                                  SkScalar* advance) const override;
++    bool onGetQtLikeGlyphAdvanceDiagnostics(
++            SkGlyphID glyph,
++            SkScalar textSize,
++            QtLikeGlyphAdvanceDiagnostics* diagnostics) const override;
+     void onCharsToGlyphs(SkSpan<const SkUnichar>, SkSpan<SkGlyphID>) const override;
+     int onCountGlyphs() const override;
+ 

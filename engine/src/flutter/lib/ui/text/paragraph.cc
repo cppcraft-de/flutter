@@ -212,6 +212,135 @@ tonic::Float64List Paragraph::computeLineMetrics() const {
   return result;
 }
 
+tonic::Float64List Paragraph::computeDetailedLineMetricsForDiagnostics() const {
+  std::vector<txt::LineMetrics> metrics = m_paragraph_->GetLineMetrics();
+
+  // Groups of 13: raw ascent/descent/leading, effective
+  // ascent/descent/leading, height input ascent/descent/leading/raw-leading,
+  // line-height branch, next-line baseline pitch, and line-box height.
+  tonic::Float64List result(
+      Dart_NewTypedData(Dart_TypedData_kFloat64, metrics.size() * 13));
+  uint64_t position = 0;
+  for (const txt::LineMetrics& line : metrics) {
+    result[position++] = line.raw_ascent;
+    result[position++] = line.raw_descent;
+    result[position++] = line.raw_leading;
+    result[position++] = line.effective_ascent;
+    result[position++] = line.effective_descent;
+    result[position++] = line.effective_leading;
+    result[position++] = line.height_input_ascent;
+    result[position++] = line.height_input_descent;
+    result[position++] = line.height_input_leading;
+    result[position++] = line.height_input_raw_leading;
+    result[position++] = line.line_height_branch;
+    result[position++] = line.next_line_baseline_pitch;
+    result[position++] = line.line_box_height;
+  }
+  return result;
+}
+
+Dart_Handle Paragraph::computeGlyphMetricsForDiagnostics() const {
+  const auto glyphs = m_paragraph_->GetGlyphDiagnostics();
+  Dart_Handle result = Dart_NewList(glyphs.size());
+  for (intptr_t i = 0; i < static_cast<intptr_t>(glyphs.size()); ++i) {
+    const auto& glyph = glyphs[i];
+    Dart_Handle record = Dart_NewList(74);
+    intptr_t position = 0;
+    auto add_double = [&](double value) {
+      tonic::CheckAndHandleError(
+          Dart_ListSetAt(record, position++, Dart_NewDouble(value)));
+    };
+    add_double(glyph.fLineNumber);
+    add_double(glyph.fRunIndex);
+    SkString family;
+    SkTypefaceID typeface_id = 0;
+    if (glyph.fFont.getTypeface() != nullptr) {
+      glyph.fFont.getTypeface()->getFamilyName(&family);
+      typeface_id = glyph.fFont.getTypeface()->uniqueID();
+    }
+    tonic::CheckAndHandleError(
+        Dart_ListSetAt(record, position++, tonic::ToDart(family.c_str())));
+    add_double(typeface_id);
+    add_double(glyph.fFont.getSize());
+    add_double(glyph.fFont.isSubpixel());
+    add_double(glyph.fFont.isLinearMetrics());
+    add_double(static_cast<int>(glyph.fFont.getHinting()));
+    add_double(static_cast<int>(glyph.fFont.getEdging()));
+    add_double(glyph.fFontMetrics.fTop);
+    add_double(glyph.fFontMetrics.fAscent);
+    add_double(glyph.fFontMetrics.fDescent);
+    add_double(glyph.fFontMetrics.fBottom);
+    add_double(glyph.fFontMetrics.fLeading);
+    add_double(glyph.fGlyph);
+    add_double(glyph.fUtf8Cluster);
+    add_double(glyph.fRawShapePosition.fX);
+    add_double(glyph.fRawShapePosition.fY);
+    add_double(glyph.fRawAdvance.fX);
+    add_double(glyph.fRawAdvance.fY);
+    add_double(glyph.fLegacyPairKerningX);
+    add_double(glyph.fLegacyPairKerningAvailable ? 1 : 0);
+    add_double(glyph.fQtLikeAdvanceX);
+    add_double(glyph.fQtLikeAdvanceAvailable ? 1 : 0);
+    add_double(glyph.fShapePosition.fX);
+    add_double(glyph.fShapePosition.fY);
+    add_double(glyph.fOffset.fX);
+    add_double(glyph.fOffset.fY);
+    add_double(glyph.fAdvance.fX);
+    add_double(glyph.fAdvance.fY);
+    add_double(glyph.fFinalOrigin.fX);
+    add_double(glyph.fFinalOrigin.fY);
+    add_double(glyph.fBounds.fLeft);
+    add_double(glyph.fBounds.fTop);
+    add_double(glyph.fBounds.fRight);
+    add_double(glyph.fBounds.fBottom);
+    add_double(glyph.fInkBounds.fLeft);
+    add_double(glyph.fInkBounds.fTop);
+    add_double(glyph.fInkBounds.fRight);
+    add_double(glyph.fInkBounds.fBottom);
+    SkFontStyle style;
+    if (glyph.fFont.getTypeface() != nullptr) {
+      style = glyph.fFont.getTypeface()->fontStyle();
+    }
+    add_double(style.weight());
+    add_double(style.width());
+    add_double(static_cast<int>(style.slant()));
+    add_double(glyph.fUtf8RangeBegin);
+    add_double(glyph.fUtf8RangeEnd);
+    add_double(glyph.fBidiLevel);
+    add_double(glyph.fScript);
+    tonic::CheckAndHandleError(Dart_ListSetAt(
+        record, position++, tonic::ToDart(glyph.fLanguage.c_str())));
+    add_double(glyph.fShapingFeatureCount);
+    add_double(glyph.fShapingFeatureMask);
+    add_double(glyph.fAdvanceProbeBackend);
+    add_double(glyph.fQtLikeAdvance26Dot6);
+    add_double(glyph.fQtLikeLinearHoriAdvance16Dot16);
+    add_double(glyph.fQtLikeMetricsHoriAdvance26Dot6);
+    add_double(glyph.fQtLikeLoadFlags);
+    add_double(glyph.fQtLikeXppem);
+    add_double(glyph.fQtLikeYppem);
+    add_double(glyph.fQtLikeXScale);
+    add_double(glyph.fQtLikeYScale);
+    add_double(glyph.fTypefaceUnitsPerEm);
+    add_double(glyph.fTypefaceGlyphCount);
+    add_double(glyph.fHeadTableChecksum);
+    add_double(glyph.fHheaTableChecksum);
+    add_double(glyph.fHmtxTableChecksum);
+    add_double(glyph.fOs2TableChecksum);
+    add_double(glyph.fPostTableChecksum);
+    add_double(glyph.fMaxpTableChecksum);
+    add_double(glyph.fFaceIndex);
+    add_double(glyph.fFaceFlags);
+    add_double(glyph.fStyleFlags);
+    add_double(glyph.fPlatformDesignAdvance);
+    add_double(glyph.fPlatformGdiCompatibleAdvance);
+    add_double(glyph.fPlatformDesignUnitsPerEm);
+    add_double(glyph.fPlatformMeasuringMode);
+    tonic::CheckAndHandleError(Dart_ListSetAt(result, i, record));
+  }
+  return result;
+}
+
 Dart_Handle Paragraph::getLineMetricsAt(int lineNumber,
                                         Dart_Handle constructor) const {
   skia::textlayout::LineMetrics line;

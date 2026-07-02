@@ -1,0 +1,51 @@
+diff --git a/modules/canvaskit/externs.js b/modules/canvaskit/externs.js
+index 988f377a7c..bb9671ee0a 100644
+--- a/modules/canvaskit/externs.js
++++ b/modules/canvaskit/externs.js
+@@ -483,6 +483,7 @@ var CanvasKit = {
+     // public API (from C++ and JS bindings)
+     Make: function() {},
+     registerFont: function() {},
++    registerTypeface: function() {},
+ 
+     // private API
+     _registerFont: function() {},
+diff --git a/modules/canvaskit/npm_build/types/index.d.ts b/modules/canvaskit/npm_build/types/index.d.ts
+index 892a27ebe3..f1c5604376 100644
+--- a/modules/canvaskit/npm_build/types/index.d.ts
++++ b/modules/canvaskit/npm_build/types/index.d.ts
+@@ -3311,6 +3311,13 @@ export interface TypefaceFontProvider extends FontMgr {
+      * @param family
+      */
+     registerFont(bytes: ArrayBuffer | Uint8Array, family: string): void;
++
++    /**
++     * Registers a given already-decoded typeface with the given family name.
++     * @param typeface
++     * @param family
++     */
++    registerTypeface(typeface: Typeface, family: string): void;
+ }
+ 
+ /**
+diff --git a/modules/canvaskit/paragraph.js b/modules/canvaskit/paragraph.js
+index 9c93a89f71..2163dd5478 100644
+--- a/modules/canvaskit/paragraph.js
++++ b/modules/canvaskit/paragraph.js
+@@ -68,6 +68,16 @@
+       typeface.delete();
+     }
+ 
++    // Registers an already-decoded typeface with the alias `family`.
++    CanvasKit.TypefaceFontProvider.prototype.registerTypeface = function(typeface, family) {
++      if (!typeface) {
++          Debug('Could not register missing typeface');
++          return null;
++      }
++      var familyPtr = cacheOrCopyString(family);
++      this._registerFont(typeface, familyPtr);
++    }
++
+     // These helpers fill out all fields, because emscripten complains if we
+     // have undefined and it expects, for example, a float.
+     // TODO(kjlubick) For efficiency, we should probably just return opaque WASM objects so we do

@@ -11,6 +11,43 @@ import 'package:ui/ui_web/src/ui_web.dart' as ui_web;
 
 const String _kWeightAxisTag = 'wght';
 
+double _ckTextProfileNow() => domWindow.performance.now();
+
+String _ckTextProfileMs(double value) => value.toStringAsFixed(2);
+
+class _CkTextProfileCounters {
+  int buildCount = 0;
+  int layoutCount = 0;
+  double buildMs = 0.0;
+  double layoutMs = 0.0;
+
+  void recordBuild(double elapsedMs) {
+    buildCount += 1;
+    buildMs += elapsedMs;
+    _maybeLog('build', elapsedMs);
+  }
+
+  void recordLayout(double elapsedMs) {
+    layoutCount += 1;
+    layoutMs += elapsedMs;
+    _maybeLog('layout', elapsedMs);
+  }
+
+  void _maybeLog(String phase, double elapsedMs) {
+    final int totalOps = buildCount + layoutCount;
+    if (elapsedMs < 4.0 && totalOps % 100 != 0) {
+      return;
+    }
+    domWindow.console.debug(
+      '[CanvasKitTextProfile] phase=$phase last=${_ckTextProfileMs(elapsedMs)}ms '
+      'builds=$buildCount buildTotal=${_ckTextProfileMs(buildMs)}ms '
+      'layouts=$layoutCount layoutTotal=${_ckTextProfileMs(layoutMs)}ms',
+    );
+  }
+}
+
+final _CkTextProfileCounters _ckTextProfileCounters = _CkTextProfileCounters();
+
 final List<String> _testFonts = <String>['FlutterTest', 'Ahem'];
 String? _computeEffectiveFontFamily(String? fontFamily) {
   return ui_web.TestEnvironment.instance.forceTestFonts && !_testFonts.contains(fontFamily)
@@ -938,6 +975,7 @@ class CkParagraph implements ui.Paragraph {
     // TODO(het): CanvasKit throws an exception when laid out with
     // a font that wasn't registered.
     try {
+      final double profileStart = _ckTextProfileNow();
       final SkParagraph paragraph = skiaObject;
       paragraph.layout(constraints.width);
       _alphabeticBaseline = paragraph.getAlphabeticBaseline();
@@ -949,6 +987,7 @@ class CkParagraph implements ui.Paragraph {
       _minIntrinsicWidth = paragraph.getMinIntrinsicWidth();
       _width = paragraph.getMaxWidth();
       _boxesForPlaceholders = skRectsToTextBoxes(paragraph.getRectsForPlaceholders());
+      _ckTextProfileCounters.recordLayout(domWindow.performance.now() - profileStart);
     } catch (e) {
       printWarning(
         'CanvasKit threw an exception while laying '
@@ -981,6 +1020,36 @@ class CkParagraph implements ui.Paragraph {
       result.add(CkLineMetrics._(metric));
     }
     return result;
+  }
+
+  @override
+  Float64List computeDetailedLineMetricsForDiagnostics() {
+    assert(!_disposed, 'Paragraph has been disposed.');
+    final List<SkLineMetrics> skLineMetrics = skiaObject.getLineMetrics();
+    final result = Float64List(skLineMetrics.length * 13);
+    var position = 0;
+    for (final metrics in skLineMetrics) {
+      result[position++] = metrics.rawAscent;
+      result[position++] = metrics.rawDescent;
+      result[position++] = metrics.rawLeading;
+      result[position++] = metrics.effectiveAscent;
+      result[position++] = metrics.effectiveDescent;
+      result[position++] = metrics.effectiveLeading;
+      result[position++] = metrics.heightInputAscent;
+      result[position++] = metrics.heightInputDescent;
+      result[position++] = metrics.heightInputLeading;
+      result[position++] = metrics.heightInputRawLeading;
+      result[position++] = metrics.lineHeightBranch;
+      result[position++] = metrics.nextLineBaselinePitch;
+      result[position++] = metrics.lineBoxHeight;
+    }
+    return result;
+  }
+
+  @override
+  List<Object?> computeGlyphMetricsForDiagnostics() {
+    assert(!_disposed, 'Paragraph has been disposed.');
+    return skiaObject.getGlyphDiagnostics();
   }
 
   @override
@@ -1159,9 +1228,11 @@ class CkParagraphBuilder implements ui.ParagraphBuilder {
 
   /// Builds the CkParagraph with the builder and deletes the builder.
   SkParagraph _buildSkParagraph() {
+    final double profileStart = _ckTextProfileNow();
     _paragraphBuilder.injectClientICUIfNeeded();
     final SkParagraph result = _paragraphBuilder.build();
     _paragraphBuilder.delete();
+    _ckTextProfileCounters.recordBuild(domWindow.performance.now() - profileStart);
     return result;
   }
 

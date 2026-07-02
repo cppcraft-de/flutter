@@ -16,6 +16,24 @@ import 'package:ui/ui_web/src/ui_web.dart' as ui_web;
 String _robotoUrl =
     '${configuration.fontFallbackBaseUrl}roboto/v32/KFOmCnqEu92Fr1Me4GZLCzYlKw.woff2';
 
+const bool _profileCanvasKitFontLoading = true;
+
+double _fontLoadNow() {
+  if (!_profileCanvasKitFontLoading) {
+    return 0.0;
+  }
+  return domWindow.performance.now();
+}
+
+double _fontLoadElapsed(double start) {
+  if (!_profileCanvasKitFontLoading) {
+    return 0.0;
+  }
+  return domWindow.performance.now() - start;
+}
+
+String _fontLoadMs(double value) => value.toStringAsFixed(2);
+
 /// Manages the fonts used in the Skia-based backend.
 class SkiaFontCollection implements FlutterFontCollection {
   final Set<String> _downloadedFontFamilies = <String>{};
@@ -32,6 +50,14 @@ class SkiaFontCollection implements FlutterFontCollection {
   final List<RegisteredFont> _registeredFonts = <RegisteredFont>[];
   final List<RegisteredFont> registeredFallbackFonts = <RegisteredFont>[];
 
+  int _profileDynamicLoadCount = 0;
+  double _profileDynamicTotalMs = 0.0;
+  double _profileDynamicParseMs = 0.0;
+  double _profileDynamicWarmupMs = 0.0;
+  double _profileDynamicProviderMs = 0.0;
+  double _profileDynamicCacheMs = 0.0;
+  int _fontRegistrationGeneration = 0;
+
   /// Returns fonts that have been downloaded, registered, and parsed.
   ///
   /// This should only be used in tests.
@@ -46,6 +72,68 @@ class SkiaFontCollection implements FlutterFontCollection {
 
   final Map<String, List<SkFont>> familyToFontMap = <String, List<SkFont>>{};
 
+  void _ensureFontProvider() {
+    if (_fontProvider != null) {
+      return;
+    }
+    _fontProvider = canvasKit.TypefaceFontProvider.Make();
+    _recreateSkFontCollection();
+  }
+
+  void _recreateSkFontCollection() {
+    skFontCollection?.delete();
+    skFontCollection = canvasKit.FontCollection.Make();
+    skFontCollection!.enableFontFallback();
+    skFontCollection!.setDefaultFontManager(_fontProvider);
+  }
+
+  double _registerFontWithFontProvider(RegisteredFont font) {
+    final double start = _fontLoadNow();
+    _ensureFontProvider();
+    _fontProvider!.registerTypeface(font.typeface, font.family);
+    familyToFontMap.putIfAbsent(font.family, () => <SkFont>[]).add(SkFont(font.typeface));
+    _fontRegistrationGeneration += 1;
+    return _fontLoadElapsed(start);
+  }
+
+  void _profileDynamicFontLoad({
+    required String family,
+    required int byteLength,
+    required double totalMs,
+    required double initializeMs,
+    required double parseMs,
+    required double familyMs,
+    required double warmupMs,
+    required double providerMs,
+    required double cacheMs,
+  }) {
+    if (!_profileCanvasKitFontLoading) {
+      return;
+    }
+    _profileDynamicLoadCount += 1;
+    _profileDynamicTotalMs += totalMs;
+    _profileDynamicParseMs += parseMs;
+    _profileDynamicWarmupMs += warmupMs;
+    _profileDynamicProviderMs += providerMs;
+    _profileDynamicCacheMs += cacheMs;
+    domWindow.console.debug(
+      '[CanvasKitFontLoad] #$_profileDynamicLoadCount '
+      'family="$family" bytes=$byteLength '
+      'total=${_fontLoadMs(totalMs)}ms '
+      'init=${_fontLoadMs(initializeMs)}ms '
+      'parse=${_fontLoadMs(parseMs)}ms '
+      'family=${_fontLoadMs(familyMs)}ms '
+      'warmup=${_fontLoadMs(warmupMs)}ms '
+      'provider=${_fontLoadMs(providerMs)}ms '
+      'cache=${_fontLoadMs(cacheMs)}ms '
+      'totals(total=${_fontLoadMs(_profileDynamicTotalMs)}ms '
+      'parse=${_fontLoadMs(_profileDynamicParseMs)}ms '
+      'warmup=${_fontLoadMs(_profileDynamicWarmupMs)}ms '
+      'provider=${_fontLoadMs(_profileDynamicProviderMs)}ms '
+      'cache=${_fontLoadMs(_profileDynamicCacheMs)}ms)',
+    );
+  }
+
   void _registerWithFontProvider() {
     if (_fontProvider != null) {
       _fontProvider!.delete();
@@ -53,41 +141,58 @@ class SkiaFontCollection implements FlutterFontCollection {
       skFontCollection?.delete();
       skFontCollection = null;
     }
-    _fontProvider = canvasKit.TypefaceFontProvider.Make();
-    skFontCollection = canvasKit.FontCollection.Make();
-    skFontCollection!.enableFontFallback();
-    skFontCollection!.setDefaultFontManager(_fontProvider);
     familyToFontMap.clear();
 
     for (final RegisteredFont font in _registeredFonts) {
-      _fontProvider!.registerFont(font.bytes, font.family);
-      familyToFontMap.putIfAbsent(font.family, () => <SkFont>[]).add(SkFont(font.typeface));
+      _registerFontWithFontProvider(font);
     }
 
     for (final RegisteredFont font in registeredFallbackFonts) {
-      _fontProvider!.registerFont(font.bytes, font.family);
-      familyToFontMap.putIfAbsent(font.family, () => <SkFont>[]).add(SkFont(font.typeface));
+      _registerFontWithFontProvider(font);
     }
   }
 
   @override
   Future<bool> loadFontFromList(Uint8List list, {String? fontFamily}) async {
+    final double totalStart = _fontLoadNow();
     // Make sure CanvasKit is actually loaded
+    final double initializeStart = _fontLoadNow();
     await renderer.initialize();
+    final double initializeMs = _fontLoadElapsed(initializeStart);
 
+    final double parseStart = _fontLoadNow();
     final SkTypeface? typeface = canvasKit.Typeface.MakeFreeTypeFaceFromData(list.buffer);
+    final double parseMs = _fontLoadElapsed(parseStart);
 
     if (typeface != null) {
+      double familyMs = 0.0;
       if (fontFamily == null) {
         // Read actual family name from SkTypeface
+        final double familyStart = _fontLoadNow();
         fontFamily = typeface.getFamilyName();
+        familyMs = _fontLoadElapsed(familyStart);
         if (fontFamily == null) {
           printWarning('Failed to read font family name. Aborting font load.');
           return false;
         }
       }
-      _registeredFonts.add(RegisteredFont(list, fontFamily, typeface));
-      _registerWithFontProvider();
+      final registeredFont = RegisteredFont(list, fontFamily, typeface);
+      _registeredFonts.add(registeredFont);
+      final double providerMs = _registerFontWithFontProvider(registeredFont);
+      final double cacheStart = _fontLoadNow();
+      skFontCollection?.clearFontLookupCaches();
+      final double cacheMs = _fontLoadElapsed(cacheStart);
+      _profileDynamicFontLoad(
+        family: fontFamily,
+        byteLength: list.length,
+        totalMs: _fontLoadElapsed(totalStart),
+        initializeMs: initializeMs,
+        parseMs: parseMs,
+        familyMs: familyMs,
+        warmupMs: registeredFont.warmupMilliseconds,
+        providerMs: providerMs,
+        cacheMs: cacheMs,
+      );
     } else {
       printWarning('Failed to parse font family "$fontFamily"');
       return false;
@@ -214,9 +319,11 @@ class SkiaFontCollection implements FlutterFontCollection {
 /// Represents a font that has been registered.
 class RegisteredFont {
   RegisteredFont(this.bytes, this.family, this.typeface) {
+    final double warmupStart = _fontLoadNow();
     // This is a hack which causes Skia to cache the decoded font.
     final skFont = SkFont(typeface);
     skFont.getGlyphBounds(<int>[0], null, null);
+    warmupMilliseconds = _fontLoadElapsed(warmupStart);
   }
 
   /// The font family name for this font.
@@ -229,6 +336,8 @@ class RegisteredFont {
   ///
   /// This is used to determine which code points are supported by this font.
   final SkTypeface typeface;
+
+  late final double warmupMilliseconds;
 }
 
 /// Represents a font that has been downloaded but not registered.
@@ -252,9 +361,58 @@ class SkiaFallbackRegistry implements FallbackFontRegistry {
   SkiaFallbackRegistry(this._fontCollection);
 
   final SkiaFontCollection _fontCollection;
+  final Map<String, List<int>> _missingCodePointCache = <String, List<int>>{};
+  int _cachedFontRegistrationGeneration = -1;
+  int _profileFallbackCallCount = 0;
+  int _profileFallbackCachedCount = 0;
+  double _profileFallbackTotalMs = 0.0;
+
+  void _profileFallbackCheck({
+    required bool cached,
+    required int familyCount,
+    required int fontCount,
+    required int codeUnitCount,
+    required int missingCount,
+    required double elapsedMs,
+  }) {
+    _profileFallbackCallCount += 1;
+    if (cached) {
+      _profileFallbackCachedCount += 1;
+    }
+    _profileFallbackTotalMs += elapsedMs;
+    if (elapsedMs < 1.0 && _profileFallbackCallCount % 100 != 0) {
+      return;
+    }
+    domWindow.console.debug(
+      '[CanvasKitFontFallback] calls=$_profileFallbackCallCount '
+      'cached=$_profileFallbackCachedCount '
+      'families=$familyCount fonts=$fontCount codeUnits=$codeUnitCount '
+      'missing=$missingCount last=${_fontLoadMs(elapsedMs)}ms '
+      'total=${_fontLoadMs(_profileFallbackTotalMs)}ms',
+    );
+  }
 
   @override
   List<int> getMissingCodePoints(List<int> codeUnits, List<String> fontFamilies) {
+    final double totalStart = _fontLoadNow();
+    if (_cachedFontRegistrationGeneration != _fontCollection._fontRegistrationGeneration) {
+      _missingCodePointCache.clear();
+      _cachedFontRegistrationGeneration = _fontCollection._fontRegistrationGeneration;
+    }
+    final String cacheKey = '${fontFamilies.join('\u0001')}|${codeUnits.join(',')}';
+    final List<int>? cachedMissingCodeUnits = _missingCodePointCache[cacheKey];
+    if (cachedMissingCodeUnits != null) {
+      _profileFallbackCheck(
+        cached: true,
+        familyCount: fontFamilies.length,
+        fontCount: -1,
+        codeUnitCount: codeUnits.length,
+        missingCount: cachedMissingCodeUnits.length,
+        elapsedMs: _fontLoadElapsed(totalStart),
+      );
+      return cachedMissingCodeUnits;
+    }
+
     final fonts = <SkFont>[];
     for (final font in fontFamilies) {
       final List<SkFont>? typefacesForFamily = _fontCollection.familyToFontMap[font];
@@ -278,6 +436,15 @@ class SkiaFallbackRegistry implements FallbackFontRegistry {
         missingCodeUnits.add(codeUnits[i]);
       }
     }
+    _missingCodePointCache[cacheKey] = missingCodeUnits;
+    _profileFallbackCheck(
+      cached: false,
+      familyCount: fontFamilies.length,
+      fontCount: fonts.length,
+      codeUnitCount: codeUnits.length,
+      missingCount: missingCodeUnits.length,
+      elapsedMs: _fontLoadElapsed(totalStart),
+    );
     return missingCodeUnits;
   }
 

@@ -5,6 +5,9 @@
 #include "paragraph_builder_skia.h"
 #include "paragraph_skia.h"
 
+#include <cctype>
+#include <cstdlib>
+
 #include "third_party/skia/modules/skparagraph/include/ParagraphStyle.h"
 #include "third_party/skia/modules/skparagraph/include/TextStyle.h"
 #include "third_party/skia/modules/skunicode/include/SkUnicode_icu.h"
@@ -17,6 +20,64 @@ namespace txt {
 namespace {
 
 constexpr std::string_view kWeightAxisTag = "wght";
+
+bool EnvironmentVariableDisabled(const char* value) {
+  if (value == nullptr || *value == '\0') {
+    return false;
+  }
+
+  std::string normalized(value);
+  for (char& ch : normalized) {
+    ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+  }
+
+  return normalized == "0" || normalized == "false" || normalized == "no" ||
+         normalized == "off";
+}
+
+bool IsIntegerTextMetricsEnabledFromEnv() {
+  const char* value = std::getenv("FLUTTER_INTEGER_TEXT_METRICS");
+  if (value == nullptr || *value == '\0') {
+    return true;
+  }
+  if (EnvironmentVariableDisabled(value)) {
+    return false;
+  }
+
+  std::string normalized(value);
+  for (char& ch : normalized) {
+    ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+  }
+
+  return normalized == "1" || normalized == "true" || normalized == "yes" ||
+         normalized == "on";
+}
+
+std::optional<SkFontHinting> GetFontHintingFromEnv() {
+  const char* value = std::getenv("FCTWEAK_HINTING");
+  if (value == nullptr || *value == '\0') {
+    return SkFontHinting::kFull;
+  }
+
+  std::string normalized(value);
+  for (char& ch : normalized) {
+    ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+  }
+
+  if (normalized == "none") {
+    return SkFontHinting::kNone;
+  }
+  if (normalized == "slight") {
+    return SkFontHinting::kSlight;
+  }
+  if (normalized == "normal") {
+    return SkFontHinting::kNormal;
+  }
+  if (normalized == "full") {
+    return SkFontHinting::kFull;
+  }
+  return std::nullopt;
+}
 
 template <typename T>
 SkFourByteTag GetFourByteTag(const T& tag) {
@@ -36,7 +97,10 @@ ParagraphBuilderSkia::ParagraphBuilderSkia(
     const ParagraphStyle& style,
     const std::shared_ptr<FontCollection>& font_collection,
     const bool impeller_enabled)
-    : base_style_(style.GetTextStyle()), impeller_enabled_(impeller_enabled) {
+    : base_style_(style.GetTextStyle()),
+      subpixel_enabled_(!IsIntegerTextMetricsEnabledFromEnv()),
+      font_hinting_(GetFontHintingFromEnv()),
+      impeller_enabled_(impeller_enabled) {
   builder_ = skt::ParagraphBuilder::make(
       TxtToSkia(style), font_collection->CreateSktFontCollection(),
       SkUnicodes::ICU::Make());
@@ -101,6 +165,10 @@ skt::ParagraphStyle ParagraphBuilderSkia::TxtToSkia(const ParagraphStyle& txt) {
 
   text_style.setFontStyle(MakeSkFontStyle(txt.font_weight, txt.font_style));
   text_style.setFontSize(SkDoubleToScalar(txt.font_size));
+  text_style.setSubpixel(subpixel_enabled_);
+  if (font_hinting_.has_value()) {
+    text_style.setFontHinting(font_hinting_.value());
+  }
   text_style.setHeight(SkDoubleToScalar(txt.height));
   text_style.setHeightOverride(txt.has_height_override);
   text_style.setFontFamilies({SkString(txt.font_family.c_str())});
@@ -136,7 +204,10 @@ skt::ParagraphStyle ParagraphBuilderSkia::TxtToSkia(const ParagraphStyle& txt) {
   skia.setTextHeightBehavior(
       static_cast<skt::TextHeightBehavior>(txt.text_height_behavior));
 
-  skia.turnHintingOff();
+  if (!font_hinting_.has_value() ||
+      font_hinting_.value() == SkFontHinting::kNone) {
+    skia.turnHintingOff();
+  }
   skia.setReplaceTabCharacters(true);
   skia.setApplyRoundingHack(false);
 
@@ -165,6 +236,10 @@ skt::TextStyle ParagraphBuilderSkia::TxtToSkia(const TextStyle& txt) {
   skia.setFontSize(SkDoubleToScalar(txt.font_size));
   skia.setLetterSpacing(SkDoubleToScalar(txt.letter_spacing));
   skia.setWordSpacing(SkDoubleToScalar(txt.word_spacing));
+  skia.setSubpixel(subpixel_enabled_);
+  if (font_hinting_.has_value()) {
+    skia.setFontHinting(font_hinting_.value());
+  }
   skia.setHeight(SkDoubleToScalar(txt.height));
   skia.setHeightOverride(txt.has_height_override);
   skia.setHalfLeading(txt.half_leading);
