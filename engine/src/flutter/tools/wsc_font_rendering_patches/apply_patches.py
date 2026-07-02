@@ -38,8 +38,6 @@ GROUP_MARKERS = {
         ('skia', 'modules/skparagraph/include/FontCollection.h'): 'clearFontLookupCaches',
         ('skia', 'modules/skshaper/src/SkShaper_harfbuzz.cpp'): 'skhb_qt_style_script',
         ('skia', 'src/ports/SkFontHost_FreeType.cpp'): 'FT_Size_Metrics& sizeMetrics',
-        ('skia', 'src/ports/SkScalerContext_win_dw.cpp'): 'qtLineHeight',
-        ('skia', 'src/ports/SkScalerContext_mac_ct.cpp'): 'SkOTTableHorizontalHeader',
         ('harfbuzz', 'src/hb-ot-shape.cc'): 'plan.apply_fallback_kern = true;',
     },
     'diagnostics': {
