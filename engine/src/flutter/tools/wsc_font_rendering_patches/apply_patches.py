@@ -64,6 +64,17 @@ EXPECTED_REVISIONS = {
 
 STALE_GCLIENT_ENTRIES = ("'engine/src/flutter/third_party/freetype2':",)
 
+LEGACY_WSC_PATCH_PATHS = {
+    'skia': {
+        'src/ports/SkScalerContext_mac_ct.cpp',
+        'src/ports/SkScalerContext_win_dw.cpp',
+        'src/ports/SkTypeface_mac_ct.cpp',
+        'src/ports/SkTypeface_mac_ct.h',
+        'src/ports/SkTypeface_win_dw.cpp',
+        'src/ports/SkTypeface_win_dw.h',
+    },
+}
+
 
 def run_git(repo_dir, args, *, check=True, capture_output=False):
   command = [
@@ -213,6 +224,8 @@ def reset_patch_owned_repos(repo_dirs, patch_files):
   allowed_paths_by_repo = {}
   for repo_name, patch_file in patch_files:
     allowed_paths_by_repo.setdefault(repo_name, set()).update(patch_touched_paths(patch_file))
+  for repo_name, legacy_paths in LEGACY_WSC_PATCH_PATHS.items():
+    allowed_paths_by_repo.setdefault(repo_name, set()).update(legacy_paths)
 
   for repo_name, allowed_paths in sorted(allowed_paths_by_repo.items()):
     repo_dir = repo_dirs[repo_name]
