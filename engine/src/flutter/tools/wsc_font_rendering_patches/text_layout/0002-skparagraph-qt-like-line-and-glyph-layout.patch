@@ -38,15 +38,7 @@ diff --git a/modules/skparagraph/src/Run.cpp b/modules/skparagraph/src/Run.cpp
 index a1cfc403f8..899920da0e 100644
 --- a/modules/skparagraph/src/Run.cpp
 +++ b/modules/skparagraph/src/Run.cpp
-@@ -1,6 +1,7 @@
- // Copyright 2019 Google LLC
- #include "include/core/SkFontMetrics.h"
- #include "include/core/SkTextBlob.h"
-+#include "include/core/SkTypeface.h"
- #include "include/private/base/SkFloatingPoint.h"
- #include "include/private/base/SkMalloc.h"
- #include "include/private/base/SkTo.h"
-@@ -87,6 +88,39 @@ SkShaper::RunHandler::Buffer Run::newRunBuffer() {
+@@ -87,6 +87,28 @@ SkShaper::RunHandler::Buffer Run::newRunBuffer() {
      return {fGlyphs.data(), fPositions.data(), fOffsets.data(), fClusterIndexes.data(), fOffset};
  }
  
@@ -62,17 +54,6 @@ index a1cfc403f8..899920da0e 100644
 +    for (size_t i = 0; i < this->size(); ++i) {
 +        SkScalar advance =
 +                SkScalarRoundToInt(rawPositions[i + 1].fX - rawPositions[i].fX);
-+        if (SkTypeface* typeface = fFont.getTypeface()) {
-+            SkTypeface::QtLikeGlyphAdvanceDiagnostics diagnostics;
-+            if (typeface->getQtLikeGlyphAdvanceDiagnostics(
-+                        fGlyphs[i], fFont.getSize(), &diagnostics) &&
-+                diagnostics.fAvailable &&
-+                !SkScalarNearlyZero(diagnostics.fDesignAdvance)) {
-+                const SkScalar selectedAdvance = SkScalarRoundToInt(diagnostics.fAdvance);
-+                const SkScalar designAdvance = SkScalarRoundToInt(diagnostics.fDesignAdvance);
-+                advance += selectedAdvance - designAdvance;
-+            }
-+        }
 +        fPositions[i].fX = x;
 +        x += advance;
 +        width += advance;
