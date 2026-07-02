@@ -41,7 +41,7 @@ index a7112c8f39..ffcba9ebad 100644
  #include "modules/skparagraph/include/FontCollection.h"
  #include "modules/skparagraph/include/Metrics.h"
  #include "modules/skparagraph/include/ParagraphStyle.h"
-@@ -112,6 +114,37 @@ public:
+@@ -112,6 +114,35 @@ public:
      using ExtendedVisitor = std::function<void(int lineNumber, const ExtendedVisitorInfo*)>;
      virtual void extendedVisit(const ExtendedVisitor&) = 0;
  
@@ -63,8 +63,6 @@ index a7112c8f39..ffcba9ebad 100644
 +        SkVector fRawAdvance;
 +        SkScalar fLegacyPairKerningX;
 +        bool fLegacyPairKerningAvailable;
-+        SkScalar fQtLikeAdvanceX;
-+        bool fQtLikeAdvanceAvailable;
 +        SkPoint fShapePosition;
 +        SkPoint fOffset;
 +        SkVector fAdvance;
@@ -206,7 +204,7 @@ index 9ea8267545..dfa296145c 100644
  }  // namespace
  
  TextRange operator*(const TextRange& a, const TextRange& b) {
-@@ -1239,6 +1269,81 @@ void ParagraphImpl::visit(const Visitor& visitor) {
+@@ -1239,6 +1269,72 @@ void ParagraphImpl::visit(const Visitor& visitor) {
      }
  }
  
@@ -241,13 +239,6 @@ index 9ea8267545..dfa296145c 100644
 +                                                  blobRun.glyphs[i],
 +                                                  blobRun.glyphs[i + 1],
 +                                                  &legacyPairKerningX);
-+                    SkScalar qtLikeAdvanceX = 0;
-+                    SkTypeface* typeface = blobRun.font.getTypeface();
-+                    const bool qtLikeAdvanceAvailable =
-+                            typeface != nullptr &&
-+                            typeface->getQtLikeGlyphAdvance(blobRun.glyphs[i],
-+                                                            blobRun.font.getSize(),
-+                                                            &qtLikeAdvanceX);
 +                    SkFontMetrics fontMetrics;
 +                    blobRun.font.getMetrics(&fontMetrics);
 +                    result.push_back({
@@ -268,8 +259,6 @@ index 9ea8267545..dfa296145c 100644
 +                            rawAdvance,
 +                            legacyPairKerningX,
 +                            legacyPairKerningAvailable,
-+                            qtLikeAdvanceX,
-+                            qtLikeAdvanceAvailable,
 +                            shapePosition,
 +                            offset,
 +                            advance,

@@ -22,7 +22,7 @@ index f5d80b3476..aaf354e5e6 100644
      return m;
  }
  
-@@ -387,6 +400,82 @@ JSArray GetLineMetrics(para::Paragraph& self) {
+@@ -387,6 +400,80 @@ JSArray GetLineMetrics(para::Paragraph& self) {
      return result;
  }
  
@@ -62,8 +62,6 @@ index f5d80b3476..aaf354e5e6 100644
 +        add_number(glyph.fRawAdvance.fY);
 +        add_number(glyph.fLegacyPairKerningX);
 +        add_number(glyph.fLegacyPairKerningAvailable ? 1 : 0);
-+        add_number(glyph.fQtLikeAdvanceX);
-+        add_number(glyph.fQtLikeAdvanceAvailable ? 1 : 0);
 +        add_number(glyph.fShapePosition.fX);
 +        add_number(glyph.fShapePosition.fY);
 +        add_number(glyph.fOffset.fX);

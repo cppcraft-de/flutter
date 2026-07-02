@@ -244,7 +244,7 @@ Dart_Handle Paragraph::computeGlyphMetricsForDiagnostics() const {
   Dart_Handle result = Dart_NewList(glyphs.size());
   for (intptr_t i = 0; i < static_cast<intptr_t>(glyphs.size()); ++i) {
     const auto& glyph = glyphs[i];
-    Dart_Handle record = Dart_NewList(74);
+    Dart_Handle record = Dart_NewList(32);
     intptr_t position = 0;
     auto add_double = [&](double value) {
       tonic::CheckAndHandleError(
@@ -273,14 +273,6 @@ Dart_Handle Paragraph::computeGlyphMetricsForDiagnostics() const {
     add_double(glyph.fFontMetrics.fLeading);
     add_double(glyph.fGlyph);
     add_double(glyph.fUtf8Cluster);
-    add_double(glyph.fRawShapePosition.fX);
-    add_double(glyph.fRawShapePosition.fY);
-    add_double(glyph.fRawAdvance.fX);
-    add_double(glyph.fRawAdvance.fY);
-    add_double(glyph.fLegacyPairKerningX);
-    add_double(glyph.fLegacyPairKerningAvailable ? 1 : 0);
-    add_double(glyph.fQtLikeAdvanceX);
-    add_double(glyph.fQtLikeAdvanceAvailable ? 1 : 0);
     add_double(glyph.fShapePosition.fX);
     add_double(glyph.fShapePosition.fY);
     add_double(glyph.fOffset.fX);
@@ -297,45 +289,6 @@ Dart_Handle Paragraph::computeGlyphMetricsForDiagnostics() const {
     add_double(glyph.fInkBounds.fTop);
     add_double(glyph.fInkBounds.fRight);
     add_double(glyph.fInkBounds.fBottom);
-    SkFontStyle style;
-    if (glyph.fFont.getTypeface() != nullptr) {
-      style = glyph.fFont.getTypeface()->fontStyle();
-    }
-    add_double(style.weight());
-    add_double(style.width());
-    add_double(static_cast<int>(style.slant()));
-    add_double(glyph.fUtf8RangeBegin);
-    add_double(glyph.fUtf8RangeEnd);
-    add_double(glyph.fBidiLevel);
-    add_double(glyph.fScript);
-    tonic::CheckAndHandleError(Dart_ListSetAt(
-        record, position++, tonic::ToDart(glyph.fLanguage.c_str())));
-    add_double(glyph.fShapingFeatureCount);
-    add_double(glyph.fShapingFeatureMask);
-    add_double(glyph.fAdvanceProbeBackend);
-    add_double(glyph.fQtLikeAdvance26Dot6);
-    add_double(glyph.fQtLikeLinearHoriAdvance16Dot16);
-    add_double(glyph.fQtLikeMetricsHoriAdvance26Dot6);
-    add_double(glyph.fQtLikeLoadFlags);
-    add_double(glyph.fQtLikeXppem);
-    add_double(glyph.fQtLikeYppem);
-    add_double(glyph.fQtLikeXScale);
-    add_double(glyph.fQtLikeYScale);
-    add_double(glyph.fTypefaceUnitsPerEm);
-    add_double(glyph.fTypefaceGlyphCount);
-    add_double(glyph.fHeadTableChecksum);
-    add_double(glyph.fHheaTableChecksum);
-    add_double(glyph.fHmtxTableChecksum);
-    add_double(glyph.fOs2TableChecksum);
-    add_double(glyph.fPostTableChecksum);
-    add_double(glyph.fMaxpTableChecksum);
-    add_double(glyph.fFaceIndex);
-    add_double(glyph.fFaceFlags);
-    add_double(glyph.fStyleFlags);
-    add_double(glyph.fPlatformDesignAdvance);
-    add_double(glyph.fPlatformGdiCompatibleAdvance);
-    add_double(glyph.fPlatformDesignUnitsPerEm);
-    add_double(glyph.fPlatformMeasuringMode);
     tonic::CheckAndHandleError(Dart_ListSetAt(result, i, record));
   }
   return result;

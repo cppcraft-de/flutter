@@ -31,7 +31,6 @@ GROUP_MARKERS = {
         ('skia', 'modules/skparagraph/src/TextLine.cpp'): 'fNextLineBaselinePitch',
         ('skia', 'modules/skparagraph/include/TextStyle.h'):
             ('SkFontHinting fHinting = SkFontHinting::kFull'),
-        ('skia', 'include/core/SkTypeface.h'): 'getQtLikeGlyphAdvance',
         ('skia', 'modules/canvaskit/paragraph.js'): 'registerTypeface = function(typeface, family)',
         ('skia', 'modules/skparagraph/include/FontCollection.h'): 'clearFontLookupCaches',
         ('skia', 'modules/skshaper/src/SkShaper_harfbuzz.cpp'): 'skhb_qt_style_script',
@@ -39,11 +38,9 @@ GROUP_MARKERS = {
         ('harfbuzz', 'src/hb-ot-shape.cc'): 'plan.apply_fallback_kern = true;',
     },
     'diagnostics': {
-        ('skia', 'modules/skparagraph/src/ParagraphImpl.cpp'): ('diagnosticTableChecksum'),
-        ('skia', 'modules/skparagraph/include/Paragraph.h'): 'fAdvanceProbeBackend',
-        ('skia', 'modules/canvaskit/paragraph_bindings.cpp'): 'fPlatformGdiCompatibleAdvance',
-        ('skia', 'include/core/SkTypeface.h'): 'fGdiCompatibleAdvance',
-        ('skia', 'src/ports/SkTypeface_FreeType.h'): 'fQtLikeAdvanceCache',
+        ('skia', 'modules/skparagraph/src/ParagraphImpl.cpp'): ('getLegacyPairKerningX'),
+        ('skia', 'modules/skparagraph/include/Paragraph.h'): 'fRawShapePosition',
+        ('skia', 'modules/canvaskit/paragraph_bindings.cpp'): 'getGlyphDiagnostics',
     },
     'pdf': {
         ('skia', 'modules/canvaskit/canvaskit_bindings.cpp'): 'MakePdf(JSArray pictures',

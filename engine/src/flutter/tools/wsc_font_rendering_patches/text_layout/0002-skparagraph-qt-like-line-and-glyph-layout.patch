@@ -1,39 +1,3 @@
-diff --git a/include/core/SkTypeface.h b/include/core/SkTypeface.h
-index 1bc8e706e4..80ac91150e 100644
---- a/include/core/SkTypeface.h
-+++ b/include/core/SkTypeface.h
-@@ -252,6 +252,17 @@ public:
-     bool getKerningPairAdjustments(SkSpan<const SkGlyphID> glyphs,
-                                    SkSpan<int32_t> adjustments) const;
- 
-+    struct QtLikeGlyphAdvanceDiagnostics {
-+        bool fAvailable = false;
-+        SkScalar fAdvance = 0;
-+        SkScalar fDesignAdvance = 0;
-+    };
-+
-+    bool getQtLikeGlyphAdvance(SkGlyphID glyph, SkScalar textSize, SkScalar* advance) const;
-+    bool getQtLikeGlyphAdvanceDiagnostics(SkGlyphID glyph,
-+                                          SkScalar textSize,
-+                                          QtLikeGlyphAdvanceDiagnostics* diagnostics) const;
-+
-     struct LocalizedString {
-         SkString fString;
-         SkString fLanguage;
-@@ -413,6 +424,13 @@ protected:
-     virtual int onGetUPEM() const = 0;
-     virtual bool onGetKerningPairAdjustments(SkSpan<const SkGlyphID>,
-                                              SkSpan<int32_t> adjustments) const;
-+    virtual bool onGetQtLikeGlyphAdvance(SkGlyphID glyph,
-+                                         SkScalar textSize,
-+                                         SkScalar* advance) const;
-+    virtual bool onGetQtLikeGlyphAdvanceDiagnostics(
-+            SkGlyphID glyph,
-+            SkScalar textSize,
-+            QtLikeGlyphAdvanceDiagnostics* diagnostics) const;
- 
-     /** Returns the family name of the typeface as known by its font manager.
-      *  This name may or may not be produced by the family name iterator.
 diff --git a/modules/skparagraph/src/Run.cpp b/modules/skparagraph/src/Run.cpp
 index a1cfc403f8..899920da0e 100644
 --- a/modules/skparagraph/src/Run.cpp
@@ -315,48 +279,6 @@ index bb60d70f9c..4aaae6816a 100644
      result.fLineNumber = this - fOwner->lines().data();
  
      // Fill out the style parts
-diff --git a/src/core/SkTypeface.cpp b/src/core/SkTypeface.cpp
-index 038b7be2fe..83ac50d05d 100644
---- a/src/core/SkTypeface.cpp
-+++ b/src/core/SkTypeface.cpp
-@@ -457,6 +457,19 @@ bool SkTypeface::getKerningPairAdjustments(SkSpan<const SkGlyphID> glyphs,
-     return this->onGetKerningPairAdjustments(glyphs.first(n + 1), adjustments.first(n));
- }
- 
-+bool SkTypeface::getQtLikeGlyphAdvance(SkGlyphID glyph,
-+                                       SkScalar textSize,
-+                                       SkScalar* advance) const {
-+    return this->onGetQtLikeGlyphAdvance(glyph, textSize, advance);
-+}
-+
-+bool SkTypeface::getQtLikeGlyphAdvanceDiagnostics(
-+        SkGlyphID glyph,
-+        SkScalar textSize,
-+        QtLikeGlyphAdvanceDiagnostics* diagnostics) const {
-+    return this->onGetQtLikeGlyphAdvanceDiagnostics(glyph, textSize, diagnostics);
-+}
-+
- SkTypeface::LocalizedStrings* SkTypeface::createFamilyNameIterator() const {
-     return this->onCreateFamilyNameIterator();
- }
-@@ -539,6 +552,17 @@ bool SkTypeface::onGetKerningPairAdjustments(SkSpan<const SkGlyphID>, SkSpan<int
-     return false;
- }
- 
-+bool SkTypeface::onGetQtLikeGlyphAdvance(SkGlyphID, SkScalar, SkScalar*) const {
-+    return false;
-+}
-+
-+bool SkTypeface::onGetQtLikeGlyphAdvanceDiagnostics(
-+        SkGlyphID,
-+        SkScalar,
-+        QtLikeGlyphAdvanceDiagnostics*) const {
-+    return false;
-+}
-+
- std::unique_ptr<SkStreamAsset> SkTypeface::onOpenExistingStream(int* ttcIndex) const {
-     return this->onOpenStream(ttcIndex);
- }
 diff --git a/src/ports/SkFontHost_FreeType.cpp b/src/ports/SkFontHost_FreeType.cpp
 index c229c444e6..e35ec2a217 100644
 --- a/src/ports/SkFontHost_FreeType.cpp
@@ -417,84 +339,7 @@ index c229c444e6..e35ec2a217 100644
  #    define SK_FREETYPE_MINIMUM_RUNTIME_VERSION (((FREETYPE_MAJOR) << 24) | ((FREETYPE_MINOR) << 16) | ((FREETYPE_PATCH) << 8))
  #  else
  #    define SK_FREETYPE_MINIMUM_RUNTIME_VERSION ((2 << 24) | (8 << 16) | (1 << 8) | (SK_FREETYPE_DLOPEN))
-@@ -894,6 +929,76 @@ bool SkTypeface_FreeType::onGetKerningPairAdjustments(SkSpan<const SkGlyphID> gl
-     return true;
- }
- 
-+bool SkTypeface_FreeType::onGetQtLikeGlyphAdvance(SkGlyphID glyph,
-+                                                  SkScalar textSize,
-+                                                  SkScalar* advance) const {
-+    if (!advance) {
-+        return false;
-+    }
-+    *advance = 0;
-+
-+    AutoFTAccess fta(this);
-+    FT_Face face = fta.face();
-+    if (!face || !FT_IS_SCALABLE(face)) {
-+        return false;
-+    }
-+
-+    SkUniqueFTSize diagnosticSize([face]() -> FT_Size {
-+        FT_Size size;
-+        FT_Error err = FT_New_Size(face, &size);
-+        if (err != 0) {
-+            SK_TRACEFTR(err, "FT_New_Size(%s) failed in onGetQtLikeGlyphAdvance.",
-+                        face->family_name);
-+            return nullptr;
-+        }
-+        return size;
-+    }());
-+    if (!diagnosticSize) {
-+        return false;
-+    }
-+
-+    FT_Size oldSize = face->size;
-+    FT_Matrix oldTransform;
-+    FT_Vector oldDelta;
-+    FT_Get_Transform(face, &oldTransform, &oldDelta);
-+
-+    FT_Error err = FT_Activate_Size(diagnosticSize.get());
-+    if (err) {
-+        return false;
-+    }
-+
-+    FT_F26Dot6 scale = SkScalarToFDot6(textSize);
-+    err = FT_Set_Char_Size(face, scale, scale, 72, 72);
-+    if (err) {
-+        FT_Activate_Size(oldSize);
-+        FT_Set_Transform(face, &oldTransform, &oldDelta);
-+        return false;
-+    }
-+
-+    FT_Matrix matrix;
-+    matrix.xx = 0x10000;
-+    matrix.xy = 0;
-+    matrix.yx = 0;
-+    matrix.yy = 0x10000;
-+    FT_Set_Transform(face, &matrix, nullptr);
-+
-+    FT_Int32 loadFlags = FT_LOAD_DEFAULT |
-+                         FT_LOAD_IGNORE_GLOBAL_ADVANCE_WIDTH |
-+                         FT_LOAD_TARGET_NORMAL |
-+                         FT_LOAD_NO_BITMAP;
-+    err = FT_Load_Glyph(face, glyph, loadFlags);
-+    if (err) {
-+        FT_Activate_Size(oldSize);
-+        FT_Set_Transform(face, &oldTransform, &oldDelta);
-+        return false;
-+    }
-+
-+    *advance = SkIntToScalar(static_cast<int>((face->glyph->advance.x + 32) >> 6));
-+    FT_Activate_Size(oldSize);
-+    FT_Set_Transform(face, &oldTransform, &oldDelta);
-+    return true;
-+}
-+
- /** Returns the bitmap strike equal to or just larger than the requested size. */
- static FT_Int chooseBitmapStrike(FT_Face face, FT_F26Dot6 scaleY) {
-     if (face == nullptr) {
-@@ -1583,6 +1687,11 @@ void SkScalerContext_FreeType::generateFontMetrics(SkFontMetrics* metrics) {
+@@ -1583,6 +1617,11 @@ void SkScalerContext_FreeType::generateFontMetrics(SkFontMetrics* metrics) {
      // pull from format-specific metrics as needed
      SkScalar ascent, descent, leading, xmin, xmax, ymin, ymax;
      SkScalar underlineThickness, underlinePosition;
@@ -506,7 +351,7 @@ index c229c444e6..e35ec2a217 100644
      if (face->face_flags & FT_FACE_FLAG_SCALABLE) { // scalable outline font
          // FreeType will always use HHEA metrics if they're not zero.
          // It completely ignores the OS/2 fsSelection::UseTypoMetrics bit.
-@@ -1653,6 +1762,16 @@ void SkScalerContext_FreeType::generateFontMetrics(SkFontMetrics* metrics) {
+@@ -1653,6 +1692,16 @@ void SkScalerContext_FreeType::generateFontMetrics(SkFontMetrics* metrics) {
          return;
      }
  
@@ -523,7 +368,7 @@ index c229c444e6..e35ec2a217 100644
      // synthesize elements that were not provided by the os/2 table or format-specific metrics
      if (!x_height) {
          x_height = -ascent * fScale.y();
-@@ -1665,15 +1784,15 @@ void SkScalerContext_FreeType::generateFontMetrics(SkFontMetrics* metrics) {
+@@ -1665,15 +1714,15 @@ void SkScalerContext_FreeType::generateFontMetrics(SkFontMetrics* metrics) {
      }
  
      // disallow negative linespacing
@@ -543,17 +388,3 @@ index c229c444e6..e35ec2a217 100644
      metrics->fAvgCharWidth = avgCharWidth * fScale.y();
      metrics->fXMin = xmin * fScale.y();
      metrics->fXMax = xmax * fScale.y();
-diff --git a/src/ports/SkTypeface_FreeType.h b/src/ports/SkTypeface_FreeType.h
-index 690763eed1..c7d4d8b0ff 100644
---- a/src/ports/SkTypeface_FreeType.h
-+++ b/src/ports/SkTypeface_FreeType.h
-@@ -62,6 +62,9 @@ protected:
-     int onGetUPEM() const override;
-     bool onGetKerningPairAdjustments(SkSpan<const SkGlyphID>,
-                                      SkSpan<int32_t> adjustments) const override;
-+    bool onGetQtLikeGlyphAdvance(SkGlyphID glyph,
-+                                 SkScalar textSize,
-+                                 SkScalar* advance) const override;
-     void onCharsToGlyphs(SkSpan<const SkUnichar>, SkSpan<SkGlyphID>) const override;
-     int onCountGlyphs() const override;
- 
