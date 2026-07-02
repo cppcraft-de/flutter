@@ -46,6 +46,22 @@ class SkiaFontCollection implements FlutterFontCollection {
 
   final Map<String, List<SkFont>> familyToFontMap = <String, List<SkFont>>{};
 
+  void _ensureFontProvider() {
+    if (_fontProvider != null) {
+      return;
+    }
+    _fontProvider = canvasKit.TypefaceFontProvider.Make();
+    skFontCollection = canvasKit.FontCollection.Make();
+    skFontCollection!.enableFontFallback();
+    skFontCollection!.setDefaultFontManager(_fontProvider);
+  }
+
+  void _registerFontWithFontProvider(RegisteredFont font) {
+    _ensureFontProvider();
+    _fontProvider!.registerTypeface(font.typeface, font.family);
+    familyToFontMap.putIfAbsent(font.family, () => <SkFont>[]).add(SkFont(font.typeface));
+  }
+
   void _registerWithFontProvider() {
     if (_fontProvider != null) {
       _fontProvider!.delete();
@@ -53,20 +69,14 @@ class SkiaFontCollection implements FlutterFontCollection {
       skFontCollection?.delete();
       skFontCollection = null;
     }
-    _fontProvider = canvasKit.TypefaceFontProvider.Make();
-    skFontCollection = canvasKit.FontCollection.Make();
-    skFontCollection!.enableFontFallback();
-    skFontCollection!.setDefaultFontManager(_fontProvider);
     familyToFontMap.clear();
 
     for (final RegisteredFont font in _registeredFonts) {
-      _fontProvider!.registerFont(font.bytes, font.family);
-      familyToFontMap.putIfAbsent(font.family, () => <SkFont>[]).add(SkFont(font.typeface));
+      _registerFontWithFontProvider(font);
     }
 
     for (final RegisteredFont font in registeredFallbackFonts) {
-      _fontProvider!.registerFont(font.bytes, font.family);
-      familyToFontMap.putIfAbsent(font.family, () => <SkFont>[]).add(SkFont(font.typeface));
+      _registerFontWithFontProvider(font);
     }
   }
 
@@ -86,8 +96,9 @@ class SkiaFontCollection implements FlutterFontCollection {
           return false;
         }
       }
-      _registeredFonts.add(RegisteredFont(list, fontFamily, typeface));
-      _registerWithFontProvider();
+      final registeredFont = RegisteredFont(list, fontFamily, typeface);
+      _registeredFonts.add(registeredFont);
+      _registerFontWithFontProvider(registeredFont);
     } else {
       printWarning('Failed to parse font family "$fontFamily"');
       return false;

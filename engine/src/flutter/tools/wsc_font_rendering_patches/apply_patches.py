@@ -34,6 +34,7 @@ GROUP_MARKERS = {
         ('skia', 'modules/skparagraph/include/TextStyle.h'):
             ('SkFontHinting fHinting = SkFontHinting::kFull'),
         ('skia', 'include/core/SkTypeface.h'): 'getQtLikeGlyphAdvance',
+        ('skia', 'modules/canvaskit/paragraph.js'): 'registerTypeface = function(typeface, family)',
         ('skia', 'modules/skshaper/src/SkShaper_harfbuzz.cpp'): 'skhb_qt_style_script',
         ('skia', 'src/ports/SkFontHost_FreeType.cpp'): 'FT_Size_Metrics& sizeMetrics',
         ('skia', 'src/ports/SkScalerContext_win_dw.cpp'): 'qtLineHeight',
