@@ -51,6 +51,11 @@ class SkiaFontCollection implements FlutterFontCollection {
       return;
     }
     _fontProvider = canvasKit.TypefaceFontProvider.Make();
+    _recreateSkFontCollection();
+  }
+
+  void _recreateSkFontCollection() {
+    skFontCollection?.delete();
     skFontCollection = canvasKit.FontCollection.Make();
     skFontCollection!.enableFontFallback();
     skFontCollection!.setDefaultFontManager(_fontProvider);
@@ -99,6 +104,7 @@ class SkiaFontCollection implements FlutterFontCollection {
       final registeredFont = RegisteredFont(list, fontFamily, typeface);
       _registeredFonts.add(registeredFont);
       _registerFontWithFontProvider(registeredFont);
+      _recreateSkFontCollection();
     } else {
       printWarning('Failed to parse font family "$fontFamily"');
       return false;
