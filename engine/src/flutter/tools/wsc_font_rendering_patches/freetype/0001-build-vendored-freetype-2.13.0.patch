@@ -7,11 +7,11 @@ index 72b0aec46..1cf5206de 100644
  }
  
 +# WSC/Qt parity patch:
-+# Build the stable Flutter GN label from the Qt-matching FreeType 2.13.0
-+# source tree. Keep Flutter's trimmed module list below so existing native,
-+# Android, and web dependencies on //flutter/third_party/freetype2 do not need
-+# to change labels.
-+qt_compatible_freetype_dir = "../freetype_2.13.0"
++# Build the stable Flutter GN label from the WSC-vendored, Qt-matching
++# FreeType 2.13 source tree. Keep Flutter's trimmed module list below so
++# existing native, Android, and web dependencies on //flutter/third_party/freetype2
++# do not need to change labels.
++qt_compatible_freetype_dir = "../../wsc/third_party/freetype2_2_13"
 +
  config("freetype_config") {
    include_dirs = [
