@@ -102,13 +102,25 @@ def expand_groups(groups):
   return [group for group in PATCH_GROUP_ORDER if group in selected]
 
 
-def patch_groups_already_applied(repo_dirs, groups):
-  for group in groups:
-    for (repo_name, relative_path), marker in GROUP_MARKERS[group].items():
-      contents = (repo_dirs[repo_name] / relative_path).read_text(encoding='utf-8')
-      if marker not in contents:
-        return False
+def patch_group_already_applied(repo_dirs, group):
+  for (repo_name, relative_path), marker in GROUP_MARKERS[group].items():
+    marker_path = repo_dirs[repo_name] / relative_path
+    if not marker_path.exists():
+      return False
+    contents = marker_path.read_text(encoding='utf-8')
+    if marker not in contents:
+      return False
   return True
+
+
+def unapplied_groups(repo_dirs, groups):
+  remaining = []
+  for group in groups:
+    if patch_group_already_applied(repo_dirs, group):
+      print(f'{group} WSC font-rendering patches are already applied.')
+    else:
+      remaining.append(group)
+  return remaining
 
 
 def patch_check(repo_dir, patch_file, reverse=False):
@@ -178,7 +190,12 @@ def main(argv):
   }
   patch_dir = Path(__file__).resolve().parent
   groups = expand_groups(args.groups)
-  patch_files = selected_patch_files(patch_dir, groups)
+  groups_to_apply = unapplied_groups(repo_dirs, groups)
+  if not groups_to_apply:
+    print('Selected WSC font-rendering patches are already applied.')
+    return 0
+
+  patch_files = selected_patch_files(patch_dir, groups_to_apply)
 
   if not patch_files:
     print('No WSC font-rendering patch files found.')
