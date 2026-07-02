@@ -8,6 +8,8 @@
 #include <memory>
 
 #include "flutter/display_list/geometry/dl_geometry_types.h"
+#include "flutter/display_list/geometry/dl_path.h"
+#include "flutter/fml/status_or.h"
 
 namespace impeller {
 class TextFrame;
@@ -21,6 +23,7 @@ class DlText {
   virtual DlRect GetBounds() const = 0;
   virtual std::shared_ptr<impeller::TextFrame> GetTextFrame() const = 0;
   virtual const SkTextBlob* GetTextBlob() const = 0;
+  virtual fml::StatusOr<DlPath> GetPath() const;
 
   bool operator==(const DlText& other) const;
 

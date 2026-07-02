@@ -275,6 +275,12 @@ class SkwasmParagraph extends SkwasmObjectWrapper<RawParagraph> implements ui.Pa
   }
 
   @override
+  Float64List computeDetailedLineMetricsForDiagnostics() => Float64List(0);
+
+  @override
+  List<Object?> computeGlyphMetricsForDiagnostics() => const <Object?>[];
+
+  @override
   ui.LineMetrics? getLineMetricsAt(int index) {
     final LineMetricsHandle metricsHandle = paragraphGetLineMetricsAtIndex(handle, index);
     if (metricsHandle == nullptr) {

@@ -846,6 +846,14 @@ recursedeps = [
 
 hooks = [
   {
+    'name': 'Apply local WSC font rendering patches',
+    'pattern': '.',
+    'action': [
+      'python3',
+      'engine/src/flutter/tools/wsc_font_rendering_patches/apply_patches.py',
+    ],
+  },
+  {
     # Generate the Dart SDK's .dart_tool/package_confg.json file.
     'name': 'Generate .dart_tool/package_confg.json',
     'pattern': '.',

@@ -5,6 +5,8 @@
 #ifndef FLUTTER_TXT_SRC_SKIA_PARAGRAPH_BUILDER_SKIA_H_
 #define FLUTTER_TXT_SRC_SKIA_PARAGRAPH_BUILDER_SKIA_H_
 
+#include <optional>
+
 #include "txt/paragraph_builder.h"
 
 #include "flutter/display_list/dl_paint.h"
@@ -35,6 +37,12 @@ class ParagraphBuilderSkia : public ParagraphBuilder {
 
  private:
   friend class SkiaParagraphBuilderTests_ParagraphStrutStyle_Test;
+  friend class SkiaParagraphBuilderTests_SubpixelTracksEnvironment_Test;
+  friend class SkiaParagraphBuilderTests_SubpixelCanOptOutToVanilla_Test;
+  friend class
+      SkiaParagraphBuilderTests_ExplicitSubpixelPatchValueStillWorks_Test;
+  friend class SkiaParagraphBuilderTests_HintingTracksEnvironment_Test;
+  friend class SkiaParagraphBuilderTests_HintingCanOptOutToVanilla_Test;
 
   skia::textlayout::ParagraphPainter::PaintID CreatePaintID(
       const flutter::DlPaint& dl_paint);
@@ -43,6 +51,8 @@ class ParagraphBuilderSkia : public ParagraphBuilder {
 
   std::shared_ptr<skia::textlayout::ParagraphBuilder> builder_;
   TextStyle base_style_;
+  const bool subpixel_enabled_;
+  const std::optional<SkFontHinting> font_hinting_;
 
   /// @brief      Whether Impeller is enabled in the runtime.
   ///

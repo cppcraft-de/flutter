@@ -1,0 +1,74 @@
+diff --git a/modules/skshaper/src/SkShaper_harfbuzz.cpp b/modules/skshaper/src/SkShaper_harfbuzz.cpp
+index 68897a8bfe..273e97f3eb 100644
+--- a/modules/skshaper/src/SkShaper_harfbuzz.cpp
++++ b/modules/skshaper/src/SkShaper_harfbuzz.cpp
+@@ -139,6 +139,52 @@ hb_position_t skhb_glyph_h_advance(hb_font_t* hb_font,
+     return skhb_position(advance);
+ }
+ 
++bool skhb_glyph_h_kerning(const SkFont& font,
++                          SkGlyphID firstGlyph,
++                          SkGlyphID secondGlyph,
++                          SkScalar* kerning) {
++    SkASSERT(kerning);
++    *kerning = 0;
++
++    SkTypeface* typeface = font.getTypeface();
++    if (!typeface) {
++        return false;
++    }
++
++    SkGlyphID glyphs[2] = {firstGlyph, secondGlyph};
++    int32_t adjustment = 0;
++    if (!typeface->getKerningPairAdjustments({glyphs, 2}, {&adjustment, 1})) {
++        return false;
++    }
++
++    int unitsPerEm = typeface->getUnitsPerEm();
++    if (unitsPerEm <= 0) {
++        return false;
++    }
++
++    *kerning = SkIntToScalar(adjustment) * font.getSize() / SkIntToScalar(unitsPerEm);
++    if (!font.isSubpixel()) {
++        *kerning = SkScalarRoundToInt(*kerning);
++    }
++    return true;
++}
++
++hb_position_t skhb_glyph_h_kerning(hb_font_t* hb_font,
++                                   void* font_data,
++                                   hb_codepoint_t firstGlyph,
++                                   hb_codepoint_t secondGlyph,
++                                   void* user_data) {
++    SkFont& font = *reinterpret_cast<SkFont*>(font_data);
++    SkScalar kerning = 0;
++    if (!skhb_glyph_h_kerning(font,
++                              SkTo<SkGlyphID>(firstGlyph),
++                              SkTo<SkGlyphID>(secondGlyph),
++                              &kerning)) {
++        return 0;
++    }
++    return skhb_position(kerning);
++}
++
+ void skhb_glyph_h_advances(hb_font_t* hb_font,
+                            void* font_data,
+                            unsigned count,
+@@ -222,6 +268,7 @@ hb_font_funcs_t* skhb_get_font_funcs() {
+         sk_ignore_unused_variable(skhb_nominal_glyphs);
+ #endif
+         hb_font_funcs_set_glyph_h_advance_func(funcs, skhb_glyph_h_advance, nullptr, nullptr);
++        hb_font_funcs_set_glyph_h_kerning_func(funcs, skhb_glyph_h_kerning, nullptr, nullptr);
+ #if SK_HB_VERSION_CHECK(1, 8, 6)
+         hb_font_funcs_set_glyph_h_advances_func(funcs, skhb_glyph_h_advances, nullptr, nullptr);
+ #else
+@@ -1370,6 +1417,8 @@ ShapedRun ShaperHarfBuzz::shape(char const * const utf8,
+     }
+ 
+     STArray<32, hb_feature_t> hbFeatures;
++    hbFeatures.push_back({HB_TAG('k', 'e', 'r', 'n'), 1,
++                          HB_FEATURE_GLOBAL_START, HB_FEATURE_GLOBAL_END});
+     for (const auto& feature : SkSpan(features, featuresSize)) {
+         if (feature.end < SkTo<size_t>(utf8Start - utf8) ||
+                           SkTo<size_t>(utf8End   - utf8)  <= feature.start)

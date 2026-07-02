@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import 'dart:typed_data';
+
 import 'package:test/bootstrap/browser.dart';
 import 'package:test/test.dart';
 import 'package:ui/src/engine.dart';
@@ -114,6 +116,28 @@ Future<void> testMain() async {
 
     ui.Picture.onDispose = null;
   });
+
+  test('PdfDocument.toBytes rejects empty pages', () {
+    expect(() => ui.PdfDocument.toBytes(const <ui.PdfPage>[]), throwsArgumentError);
+  });
+
+  test('PdfDocument.toBytes exports a CanvasKit PDF', () async {
+    if (renderer is! CanvasKitRenderer) {
+      return;
+    }
+
+    final ui.Scene scene = _createScene();
+    try {
+      final Uint8List bytes = await ui.PdfDocument.toBytes(<ui.PdfPage>[
+        ui.PdfPage(scene: scene, size: const ui.Size(100.0, 100.0)),
+      ]);
+
+      expect(bytes.length, greaterThan(100));
+      expect(String.fromCharCodes(bytes.take(5)), '%PDF-');
+    } finally {
+      scene.dispose();
+    }
+  });
 }
 
 ui.Picture _createPicture() {
@@ -122,4 +146,19 @@ ui.Picture _createPicture() {
   const rect = ui.Rect.fromLTWH(0.0, 0.0, 100.0, 100.0);
   canvas.clipRect(rect);
   return recorder.endRecording();
+}
+
+ui.Scene _createScene() {
+  final recorder = ui.PictureRecorder();
+  final canvas = ui.Canvas(recorder);
+  canvas.drawRect(
+    const ui.Rect.fromLTWH(10.0, 10.0, 80.0, 80.0),
+    ui.Paint()..color = const ui.Color(0xFF123456),
+  );
+  final ui.Picture picture = recorder.endRecording();
+  final builder = ui.SceneBuilder();
+  builder.addPicture(ui.Offset.zero, picture);
+  final ui.Scene scene = builder.build();
+  picture.dispose();
+  return scene;
 }

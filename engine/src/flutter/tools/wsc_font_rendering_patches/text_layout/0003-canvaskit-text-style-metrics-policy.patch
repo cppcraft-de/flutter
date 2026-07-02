@@ -1,0 +1,15 @@
+diff --git a/modules/skparagraph/include/TextStyle.h b/modules/skparagraph/include/TextStyle.h
+index 9a65834b8e..0fc7bbca57 100644
+--- a/modules/skparagraph/include/TextStyle.h
++++ b/modules/skparagraph/include/TextStyle.h
+@@ -315,8 +315,8 @@ private:
+ 
+     SkScalar fFontSize = 14.0;
+     SkFont::Edging fEdging = SkFont::Edging::kAntiAlias;
+-    bool fSubpixel = true;
+-    SkFontHinting fHinting = SkFontHinting::kSlight;
++    bool fSubpixel = false;
++    SkFontHinting fHinting = SkFontHinting::kFull;
+     SkScalar fHeight = 1.0;
+     bool fHeightOverride = false;
+     SkScalar fBaselineShift = 0.0f;

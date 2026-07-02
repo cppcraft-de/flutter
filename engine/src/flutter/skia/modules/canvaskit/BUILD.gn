@@ -205,6 +205,9 @@ canvaskit_wasm_lib("canvaskit") {
   if (!is_debug && !skia_canvaskit_force_tracing) {
     defines += [ "SK_DISABLE_TRACING" ]
   }
+  if (skia_use_zlib) {
+    defines += [ "SK_SUPPORT_PDF" ]
+  }
   defines += [
     "SK_FORCE_AAA",
     "SK_FORCE_8_BYTE_ALIGNMENT",

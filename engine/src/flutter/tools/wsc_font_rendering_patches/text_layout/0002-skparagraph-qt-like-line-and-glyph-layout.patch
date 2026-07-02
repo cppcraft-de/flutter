@@ -1,0 +1,891 @@
+diff --git a/include/core/SkTypeface.h b/include/core/SkTypeface.h
+index 1bc8e706e4..80ac91150e 100644
+--- a/include/core/SkTypeface.h
++++ b/include/core/SkTypeface.h
+@@ -252,6 +252,17 @@ public:
+     bool getKerningPairAdjustments(SkSpan<const SkGlyphID> glyphs,
+                                    SkSpan<int32_t> adjustments) const;
+ 
++    struct QtLikeGlyphAdvanceDiagnostics {
++        bool fAvailable = false;
++        SkScalar fAdvance = 0;
++        SkScalar fDesignAdvance = 0;
++    };
++
++    bool getQtLikeGlyphAdvance(SkGlyphID glyph, SkScalar textSize, SkScalar* advance) const;
++    bool getQtLikeGlyphAdvanceDiagnostics(SkGlyphID glyph,
++                                          SkScalar textSize,
++                                          QtLikeGlyphAdvanceDiagnostics* diagnostics) const;
++
+     struct LocalizedString {
+         SkString fString;
+         SkString fLanguage;
+@@ -413,6 +424,13 @@ protected:
+     virtual int onGetUPEM() const = 0;
+     virtual bool onGetKerningPairAdjustments(SkSpan<const SkGlyphID>,
+                                              SkSpan<int32_t> adjustments) const;
++    virtual bool onGetQtLikeGlyphAdvance(SkGlyphID glyph,
++                                         SkScalar textSize,
++                                         SkScalar* advance) const;
++    virtual bool onGetQtLikeGlyphAdvanceDiagnostics(
++            SkGlyphID glyph,
++            SkScalar textSize,
++            QtLikeGlyphAdvanceDiagnostics* diagnostics) const;
+ 
+     /** Returns the family name of the typeface as known by its font manager.
+      *  This name may or may not be produced by the family name iterator.
+diff --git a/modules/skparagraph/src/Run.cpp b/modules/skparagraph/src/Run.cpp
+index a1cfc403f8..899920da0e 100644
+--- a/modules/skparagraph/src/Run.cpp
++++ b/modules/skparagraph/src/Run.cpp
+@@ -1,6 +1,7 @@
+ // Copyright 2019 Google LLC
+ #include "include/core/SkFontMetrics.h"
+ #include "include/core/SkTextBlob.h"
++#include "include/core/SkTypeface.h"
+ #include "include/private/base/SkFloatingPoint.h"
+ #include "include/private/base/SkMalloc.h"
+ #include "include/private/base/SkTo.h"
+@@ -87,6 +88,39 @@ SkShaper::RunHandler::Buffer Run::newRunBuffer() {
+     return {fGlyphs.data(), fPositions.data(), fOffsets.data(), fClusterIndexes.data(), fOffset};
+ }
+ 
++void Run::commit() {
++    if (!InternalLineMetrics::useQtLikeIntegerMetrics() || this->isPlaceholder()) {
++        return;
++    }
++
++    const auto rawPositions = fPositions;
++
++    SkScalar x = fPositions.empty() ? 0.0f : fPositions[0].fX;
++    SkScalar width = 0.0f;
++    for (size_t i = 0; i < this->size(); ++i) {
++        SkScalar advance =
++                SkScalarRoundToInt(rawPositions[i + 1].fX - rawPositions[i].fX);
++        if (SkTypeface* typeface = fFont.getTypeface()) {
++            SkTypeface::QtLikeGlyphAdvanceDiagnostics diagnostics;
++            if (typeface->getQtLikeGlyphAdvanceDiagnostics(
++                        fGlyphs[i], fFont.getSize(), &diagnostics) &&
++                diagnostics.fAvailable &&
++                !SkScalarNearlyZero(diagnostics.fDesignAdvance)) {
++                const SkScalar selectedAdvance = SkScalarRoundToInt(diagnostics.fAdvance);
++                const SkScalar designAdvance = SkScalarRoundToInt(diagnostics.fDesignAdvance);
++                advance += selectedAdvance - designAdvance;
++            }
++        }
++        fPositions[i].fX = x;
++        x += advance;
++        width += advance;
++    }
++    if (!fPositions.empty()) {
++        fPositions[this->size()].fX = x;
++    }
++    fAdvance.fX = width;
++}
++
+ void Run::copyTo(SkTextBlobBuilder& builder, size_t pos, size_t size) const {
+     SkASSERT(pos + size <= this->size());
+     const auto& blobBuffer = builder.allocRunPos(fFont, SkToInt(size));
+diff --git a/modules/skparagraph/src/Run.h b/modules/skparagraph/src/Run.h
+index 8f5d709c8b..73918ac060 100644
+--- a/modules/skparagraph/src/Run.h
++++ b/modules/skparagraph/src/Run.h
+@@ -14,6 +14,8 @@
+ #include "modules/skparagraph/include/TextStyle.h"
+ #include "modules/skshaper/include/SkShaper.h"
+ 
++#include <cstdlib>
++#include <cstring>
+ #include <math.h>
+ #include <algorithm>
+ #include <functional>
+@@ -161,7 +163,7 @@ public:
+         return SkSpan<const uint32_t>(fClusterIndexes.begin(), fClusterIndexes.size());
+     }
+ 
+-    void commit() { }
++    void commit();
+ 
+     void resetJustificationShifts() {
+         fJustificationShifts.clear();
+@@ -388,6 +390,9 @@ public:
+         fRawAscent = a;
+         fRawDescent = d;
+         fRawLeading = l;
++        fHeightInputAscent = a;
++        fHeightInputDescent = d;
++        fHeightInputLeading = l;
+         fForceStrut = false;
+     }
+ 
+@@ -398,6 +403,9 @@ public:
+         fRawAscent = ra;
+         fRawDescent = rd;
+         fRawLeading = rl;
++        fHeightInputAscent = ra;
++        fHeightInputDescent = rd;
++        fHeightInputLeading = rl;
+         fForceStrut = false;
+     }
+ 
+@@ -410,6 +418,9 @@ public:
+         fRawAscent = metrics.fAscent;
+         fRawDescent = metrics.fDescent;
+         fRawLeading = metrics.fLeading;
++        fHeightInputAscent = metrics.fAscent;
++        fHeightInputDescent = metrics.fDescent;
++        fHeightInputLeading = metrics.fLeading;
+         fForceStrut = forceStrut;
+     }
+ 
+@@ -424,6 +435,9 @@ public:
+         fRawAscent = std::min(fRawAscent, run->ascent());
+         fRawDescent = std::max(fRawDescent, run->descent());
+         fRawLeading = std::max(fRawLeading, run->leading());
++        fHeightInputAscent = std::min(fHeightInputAscent, run->ascent());
++        fHeightInputDescent = std::max(fHeightInputDescent, run->descent());
++        fHeightInputLeading = std::max(fHeightInputLeading, run->leading());
+     }
+ 
+     void add(InternalLineMetrics other) {
+@@ -433,6 +447,9 @@ public:
+         fRawAscent = std::min(fRawAscent, other.fRawAscent);
+         fRawDescent = std::max(fRawDescent, other.fRawDescent);
+         fRawLeading = std::max(fRawLeading, other.fRawLeading);
++        fHeightInputAscent = std::min(fHeightInputAscent, other.fHeightInputAscent);
++        fHeightInputDescent = std::max(fHeightInputDescent, other.fHeightInputDescent);
++        fHeightInputLeading = std::max(fHeightInputLeading, other.fHeightInputLeading);
+     }
+ 
+     void clean() {
+@@ -442,6 +459,9 @@ public:
+         fRawAscent = SK_ScalarMax;
+         fRawDescent = SK_ScalarMin;
+         fRawLeading = 0;
++        fHeightInputAscent = SK_ScalarMax;
++        fHeightInputDescent = SK_ScalarMin;
++        fHeightInputLeading = SK_ScalarMin;
+     }
+ 
+     bool isClean() {
+@@ -455,6 +475,38 @@ public:
+ 
+     SkScalar delta() const { return height() - ideographicBaseline(); }
+ 
++    static bool environmentVariableEnabled(const char* value) {
++        return value != nullptr &&
++               (std::strcmp(value, "1") == 0 ||
++                std::strcmp(value, "true") == 0 ||
++                std::strcmp(value, "TRUE") == 0 ||
++                std::strcmp(value, "yes") == 0 ||
++                std::strcmp(value, "on") == 0);
++    }
++
++    static bool environmentVariableDisabled(const char* value) {
++        return value != nullptr &&
++               (std::strcmp(value, "0") == 0 ||
++                std::strcmp(value, "false") == 0 ||
++                std::strcmp(value, "FALSE") == 0 ||
++                std::strcmp(value, "no") == 0 ||
++                std::strcmp(value, "off") == 0);
++    }
++
++    static bool useQtLikeIntegerMetrics() {
++        const char* value = std::getenv("FLUTTER_QT_LINE_METRICS");
++        if (value == nullptr || *value == '\0') {
++            value = std::getenv("FLUTTER_INTEGER_TEXT_METRICS");
++        }
++        if (value == nullptr || *value == '\0') {
++            return true;
++        }
++        if (environmentVariableDisabled(value)) {
++            return false;
++        }
++        return environmentVariableEnabled(value);
++    }
++
+     void updateLineMetrics(InternalLineMetrics& metrics) {
+         if (metrics.fForceStrut) {
+             metrics.fAscent = fAscent;
+@@ -463,6 +515,9 @@ public:
+             metrics.fRawAscent = fRawAscent;
+             metrics.fRawDescent = fRawDescent;
+             metrics.fRawLeading = fRawLeading;
++            metrics.fHeightInputAscent = fHeightInputAscent;
++            metrics.fHeightInputDescent = fHeightInputDescent;
++            metrics.fHeightInputLeading = fHeightInputLeading;
+         } else {
+             // This is another of those flutter changes. To be removed...
+             metrics.fAscent = std::min(metrics.fAscent, fAscent - fLeading / 2.0f);
+@@ -478,9 +533,27 @@ public:
+     }
+ 
+     SkScalar height() const {
++        if (useQtLikeIntegerMetrics()) {
++            return this->nextLineBaselinePitch();
++        }
+         return ::round((double)fDescent - fAscent + fLeading);
+     }
+ 
++    SkScalar nextLineBaselinePitch() const {
++        return ::ceil((double)-fHeightInputAscent + fHeightInputDescent + fHeightInputLeading);
++    }
++
++    int lineHeightBranch() const {
++        if (!useQtLikeIntegerMetrics()) {
++            return 0;
++        }
++        return 2;
++    }
++
++    SkScalar lineBoxHeight() const {
++        return ::ceil((double)-fHeightInputAscent + fHeightInputDescent + this->layoutLeading());
++    }
++
+     void update(SkScalar a, SkScalar d, SkScalar l) {
+         fAscent = a;
+         fDescent = d;
+@@ -492,15 +565,27 @@ public:
+         fRawDescent = rd;
+     }
+ 
+-    SkScalar alphabeticBaseline() const { return fLeading / 2 - fAscent; }
++    SkScalar alphabeticBaseline() const { return baseline(); }
+     SkScalar ideographicBaseline() const { return fDescent - fAscent + fLeading; }
+     SkScalar deltaBaselines() const { return fLeading / 2 + fDescent; }
+-    SkScalar baseline() const { return fLeading / 2 - fAscent; }
++    SkScalar baseline() const {
++        return useQtLikeIntegerMetrics() ? this->layoutAscent() : fLeading / 2 - fAscent;
++    }
+     SkScalar ascent() const { return fAscent; }
+     SkScalar descent() const { return fDescent; }
+     SkScalar leading() const { return fLeading; }
+-    SkScalar rawAscent() const { return fRawAscent; }
+-    SkScalar rawDescent() const { return fRawDescent; }
++    SkScalar rawAscent() const { return fHeightInputAscent; }
++    SkScalar rawDescent() const { return fHeightInputDescent; }
++    SkScalar rawLeading() const { return fHeightInputLeading; }
++    SkScalar heightInputAscent() const { return fHeightInputAscent; }
++    SkScalar heightInputDescent() const { return fHeightInputDescent; }
++    SkScalar heightInputLeading() const { return fHeightInputLeading; }
++    SkScalar heightInputRawLeading() const { return fHeightInputLeading; }
++    SkScalar layoutAscent() const { return ::ceil((double)-fHeightInputAscent); }
++    SkScalar layoutDescent() const { return ::ceil((double)fHeightInputDescent); }
++    SkScalar layoutLeading() const {
++        return std::max(0.0f, fHeightInputLeading);
++    }
+     void setForceStrut(bool value) { fForceStrut = value; }
+     bool getForceStrut() const { return fForceStrut; }
+ 
+@@ -517,6 +602,9 @@ private:
+     SkScalar fRawAscent;
+     SkScalar fRawDescent;
+     SkScalar fRawLeading;
++    SkScalar fHeightInputAscent;
++    SkScalar fHeightInputDescent;
++    SkScalar fHeightInputLeading;
+ 
+     bool fForceStrut;
+ };
+diff --git a/modules/skparagraph/src/TextLine.cpp b/modules/skparagraph/src/TextLine.cpp
+index bb60d70f9c..4aaae6816a 100644
+--- a/modules/skparagraph/src/TextLine.cpp
++++ b/modules/skparagraph/src/TextLine.cpp
+@@ -152,8 +152,9 @@ TextLine::TextLine(ParagraphImpl* owner,
+     for (auto runIndex = start.runIndex(); runIndex <= end.runIndex(); ++runIndex) {
+         auto& run = fOwner->run(runIndex);
+         runLevels[runLevelsIndex++] = run.fBidiLevel;
+-        fMaxRunMetrics.add(
+-            InternalLineMetrics(run.correctAscent(), run.correctDescent(), run.fFontMetrics.fLeading));
++        fMaxRunMetrics.add(InternalLineMetrics(
++            run.correctAscent(), run.correctDescent(), run.fFontMetrics.fLeading,
++            run.ascent(), run.descent(), run.leading()));
+         if (run.isPlaceholder()) {
+             placeholdersInOriginalOrder.push_back(runIndex);
+         }
+@@ -1123,9 +1124,15 @@ LineMetrics TextLine::getMetrics() const {
+     result.fEndIndex = fOwner->getUTF16Index(fText.end);
+     result.fEndIncludingNewline = fOwner->getUTF16Index(fTextIncludingNewlines.end);
+     result.fHardBreak = endsWithHardLineBreak();
+-    result.fAscent = - fMaxRunMetrics.ascent();
+-    result.fDescent = fMaxRunMetrics.descent();
+-    result.fUnscaledAscent = - fMaxRunMetrics.ascent(); // TODO: implement
++    if (InternalLineMetrics::useQtLikeIntegerMetrics()) {
++        result.fAscent = this->sizes().layoutAscent();
++        result.fDescent = this->sizes().layoutDescent();
++        result.fUnscaledAscent = result.fAscent; // TODO: implement
++    } else {
++        result.fAscent = - fMaxRunMetrics.ascent();
++        result.fDescent = fMaxRunMetrics.descent();
++        result.fUnscaledAscent = - fMaxRunMetrics.ascent(); // TODO: implement
++    }
+     result.fHeight = fAdvance.fY;
+     result.fWidth = fAdvance.fX;
+     if (fOwner->getApplyRoundingHack()) {
+@@ -1134,7 +1141,10 @@ LineMetrics TextLine::getMetrics() const {
+     }
+     result.fLeft = this->offset().fX;
+     // This is Flutter definition of a baseline
+-    result.fBaseline = this->offset().fY + this->height() - this->sizes().descent();
++    result.fBaseline = this->offset().fY +
++        (InternalLineMetrics::useQtLikeIntegerMetrics()
++            ? this->baseline()
++            : this->height() - this->sizes().descent());
+     result.fLineNumber = this - fOwner->lines().data();
+ 
+     // Fill out the style parts
+diff --git a/src/core/SkTypeface.cpp b/src/core/SkTypeface.cpp
+index 038b7be2fe..83ac50d05d 100644
+--- a/src/core/SkTypeface.cpp
++++ b/src/core/SkTypeface.cpp
+@@ -457,6 +457,19 @@ bool SkTypeface::getKerningPairAdjustments(SkSpan<const SkGlyphID> glyphs,
+     return this->onGetKerningPairAdjustments(glyphs.first(n + 1), adjustments.first(n));
+ }
+ 
++bool SkTypeface::getQtLikeGlyphAdvance(SkGlyphID glyph,
++                                       SkScalar textSize,
++                                       SkScalar* advance) const {
++    return this->onGetQtLikeGlyphAdvance(glyph, textSize, advance);
++}
++
++bool SkTypeface::getQtLikeGlyphAdvanceDiagnostics(
++        SkGlyphID glyph,
++        SkScalar textSize,
++        QtLikeGlyphAdvanceDiagnostics* diagnostics) const {
++    return this->onGetQtLikeGlyphAdvanceDiagnostics(glyph, textSize, diagnostics);
++}
++
+ SkTypeface::LocalizedStrings* SkTypeface::createFamilyNameIterator() const {
+     return this->onCreateFamilyNameIterator();
+ }
+@@ -539,6 +552,17 @@ bool SkTypeface::onGetKerningPairAdjustments(SkSpan<const SkGlyphID>, SkSpan<int
+     return false;
+ }
+ 
++bool SkTypeface::onGetQtLikeGlyphAdvance(SkGlyphID, SkScalar, SkScalar*) const {
++    return false;
++}
++
++bool SkTypeface::onGetQtLikeGlyphAdvanceDiagnostics(
++        SkGlyphID,
++        SkScalar,
++        QtLikeGlyphAdvanceDiagnostics*) const {
++    return false;
++}
++
+ std::unique_ptr<SkStreamAsset> SkTypeface::onOpenExistingStream(int* ttcIndex) const {
+     return this->onOpenStream(ttcIndex);
+ }
+diff --git a/src/ports/SkFontHost_FreeType.cpp b/src/ports/SkFontHost_FreeType.cpp
+index c229c444e6..e35ec2a217 100644
+--- a/src/ports/SkFontHost_FreeType.cpp
++++ b/src/ports/SkFontHost_FreeType.cpp
+@@ -46,6 +46,8 @@
+ #include <memory>
+ #include <optional>
+ #include <tuple>
++#include <cstdlib>
++#include <cstring>
+ 
+ #include <ft2build.h>
+ #include <freetype/ftadvanc.h>
+@@ -72,6 +74,38 @@ namespace {
+ 
+ using SkUniqueFTFace = std::unique_ptr<FT_FaceRec, SkFunctionObject<FT_Done_Face>>;
+ using SkUniqueFTSize = std::unique_ptr<FT_SizeRec, SkFunctionObject<FT_Done_Size>>;
++
++static bool environment_variable_enabled(const char* value) {
++    return value != nullptr &&
++           (std::strcmp(value, "1") == 0 ||
++            std::strcmp(value, "true") == 0 ||
++            std::strcmp(value, "TRUE") == 0 ||
++            std::strcmp(value, "yes") == 0 ||
++            std::strcmp(value, "on") == 0);
++}
++
++static bool environment_variable_disabled(const char* value) {
++    return value != nullptr &&
++           (std::strcmp(value, "0") == 0 ||
++            std::strcmp(value, "false") == 0 ||
++            std::strcmp(value, "FALSE") == 0 ||
++            std::strcmp(value, "no") == 0 ||
++            std::strcmp(value, "off") == 0);
++}
++
++static bool use_qt_like_integer_metrics() {
++    const char* value = std::getenv("FLUTTER_QT_LINE_METRICS");
++    if (value == nullptr || *value == '\0') {
++        value = std::getenv("FLUTTER_INTEGER_TEXT_METRICS");
++    }
++    if (value == nullptr || *value == '\0') {
++        return true;
++    }
++    if (environment_variable_disabled(value)) {
++        return false;
++    }
++    return environment_variable_enabled(value);
++}
+ }
+ 
+ // SK_FREETYPE_MINIMUM_RUNTIME_VERSION 0x<major><minor><patch><flags>
+@@ -894,6 +928,76 @@ bool SkTypeface_FreeType::onGetKerningPairAdjustments(SkSpan<const SkGlyphID> gl
+     return true;
+ }
+ 
++bool SkTypeface_FreeType::onGetQtLikeGlyphAdvance(SkGlyphID glyph,
++                                                  SkScalar textSize,
++                                                  SkScalar* advance) const {
++    if (!advance) {
++        return false;
++    }
++    *advance = 0;
++
++    AutoFTAccess fta(this);
++    FT_Face face = fta.face();
++    if (!face || !FT_IS_SCALABLE(face)) {
++        return false;
++    }
++
++    SkUniqueFTSize diagnosticSize([face]() -> FT_Size {
++        FT_Size size;
++        FT_Error err = FT_New_Size(face, &size);
++        if (err != 0) {
++            SK_TRACEFTR(err, "FT_New_Size(%s) failed in onGetQtLikeGlyphAdvance.",
++                        face->family_name);
++            return nullptr;
++        }
++        return size;
++    }());
++    if (!diagnosticSize) {
++        return false;
++    }
++
++    FT_Size oldSize = face->size;
++    FT_Matrix oldTransform;
++    FT_Vector oldDelta;
++    FT_Get_Transform(face, &oldTransform, &oldDelta);
++
++    FT_Error err = FT_Activate_Size(diagnosticSize.get());
++    if (err) {
++        return false;
++    }
++
++    FT_F26Dot6 scale = SkScalarToFDot6(textSize);
++    err = FT_Set_Char_Size(face, scale, scale, 72, 72);
++    if (err) {
++        FT_Activate_Size(oldSize);
++        FT_Set_Transform(face, &oldTransform, &oldDelta);
++        return false;
++    }
++
++    FT_Matrix matrix;
++    matrix.xx = 0x10000;
++    matrix.xy = 0;
++    matrix.yx = 0;
++    matrix.yy = 0x10000;
++    FT_Set_Transform(face, &matrix, nullptr);
++
++    FT_Int32 loadFlags = FT_LOAD_DEFAULT |
++                         FT_LOAD_IGNORE_GLOBAL_ADVANCE_WIDTH |
++                         FT_LOAD_TARGET_NORMAL |
++                         FT_LOAD_NO_BITMAP;
++    err = FT_Load_Glyph(face, glyph, loadFlags);
++    if (err) {
++        FT_Activate_Size(oldSize);
++        FT_Set_Transform(face, &oldTransform, &oldDelta);
++        return false;
++    }
++
++    *advance = SkIntToScalar(static_cast<int>((face->glyph->advance.x + 32) >> 6));
++    FT_Activate_Size(oldSize);
++    FT_Set_Transform(face, &oldTransform, &oldDelta);
++    return true;
++}
++
+ /** Returns the bitmap strike equal to or just larger than the requested size. */
+ static FT_Int chooseBitmapStrike(FT_Face face, FT_F26Dot6 scaleY) {
+     if (face == nullptr) {
+@@ -1583,6 +1687,11 @@ void SkScalerContext_FreeType::generateFontMetrics(SkFontMetrics* metrics) {
+     // pull from format-specific metrics as needed
+     SkScalar ascent, descent, leading, xmin, xmax, ymin, ymax;
+     SkScalar underlineThickness, underlinePosition;
++    const bool useQtLikeMetrics = use_qt_like_integer_metrics();
++    bool useQtLikeSizeMetrics = false;
++    SkScalar qtAscent = 0.0f;
++    SkScalar qtDescent = 0.0f;
++    SkScalar qtLeading = 0.0f;
+     if (face->face_flags & FT_FACE_FLAG_SCALABLE) { // scalable outline font
+         // FreeType will always use HHEA metrics if they're not zero.
+         // It completely ignores the OS/2 fsSelection::UseTypoMetrics bit.
+@@ -1653,6 +1762,16 @@ void SkScalerContext_FreeType::generateFontMetrics(SkFontMetrics* metrics) {
+         return;
+     }
+ 
++    if (useQtLikeMetrics) {
++        const FT_Size_Metrics& sizeMetrics = face->size->metrics;
++        qtAscent = -SkFDot6ToScalar(sizeMetrics.ascender);
++        qtDescent = -SkFDot6ToScalar(sizeMetrics.descender);
++        qtLeading = SkFDot6ToScalar(sizeMetrics.height -
++                                    sizeMetrics.ascender +
++                                    sizeMetrics.descender);
++        useQtLikeSizeMetrics = true;
++    }
++
+     // synthesize elements that were not provided by the os/2 table or format-specific metrics
+     if (!x_height) {
+         x_height = -ascent * fScale.y();
+@@ -1665,15 +1784,15 @@ void SkScalerContext_FreeType::generateFontMetrics(SkFontMetrics* metrics) {
+     }
+ 
+     // disallow negative linespacing
+-    if (leading < 0.0f) {
++    if (!useQtLikeSizeMetrics && leading < 0.0f) {
+         leading = 0.0f;
+     }
+ 
+     metrics->fTop = ymax * fScale.y();
+-    metrics->fAscent = ascent * fScale.y();
+-    metrics->fDescent = descent * fScale.y();
++    metrics->fAscent = useQtLikeSizeMetrics ? qtAscent : ascent * fScale.y();
++    metrics->fDescent = useQtLikeSizeMetrics ? qtDescent : descent * fScale.y();
+     metrics->fBottom = ymin * fScale.y();
+-    metrics->fLeading = leading * fScale.y();
++    metrics->fLeading = useQtLikeSizeMetrics ? qtLeading : leading * fScale.y();
+     metrics->fAvgCharWidth = avgCharWidth * fScale.y();
+     metrics->fXMin = xmin * fScale.y();
+     metrics->fXMax = xmax * fScale.y();
+diff --git a/src/ports/SkScalerContext_mac_ct.cpp b/src/ports/SkScalerContext_mac_ct.cpp
+index 0670b7615a..fc885a6df6 100644
+--- a/src/ports/SkScalerContext_mac_ct.cpp
++++ b/src/ports/SkScalerContext_mac_ct.cpp
+@@ -44,6 +44,8 @@
+ #include "src/ports/SkTypeface_mac_ct.h"
+ #include "src/sfnt/SkOTTableTypes.h"
+ #include "src/sfnt/SkOTTable_OS_2.h"
++#include "src/sfnt/SkOTTable_head.h"
++#include "src/sfnt/SkOTTable_hhea.h"
+ #include "src/utils/mac/SkCGBase.h"
+ #include "src/utils/mac/SkCGGeometry.h"
+ #include "src/utils/mac/SkCTFont.h"
+@@ -51,12 +53,47 @@
+ #include "src/utils/mac/SkUniqueCFRef.h"
+ 
+ #include <algorithm>
++#include <cmath>
++#include <cstdlib>
++#include <cstring>
+ 
+ class SkDescriptor;
+ 
+ 
+ namespace {
+ static inline const constexpr bool kSkShowTextBlitCoverage = false;
++
++static bool environment_variable_enabled(const char* value) {
++    return value != nullptr &&
++           (std::strcmp(value, "1") == 0 ||
++            std::strcmp(value, "true") == 0 ||
++            std::strcmp(value, "TRUE") == 0 ||
++            std::strcmp(value, "yes") == 0 ||
++            std::strcmp(value, "on") == 0);
++}
++
++static bool environment_variable_disabled(const char* value) {
++    return value != nullptr &&
++           (std::strcmp(value, "0") == 0 ||
++            std::strcmp(value, "false") == 0 ||
++            std::strcmp(value, "FALSE") == 0 ||
++            std::strcmp(value, "no") == 0 ||
++            std::strcmp(value, "off") == 0);
++}
++
++static bool use_qt_like_integer_metrics() {
++    const char* value = std::getenv("FLUTTER_QT_LINE_METRICS");
++    if (value == nullptr || *value == '\0') {
++        value = std::getenv("FLUTTER_INTEGER_TEXT_METRICS");
++    }
++    if (value == nullptr || *value == '\0') {
++        return true;
++    }
++    if (environment_variable_disabled(value)) {
++        return false;
++    }
++    return environment_variable_enabled(value);
++}
+ }
+ 
+ static void sk_memset_rect32(uint32_t* ptr, uint32_t value,
+@@ -700,6 +737,39 @@ void SkScalerContext_Mac::generateFontMetrics(SkFontMetrics* metrics) {
+     metrics->fStrikeoutThickness = 0;
+     metrics->fStrikeoutPosition = 0;
+ 
++    if (use_qt_like_integer_metrics()) {
++        sk_sp<SkData> head = this->getTypeface()->copyTableData(
++                SkTEndian_SwapBE32(SkOTTableHead::TAG));
++        sk_sp<SkData> hhea = this->getTypeface()->copyTableData(
++                SkTEndian_SwapBE32(SkOTTableHorizontalHeader::TAG));
++        if (head && hhea && sizeof(SkOTTableHead) <= head->size() &&
++                sizeof(SkOTTableHorizontalHeader) <= hhea->size()) {
++            const SkOTTableHead* headTable = static_cast<const SkOTTableHead*>(head->data());
++            const SkOTTableHorizontalHeader* hheaTable =
++                    static_cast<const SkOTTableHorizontalHeader*>(hhea->data());
++            const uint16_t upem = SkEndian_SwapBE16(headTable->unitsPerEm);
++            if (upem != 0) {
++                const SkScalar fontSize = SkScalarFromCGFloat(CTFontGetSize(fCTFont.get()));
++                const int16_t hheaAscent =
++                        static_cast<int16_t>(SkEndian_SwapBE16(hheaTable->Ascender));
++                const int16_t hheaDescent =
++                        static_cast<int16_t>(SkEndian_SwapBE16(hheaTable->Descender));
++                const int16_t hheaLineGap =
++                        static_cast<int16_t>(SkEndian_SwapBE16(hheaTable->LineGap));
++                const SkScalar ascent = fontSize * SkIntToScalar(hheaAscent) / upem;
++                const SkScalar descent = fontSize * SkIntToScalar(-hheaDescent) / upem;
++                const SkScalar lineGap = fontSize * SkIntToScalar(hheaLineGap) / upem;
++                const SkScalar qtAscent = SkScalarCeilToScalar(ascent);
++                const SkScalar qtDescent = SkScalarCeilToScalar(descent);
++                const SkScalar qtLineHeight = std::floor(ascent + descent + lineGap + 0.5f);
++
++                metrics->fAscent = -qtAscent;
++                metrics->fDescent = qtDescent;
++                metrics->fLeading = qtLineHeight - qtAscent - qtDescent;
++            }
++        }
++    }
++
+     metrics->fFlags = 0;
+     metrics->fFlags |= SkFontMetrics::kUnderlineThicknessIsValid_Flag;
+     metrics->fFlags |= SkFontMetrics::kUnderlinePositionIsValid_Flag;
+diff --git a/src/ports/SkScalerContext_win_dw.cpp b/src/ports/SkScalerContext_win_dw.cpp
+index 68eb71e26f..7f4733183e 100644
+--- a/src/ports/SkScalerContext_win_dw.cpp
++++ b/src/ports/SkScalerContext_win_dw.cpp
+@@ -50,9 +50,92 @@
+ #include <dwrite_1.h>
+ #include <dwrite_3.h>
+ 
++#include <cmath>
++#include <cstdlib>
++#include <cstring>
++
+ namespace {
+ static inline const constexpr bool kSkShowTextBlitCoverage = false;
+ 
++static bool environment_variable_enabled(const char* value) {
++    return value != nullptr &&
++           (std::strcmp(value, "1") == 0 ||
++            std::strcmp(value, "true") == 0 ||
++            std::strcmp(value, "TRUE") == 0 ||
++            std::strcmp(value, "yes") == 0 ||
++            std::strcmp(value, "on") == 0);
++}
++
++static bool environment_variable_disabled(const char* value) {
++    return value != nullptr &&
++           (std::strcmp(value, "0") == 0 ||
++            std::strcmp(value, "false") == 0 ||
++            std::strcmp(value, "FALSE") == 0 ||
++            std::strcmp(value, "no") == 0 ||
++            std::strcmp(value, "off") == 0);
++}
++
++static bool use_qt_like_integer_metrics() {
++    const char* value = std::getenv("FLUTTER_QT_LINE_METRICS");
++    if (value == nullptr || *value == '\0') {
++        value = std::getenv("FLUTTER_INTEGER_TEXT_METRICS");
++    }
++    if (value == nullptr || *value == '\0') {
++        return true;
++    }
++    if (environment_variable_disabled(value)) {
++        return false;
++    }
++    return environment_variable_enabled(value);
++}
++
++enum class DWriteAdvancePolicy {
++    kAuto,
++    kDesign,
++    kGdi,
++    kMin,
++};
++
++enum class DWriteGdiMeasuringPolicy {
++    kAuto,
++    kClassic,
++    kNatural,
++};
++
++static DWriteAdvancePolicy dwrite_advance_policy() {
++    const char* value = std::getenv("FLUTTER_DWRITE_ADVANCE_POLICY");
++    if (value != nullptr && *value != '\0') {
++        if (std::strcmp(value, "DESIGN") == 0 ||
++            std::strcmp(value, "design") == 0) {
++            return DWriteAdvancePolicy::kDesign;
++        }
++        if (std::strcmp(value, "GDI") == 0 ||
++            std::strcmp(value, "gdi") == 0) {
++            return DWriteAdvancePolicy::kGdi;
++        }
++        if (std::strcmp(value, "MIN") == 0 ||
++            std::strcmp(value, "min") == 0) {
++            return DWriteAdvancePolicy::kMin;
++        }
++    }
++    return DWriteAdvancePolicy::kAuto;
++}
++
++static DWriteGdiMeasuringPolicy dwrite_gdi_measuring_policy() {
++    const char* value = std::getenv("FLUTTER_DWRITE_GDI_MEASURING");
++    if (value != nullptr && *value != '\0') {
++        if (std::strcmp(value, "CLASSIC") == 0 ||
++            std::strcmp(value, "classic") == 0) {
++            return DWriteGdiMeasuringPolicy::kClassic;
++        }
++        if (std::strcmp(value, "NATURAL") == 0 ||
++            std::strcmp(value, "natural") == 0) {
++            return DWriteGdiMeasuringPolicy::kNatural;
++        }
++    }
++    return DWriteGdiMeasuringPolicy::kAuto;
++}
++
+ /* Note:
+  * In versions 8 and 8.1 of Windows, some calls in DWrite are not thread safe.
+  * The mutex returned from maybe_dw_mutex protects the calls that are
+@@ -1496,25 +1579,50 @@ bool SkScalerContext_DW::setAdvance(const SkGlyph& glyph, SkVector* advance) {
+         return false;
+     }
+ 
+-    DWRITE_GLYPH_METRICS gm;
+-
+-    if (DWRITE_MEASURING_MODE_GDI_CLASSIC == fMeasuringMode ||
+-        DWRITE_MEASURING_MODE_GDI_NATURAL == fMeasuringMode)
+-    {
++    DWRITE_GLYPH_METRICS designMetrics = {};
++    DWRITE_GLYPH_METRICS gdiMetrics = {};
++
++    const DWriteAdvancePolicy advancePolicy = dwrite_advance_policy();
++    const bool measuringModeUsesGdi =
++        DWRITE_MEASURING_MODE_GDI_CLASSIC == fMeasuringMode ||
++        DWRITE_MEASURING_MODE_GDI_NATURAL == fMeasuringMode;
++    const bool useGdiCompatibleAdvanceMetrics =
++        (advancePolicy == DWriteAdvancePolicy::kAuto && measuringModeUsesGdi) ||
++        advancePolicy == DWriteAdvancePolicy::kGdi ||
++        advancePolicy == DWriteAdvancePolicy::kMin;
++    const bool useDesignAdvanceMetrics =
++        (advancePolicy == DWriteAdvancePolicy::kAuto && !measuringModeUsesGdi) ||
++        advancePolicy == DWriteAdvancePolicy::kDesign ||
++        advancePolicy == DWriteAdvancePolicy::kMin;
++    const DWriteGdiMeasuringPolicy gdiMeasuringPolicy = dwrite_gdi_measuring_policy();
++    const bool useGdiNatural =
++        gdiMeasuringPolicy == DWriteGdiMeasuringPolicy::kNatural ||
++        (gdiMeasuringPolicy == DWriteGdiMeasuringPolicy::kAuto &&
++         DWRITE_MEASURING_MODE_GDI_NATURAL == fMeasuringMode);
++    SkScalar gdiAdvanceTextSize = fTextSizeMeasure;
++    if (useGdiCompatibleAdvanceMetrics) {
++        gdiAdvanceTextSize = SkScalarRoundToScalar(gdiAdvanceTextSize * 64.0f) / 64.0f;
++        if (gdiAdvanceTextSize == 0) {
++            gdiAdvanceTextSize = SK_Scalar1;
++        }
++    }
++
++    if (useGdiCompatibleAdvanceMetrics) {
+         Exclusive l(maybe_dw_mutex(*typeface));
+         HRBM(typeface->fDWriteFontFace->GetGdiCompatibleGlyphMetrics(
+-                 fTextSizeMeasure,
++                 gdiAdvanceTextSize,
+                  1.0f, // pixelsPerDip
+                  // This parameter does not act like the lpmat2 parameter to GetGlyphOutlineW.
+                  // If it did then GsA here and G_inv below to mapVectors.
+                  nullptr,
+-                 DWRITE_MEASURING_MODE_GDI_NATURAL == fMeasuringMode,
++                 useGdiNatural,
+                  &glyphId, 1,
+-                 &gm),
++                 &gdiMetrics),
+              "Could not get gdi compatible glyph metrics.");
+-    } else {
++    }
++    if (useDesignAdvanceMetrics) {
+         Exclusive l(maybe_dw_mutex(*typeface));
+-        HRBM(typeface->fDWriteFontFace->GetDesignGlyphMetrics(&glyphId, 1, &gm),
++        HRBM(typeface->fDWriteFontFace->GetDesignGlyphMetrics(&glyphId, 1, &designMetrics),
+              "Could not get design metrics.");
+     }
+ 
+@@ -1523,16 +1631,25 @@ bool SkScalerContext_DW::setAdvance(const SkGlyph& glyph, SkVector* advance) {
+         Shared l(maybe_dw_mutex(*typeface));
+         typeface->fDWriteFontFace->GetMetrics(&dwfm);
+     }
+-    SkScalar advanceX = fTextSizeMeasure * gm.advanceWidth / dwfm.designUnitsPerEm;
++    const SkScalar designAdvanceX =
++        fTextSizeMeasure * designMetrics.advanceWidth / dwfm.designUnitsPerEm;
++    SkScalar gdiAdvanceX =
++        gdiAdvanceTextSize * gdiMetrics.advanceWidth / dwfm.designUnitsPerEm;
++    gdiAdvanceX = SkScalarRoundToScalar(gdiAdvanceX);
+ 
+-    *advance = { advanceX, 0 };
+-    if (DWRITE_MEASURING_MODE_GDI_CLASSIC == fMeasuringMode ||
+-        DWRITE_MEASURING_MODE_GDI_NATURAL == fMeasuringMode)
+-    {
+-        // DirectWrite produced 'compatible' metrics, but while close,
+-        // the end result is not always an integer as it would be with GDI.
+-        advance->fX = SkScalarRoundToScalar(advance->fX);
++    SkScalar advanceX = designAdvanceX;
++    if ((advancePolicy == DWriteAdvancePolicy::kAuto && measuringModeUsesGdi) ||
++        advancePolicy == DWriteAdvancePolicy::kGdi) {
++        advanceX = gdiAdvanceX;
++    } else if (advancePolicy == DWriteAdvancePolicy::kMin) {
++        if (designAdvanceX <= 0) {
++            advanceX = gdiAdvanceX;
++        } else if (gdiAdvanceX > 0 && gdiAdvanceX < designAdvanceX) {
++            advanceX = gdiAdvanceX;
++        }
+     }
++
++    *advance = { advanceX, 0 };
+     *advance = fSkXform.mapVector(*advance);
+     return true;
+ }
+@@ -1868,9 +1985,24 @@ void SkScalerContext_DW::generateFontMetrics(SkFontMetrics* metrics) {
+ 
+     SkScalar upem = SkIntToScalar(dwfm.designUnitsPerEm);
+ 
+-    metrics->fAscent = -fTextSizeRender * SkIntToScalar(dwfm.ascent) / upem;
+-    metrics->fDescent = fTextSizeRender * SkIntToScalar(dwfm.descent) / upem;
+-    metrics->fLeading = fTextSizeRender * SkIntToScalar(dwfm.lineGap) / upem;
++    if (use_qt_like_integer_metrics()) {
++        const SkScalar qtAscent =
++            SkScalarCeilToScalar(fTextSizeRender * SkIntToScalar(dwfm.ascent) / upem);
++        const SkScalar qtDescent =
++            SkScalarCeilToScalar(fTextSizeRender * SkIntToScalar(dwfm.descent) / upem);
++        const SkScalar qtLineHeight = std::floor(
++            fTextSizeRender *
++                SkIntToScalar(dwfm.ascent + dwfm.descent + dwfm.lineGap) / upem +
++            0.5f);
++
++        metrics->fAscent = -qtAscent;
++        metrics->fDescent = qtDescent;
++        metrics->fLeading = qtLineHeight - qtAscent - qtDescent;
++    } else {
++        metrics->fAscent = -fTextSizeRender * SkIntToScalar(dwfm.ascent) / upem;
++        metrics->fDescent = fTextSizeRender * SkIntToScalar(dwfm.descent) / upem;
++        metrics->fLeading = fTextSizeRender * SkIntToScalar(dwfm.lineGap) / upem;
++    }
+     metrics->fXHeight = fTextSizeRender * SkIntToScalar(dwfm.xHeight) / upem;
+     metrics->fCapHeight = fTextSizeRender * SkIntToScalar(dwfm.capHeight) / upem;
+     metrics->fUnderlineThickness = fTextSizeRender * SkIntToScalar(dwfm.underlineThickness) / upem;
+diff --git a/src/ports/SkTypeface_FreeType.h b/src/ports/SkTypeface_FreeType.h
+index 690763eed1..c7d4d8b0ff 100644
+--- a/src/ports/SkTypeface_FreeType.h
++++ b/src/ports/SkTypeface_FreeType.h
+@@ -62,6 +62,9 @@ protected:
+     int onGetUPEM() const override;
+     bool onGetKerningPairAdjustments(SkSpan<const SkGlyphID>,
+                                      SkSpan<int32_t> adjustments) const override;
++    bool onGetQtLikeGlyphAdvance(SkGlyphID glyph,
++                                 SkScalar textSize,
++                                 SkScalar* advance) const override;
+     void onCharsToGlyphs(SkSpan<const SkUnichar>, SkSpan<SkGlyphID>) const override;
+     int onCountGlyphs() const override;
+ 
