@@ -62,6 +62,10 @@ EXPECTED_REVISIONS = {
     'harfbuzz': EXPECTED_HARFBUZZ_REVISION,
 }
 
+STALE_GCLIENT_ENTRIES = (
+    "'engine/src/flutter/third_party/freetype2':",
+)
+
 
 def run_git(repo_dir, args, *, check=True, capture_output=False):
   command = [
@@ -235,6 +239,26 @@ def reset_patch_owned_repos(repo_dirs, patch_files):
   return True
 
 
+def remove_stale_gclient_entries(flutter_dir):
+  gclient_root = Path.cwd()
+  if not (gclient_root / '.gclient_entries').exists():
+    gclient_root = flutter_dir.parents[2]
+  gclient_entries = gclient_root / '.gclient_entries'
+  if not gclient_entries.exists():
+    return
+
+  lines = gclient_entries.read_text(encoding='utf-8').splitlines(keepends=True)
+  filtered_lines = [
+      line for line in lines
+      if not any(entry in line for entry in STALE_GCLIENT_ENTRIES)
+  ]
+  if filtered_lines == lines:
+    return
+
+  gclient_entries.write_text(''.join(filtered_lines), encoding='utf-8')
+  print('Removed stale freetype2 entry from .gclient_entries.')
+
+
 def main(argv):
   parser = argparse.ArgumentParser()
   default_flutter_dir = Path(__file__).resolve().parents[2]
@@ -287,6 +311,9 @@ def main(argv):
   if not patch_files:
     print('No WSC font-rendering patch files found.')
     return 0
+
+  if args.reverse:
+    remove_stale_gclient_entries(default_flutter_dir)
 
   needed_repos = {repo_name for repo_name, _ in patch_files}
   if not ensure_repos_available(repo_dirs, needed_repos, reverse=args.reverse):
