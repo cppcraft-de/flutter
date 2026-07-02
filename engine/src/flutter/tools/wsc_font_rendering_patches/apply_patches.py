@@ -110,6 +110,10 @@ def patch_group_already_applied(repo_dirs, group):
   return True
 
 
+def patch_groups_already_applied(repo_dirs, groups):
+  return all(patch_group_already_applied(repo_dirs, group) for group in groups)
+
+
 def unapplied_groups(repo_dirs, groups):
   remaining = []
   for group in groups:
@@ -142,6 +146,95 @@ def selected_patch_files(patch_dir, groups):
   return patch_files
 
 
+def patch_touched_paths(patch_file):
+  paths = set()
+  for line in patch_file.read_text(encoding='utf-8').splitlines():
+    if not line.startswith('diff --git a/'):
+      continue
+    parts = line.split()
+    if len(parts) < 4:
+      continue
+    for path in parts[2:4]:
+      if path.startswith('a/') or path.startswith('b/'):
+        paths.add(path[2:])
+  return paths
+
+
+def dirty_paths(repo_dir):
+  result = run_git(repo_dir, ['diff', '--name-only'], capture_output=True)
+  return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+
+
+def ensure_repos_available(repo_dirs, repo_names, *, reverse):
+  for repo_name in sorted(repo_names):
+    repo_dir = repo_dirs[repo_name]
+    if not (repo_dir / '.git').exists():
+      if reverse:
+        print(f'{repo_name} checkout not found, nothing to unapply: {repo_dir}')
+        continue
+      print(f'{repo_name} checkout not found: {repo_dir}')
+      return False
+
+    if reverse:
+      continue
+
+    head = run_git(repo_dir, ['rev-parse', 'HEAD'], capture_output=True).stdout.strip()
+    expected_revision = EXPECTED_REVISIONS[repo_name]
+    if head != expected_revision:
+      print(
+          f'{repo_name} checkout is at {head}, expected {expected_revision}.',
+          file=sys.stderr,
+      )
+      return False
+  return True
+
+
+def apply_selected_patches(repo_dirs, patch_dir, patch_files):
+  for repo_name, patch_file in patch_files:
+    repo_dir = repo_dirs[repo_name]
+    if patch_check(repo_dir, patch_file):
+      print(f'Applying {patch_file.relative_to(patch_dir)}')
+      apply_patch(repo_dir, patch_file)
+      continue
+
+    if patch_check(repo_dir, patch_file, reverse=True):
+      print(f'{patch_file.relative_to(patch_dir)} is already applied.')
+      continue
+
+    print(f'Failed to apply {patch_file.relative_to(patch_dir)}.', file=sys.stderr)
+    print('Resolve the Skia checkout state or update the patch stack.', file=sys.stderr)
+    return False
+  return True
+
+
+def reset_patch_owned_repos(repo_dirs, patch_files):
+  allowed_paths_by_repo = {}
+  for repo_name, patch_file in patch_files:
+    allowed_paths_by_repo.setdefault(repo_name, set()).update(patch_touched_paths(patch_file))
+
+  for repo_name, allowed_paths in sorted(allowed_paths_by_repo.items()):
+    repo_dir = repo_dirs[repo_name]
+    if not (repo_dir / '.git').exists():
+      continue
+
+    dirty = dirty_paths(repo_dir)
+    if not dirty:
+      print(f'{repo_name} checkout is clean.')
+      continue
+
+    unknown = sorted(dirty - allowed_paths)
+    if unknown:
+      print(f'{repo_name} checkout has non-WSC changes:', file=sys.stderr)
+      for path in unknown:
+        print(f'  {path}', file=sys.stderr)
+      print('Resolve those nested checkout changes before running gclient sync.', file=sys.stderr)
+      return False
+
+    print(f'Resetting {repo_name} WSC patch-owned changes before sync.')
+    run_git(repo_dir, ['reset', '--hard', 'HEAD'])
+  return True
+
+
 def main(argv):
   parser = argparse.ArgumentParser()
   default_flutter_dir = Path(__file__).resolve().parents[2]
@@ -156,6 +249,11 @@ def main(argv):
       type=Path,
       default=default_flutter_dir / 'third_party' / 'harfbuzz',
       help='Path to the HarfBuzz checkout to patch.',
+  )
+  parser.add_argument(
+      '--reverse',
+      action='store_true',
+      help='Reset WSC patch-owned nested checkout changes before gclient sync.',
   )
   parser.add_argument(
       '--groups',
@@ -175,51 +273,37 @@ def main(argv):
   }
   patch_dir = Path(__file__).resolve().parent
   groups = expand_groups(args.groups)
-  groups_to_apply = unapplied_groups(repo_dirs, groups)
-  if not groups_to_apply:
+  if args.reverse:
+    groups_to_process = groups
+  else:
+    groups_to_process = unapplied_groups(repo_dirs, groups)
+
+  if not groups_to_process:
     print('Selected WSC font-rendering patches are already applied.')
     return 0
 
-  patch_files = selected_patch_files(patch_dir, groups_to_apply)
+  patch_files = selected_patch_files(patch_dir, groups_to_process)
 
   if not patch_files:
     print('No WSC font-rendering patch files found.')
     return 0
 
   needed_repos = {repo_name for repo_name, _ in patch_files}
-  for repo_name in sorted(needed_repos):
-    repo_dir = repo_dirs[repo_name]
-    if not (repo_dir / '.git').exists():
-      print(f'{repo_name} checkout not found: {repo_dir}')
-      return 1
+  if not ensure_repos_available(repo_dirs, needed_repos, reverse=args.reverse):
+    return 1
 
-    head = run_git(repo_dir, ['rev-parse', 'HEAD'], capture_output=True).stdout.strip()
-    expected_revision = EXPECTED_REVISIONS[repo_name]
-    if head != expected_revision:
-      print(
-          f'{repo_name} checkout is at {head}, expected {expected_revision}.',
-          file=sys.stderr,
-      )
-      return 1
-
-  if patch_groups_already_applied(repo_dirs, groups):
+  if not args.reverse and patch_groups_already_applied(repo_dirs, groups):
     print('Selected WSC font-rendering patches are already applied.')
     return 0
 
-  for repo_name, patch_file in patch_files:
-    repo_dir = repo_dirs[repo_name]
-    if patch_check(repo_dir, patch_file):
-      print(f'Applying {patch_file.relative_to(patch_dir)}')
-      apply_patch(repo_dir, patch_file)
-      continue
-
-    if patch_check(repo_dir, patch_file, reverse=True):
-      print(f'{patch_file.relative_to(patch_dir)} is already applied.')
-      continue
-
-    print(f'Failed to apply {patch_file.relative_to(patch_dir)}.', file=sys.stderr)
-    print('Resolve the Skia checkout state or update the patch stack.', file=sys.stderr)
-    return 1
+  if args.reverse:
+    if not reset_patch_owned_repos(repo_dirs, patch_files):
+      return 1
+    print('Selected WSC font-rendering patches are reset for sync.')
+  else:
+    if not apply_selected_patches(repo_dirs, patch_dir, patch_files):
+      return 1
+    print('Selected WSC font-rendering patches are applied.')
 
   return 0
 

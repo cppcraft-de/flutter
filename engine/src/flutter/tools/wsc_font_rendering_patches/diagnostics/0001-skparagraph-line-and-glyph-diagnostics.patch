@@ -336,9 +336,9 @@ index 899920da0e..5496d8557c 100644
          SkScalar advance =
 -                SkScalarRoundToInt(rawPositions[i + 1].fX - rawPositions[i].fX);
 +                SkScalarRoundToInt(fRawPositions[i + 1].fX - fRawPositions[i].fX);
-         if (SkTypeface* typeface = fFont.getTypeface()) {
-             SkTypeface::QtLikeGlyphAdvanceDiagnostics diagnostics;
-             if (typeface->getQtLikeGlyphAdvanceDiagnostics(
+         fPositions[i].fX = x;
+         x += advance;
+         width += advance;
 diff --git a/modules/skparagraph/src/Run.h b/modules/skparagraph/src/Run.h
 index 73918ac060..e3102e2a1e 100644
 --- a/modules/skparagraph/src/Run.h

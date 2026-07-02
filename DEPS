@@ -841,6 +841,18 @@ recursedeps = [
   'engine/src/flutter/third_party/vulkan-deps',
 ]
 
+pre_deps_hooks = [
+  {
+    'name': 'Reset local WSC font rendering patches before sync',
+    'pattern': '.',
+    'action': [
+      'python3',
+      'engine/src/flutter/tools/wsc_font_rendering_patches/apply_patches.py',
+      '--reverse',
+    ],
+  },
+]
+
 hooks = [
   {
     'name': 'Apply local WSC font rendering patches',

@@ -218,7 +218,7 @@ index e35ec2a217..84afa4b32e 100644
      AutoFTAccess fta(this);
      FT_Face face = fta.face();
      if (!face || !FT_IS_SCALABLE(face)) {
-@@ -992,7 +1010,32 @@ bool SkTypeface_FreeType::onGetQtLikeGlyphAdvance(SkGlyphID glyph,
+@@ -992,7 +1010,30 @@ bool SkTypeface_FreeType::onGetQtLikeGlyphAdvance(SkGlyphID glyph,
          return false;
      }
  
