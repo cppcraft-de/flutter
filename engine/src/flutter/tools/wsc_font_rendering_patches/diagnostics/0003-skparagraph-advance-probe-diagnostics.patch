@@ -227,8 +227,6 @@ index e35ec2a217..84afa4b32e 100644
 +    // QFontEngineFT::recalcAdvances(..., no DesignMetrics) returns the hinted
 +    // slot advance; QTextEngine then rounds it because full hinting disables
 +    // subpixel positions.
-+    const FT_Pos qtLinearAdvance26Dot6 = face->glyph->linearHoriAdvance >> 10;
-+
 +    diagnostics->fAvailable = true;
 +    diagnostics->fBackend = 1;
 +    diagnostics->fAdvance =
