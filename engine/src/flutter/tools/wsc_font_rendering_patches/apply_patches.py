@@ -17,13 +17,10 @@ EXPECTED_FREETYPE2_REVISION = 'be4bcb57914154fc1b9e2900bf8e4b516057e2b8'
 PATCH_GROUP_ORDER = (
     'freetype',
     'text_layout',
-    'diagnostics',
     'pdf',
 )
 
-GROUP_DEPENDENCIES = {
-    'diagnostics': ('text_layout',),
-}
+GROUP_DEPENDENCIES = {}
 
 GROUP_MARKERS = {
     'text_layout': {
@@ -39,12 +36,6 @@ GROUP_MARKERS = {
         ('skia', 'src/ports/SkScalerContext_win_dw.cpp'): 'qtLineHeight',
         ('skia', 'src/ports/SkScalerContext_mac_ct.cpp'): 'SkOTTableHorizontalHeader',
         ('harfbuzz', 'src/hb-ot-shape.cc'): 'plan.apply_fallback_kern = true;',
-    },
-    'diagnostics': {
-        ('skia', 'modules/skparagraph/src/ParagraphImpl.cpp'): ('diagnosticTableChecksum'),
-        ('skia', 'modules/skparagraph/include/Paragraph.h'): 'fAdvanceProbeBackend',
-        ('skia', 'modules/canvaskit/paragraph_bindings.cpp'): 'fPlatformGdiCompatibleAdvance',
-        ('skia', 'include/core/SkTypeface.h'): 'fGdiCompatibleAdvance',
     },
     'freetype': {('freetype2', 'BUILD.gn'): 'qt_compatible_freetype_dir = "../freetype_2.13.0"',},
     'pdf': {
@@ -176,10 +167,7 @@ def main(argv):
       nargs='+',
       default=['all'],
       metavar='GROUP',
-      help=(
-          'Patch groups to apply: all, freetype, text_layout, diagnostics, pdf. '
-          'Diagnostics includes text_layout.'
-      ),
+      help='Patch groups to apply: all, freetype, text_layout, pdf.',
   )
   args = parser.parse_args(argv[1:])
 

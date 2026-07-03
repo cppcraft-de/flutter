@@ -38,9 +38,6 @@ class ParagraphSkia : public Paragraph {
 
   std::vector<LineMetrics>& GetLineMetrics() override;
 
-  std::vector<skia::textlayout::Paragraph::GlyphDiagnostic>
-  GetGlyphDiagnostics() override;
-
   bool GetLineMetricsAt(
       int lineNumber,
       skia::textlayout::LineMetrics* lineMetrics) const override;

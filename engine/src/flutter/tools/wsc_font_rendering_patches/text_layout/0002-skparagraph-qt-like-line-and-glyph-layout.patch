@@ -6,16 +6,16 @@ index 1bc8e706e4..80ac91150e 100644
      bool getKerningPairAdjustments(SkSpan<const SkGlyphID> glyphs,
                                     SkSpan<int32_t> adjustments) const;
  
-+    struct QtLikeGlyphAdvanceDiagnostics {
++    struct QtLikeGlyphAdvanceInfo {
 +        bool fAvailable = false;
 +        SkScalar fAdvance = 0;
 +        SkScalar fDesignAdvance = 0;
 +    };
 +
 +    bool getQtLikeGlyphAdvance(SkGlyphID glyph, SkScalar textSize, SkScalar* advance) const;
-+    bool getQtLikeGlyphAdvanceDiagnostics(SkGlyphID glyph,
++    bool getQtLikeGlyphAdvanceInfo(SkGlyphID glyph,
 +                                          SkScalar textSize,
-+                                          QtLikeGlyphAdvanceDiagnostics* diagnostics) const;
++                                          QtLikeGlyphAdvanceInfo* advanceInfo) const;
 +
      struct LocalizedString {
          SkString fString;
@@ -27,10 +27,10 @@ index 1bc8e706e4..80ac91150e 100644
 +    virtual bool onGetQtLikeGlyphAdvance(SkGlyphID glyph,
 +                                         SkScalar textSize,
 +                                         SkScalar* advance) const;
-+    virtual bool onGetQtLikeGlyphAdvanceDiagnostics(
++    virtual bool onGetQtLikeGlyphAdvanceInfo(
 +            SkGlyphID glyph,
 +            SkScalar textSize,
-+            QtLikeGlyphAdvanceDiagnostics* diagnostics) const;
++            QtLikeGlyphAdvanceInfo* advanceInfo) const;
  
      /** Returns the family name of the typeface as known by its font manager.
       *  This name may or may not be produced by the family name iterator.
@@ -63,13 +63,13 @@ index a1cfc403f8..899920da0e 100644
 +        SkScalar advance =
 +                SkScalarRoundToInt(rawPositions[i + 1].fX - rawPositions[i].fX);
 +        if (SkTypeface* typeface = fFont.getTypeface()) {
-+            SkTypeface::QtLikeGlyphAdvanceDiagnostics diagnostics;
-+            if (typeface->getQtLikeGlyphAdvanceDiagnostics(
-+                        fGlyphs[i], fFont.getSize(), &diagnostics) &&
-+                diagnostics.fAvailable &&
-+                !SkScalarNearlyZero(diagnostics.fDesignAdvance)) {
-+                const SkScalar selectedAdvance = SkScalarRoundToInt(diagnostics.fAdvance);
-+                const SkScalar designAdvance = SkScalarRoundToInt(diagnostics.fDesignAdvance);
++            SkTypeface::QtLikeGlyphAdvanceInfo advanceInfo;
++            if (typeface->getQtLikeGlyphAdvanceInfo(
++                        fGlyphs[i], fFont.getSize(), &advanceInfo) &&
++                advanceInfo.fAvailable &&
++                !SkScalarNearlyZero(advanceInfo.fDesignAdvance)) {
++                const SkScalar selectedAdvance = SkScalarRoundToInt(advanceInfo.fAdvance);
++                const SkScalar designAdvance = SkScalarRoundToInt(advanceInfo.fDesignAdvance);
 +                advance += selectedAdvance - designAdvance;
 +            }
 +        }
@@ -348,11 +348,11 @@ index 038b7be2fe..83ac50d05d 100644
 +    return this->onGetQtLikeGlyphAdvance(glyph, textSize, advance);
 +}
 +
-+bool SkTypeface::getQtLikeGlyphAdvanceDiagnostics(
++bool SkTypeface::getQtLikeGlyphAdvanceInfo(
 +        SkGlyphID glyph,
 +        SkScalar textSize,
-+        QtLikeGlyphAdvanceDiagnostics* diagnostics) const {
-+    return this->onGetQtLikeGlyphAdvanceDiagnostics(glyph, textSize, diagnostics);
++        QtLikeGlyphAdvanceInfo* advanceInfo) const {
++    return this->onGetQtLikeGlyphAdvanceInfo(glyph, textSize, advanceInfo);
 +}
 +
  SkTypeface::LocalizedStrings* SkTypeface::createFamilyNameIterator() const {
@@ -366,10 +366,10 @@ index 038b7be2fe..83ac50d05d 100644
 +    return false;
 +}
 +
-+bool SkTypeface::onGetQtLikeGlyphAdvanceDiagnostics(
++bool SkTypeface::onGetQtLikeGlyphAdvanceInfo(
 +        SkGlyphID,
 +        SkScalar,
-+        QtLikeGlyphAdvanceDiagnostics*) const {
++        QtLikeGlyphAdvanceInfo*) const {
 +    return false;
 +}
 +
