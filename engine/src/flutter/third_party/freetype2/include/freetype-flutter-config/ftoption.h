@@ -611,7 +611,7 @@ FT_BEGIN_HEADER
   /*   This option requires TT_CONFIG_OPTION_BYTECODE_INTERPRETER to be    */
   /*   defined.                                                            */
   /*                                                                       */
-#define TT_CONFIG_OPTION_SUBPIXEL_HINTING
+/* #define TT_CONFIG_OPTION_SUBPIXEL_HINTING */
 
 
   /*************************************************************************/
@@ -871,9 +871,6 @@ FT_BEGIN_HEADER
 #ifdef TT_CONFIG_OPTION_BYTECODE_INTERPRETER
 #define  TT_USE_BYTECODE_INTERPRETER
 #undef   TT_CONFIG_OPTION_UNPATENTED_HINTING
-#ifdef TT_CONFIG_OPTION_SUBPIXEL_HINTING
-#define  TT_SUPPORT_SUBPIXEL_HINTING_MINIMAL
-#endif
 #elif defined TT_CONFIG_OPTION_UNPATENTED_HINTING
 #define  TT_USE_BYTECODE_INTERPRETER
 #endif

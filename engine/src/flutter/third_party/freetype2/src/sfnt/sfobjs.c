@@ -4,7 +4,7 @@
  *
  *   SFNT object management (base).
  *
- * Copyright (C) 1996-2023 by
+ * Copyright (C) 1996-2025 by
  * David Turner, Robert Wilhelm, and Werner Lemberg.
  *
  * This file is part of the FreeType project, and may only be used,
@@ -38,6 +38,10 @@
 
 #ifdef TT_CONFIG_OPTION_BDF
 #include "ttbdf.h"
+#endif
+
+#ifdef TT_CONFIG_OPTION_GPOS_KERNING
+#include "ttgpos.h"
 #endif
 
 
@@ -534,17 +538,23 @@
                                         0 );
     }
 
-    if ( !face->var )
+    if ( !face->tt_var )
     {
       /* we want the metrics variations interface */
       /* from the `truetype' module only          */
       FT_Module  tt_module = FT_Get_Module( library, "truetype" );
 
 
-      face->var = ft_module_get_service( tt_module,
-                                         FT_SERVICE_ID_METRICS_VARIATIONS,
-                                         0 );
+      face->tt_var = ft_module_get_service( tt_module,
+                                            FT_SERVICE_ID_METRICS_VARIATIONS,
+                                            0 );
     }
+
+    if ( !face->face_var )
+      face->face_var = ft_module_get_service(
+                         &face->root.driver->root,
+                         FT_SERVICE_ID_METRICS_VARIATIONS,
+                         0 );
 #endif
 
     FT_TRACE2(( "SFNT driver\n" ));
@@ -569,6 +579,9 @@
     if ( face_instance_index < 0 && face_index > 0 )
       face_index--;
 
+    /* Note that `face_index` is also used to enumerate elements */
+    /* of containers like a Mac Resource; this means we must     */
+    /* check whether we actually have a TTC.                     */
     if ( face_index >= face->ttc_header.count )
     {
       if ( face_instance_index >= 0 )
@@ -691,6 +704,9 @@
 
           instance_offset += instance_size;
         }
+
+        /* named instance indices start with value 1 */
+        face->var_default_named_instance = i + 1;
 
         if ( i == num_instances )
         {
@@ -1017,6 +1033,10 @@
     LOAD_( gasp );
     LOAD_( kern );
 
+#ifdef TT_CONFIG_OPTION_GPOS_KERNING
+    LOAD_( gpos );
+#endif
+
     face->root.num_glyphs = face->max_profile.numGlyphs;
 
     /* Bit 8 of the `fsSelection' field in the `OS/2' table denotes  */
@@ -1053,6 +1073,16 @@
       if ( !face->root.style_name )
         GET_NAME( FONT_SUBFAMILY, &face->root.style_name );
     }
+
+#ifdef TT_CONFIG_OPTION_GX_VAR_SUPPORT
+    {
+      FT_Memory  memory = face->root.memory;
+
+
+      if ( FT_STRDUP( face->non_var_style_name, face->root.style_name ) )
+        goto Exit;
+    }
+#endif
 
     /* now set up root fields */
     {
@@ -1100,7 +1130,11 @@
         flags |= FT_FACE_FLAG_VERTICAL;
 
       /* kerning available ? */
-      if ( TT_FACE_HAS_KERNING( face ) )
+      if ( face->kern_avail_bits
+#ifdef TT_CONFIG_OPTION_GPOS_KERNING
+           || face->num_gpos_lookups_kerning
+#endif
+         )
         flags |= FT_FACE_FLAG_KERNING;
 
 #ifdef TT_CONFIG_OPTION_GX_VAR_SUPPORT
@@ -1221,7 +1255,7 @@
 
         if ( count > 0 )
         {
-          FT_Memory        memory   = face->root.stream->memory;
+          FT_Memory        memory   = face->root.memory;
           FT_UShort        em_size  = face->header.Units_Per_EM;
           FT_Short         avgwidth = face->os2.xAvgCharWidth;
           FT_Size_Metrics  metrics;
@@ -1343,12 +1377,6 @@
          *    2. Otherwise, use the OS/2 table's usWin* metrics.
          */
 
-        // [SCHOOLCRAFT]:
-        // Commented out. Do not evaluate the "Really use typo" flag. We found fonts, such as Lato, which set this flag
-        // but still do not include the full chars in the typo metrics (historical reasons). Instead prioritize the larger
-        // one of Win or Horizontal, see next paragraph.
-        // See [HS1367] for details.
-        /*
         if ( face->os2.version != 0xFFFFU && face->os2.fsSelection & 128 )
         {
           root->ascender  = face->os2.sTypoAscender;
@@ -1357,43 +1385,11 @@
                             face->os2.sTypoLineGap;
         }
         else
-        */
         {
-          // [SCHOOLCRAFT]
-          // For Worksheet Crafter it is essential that the ascender and descender cover the
-          // full character. Otherwise a) characters may be truncated at the top and b) selecting
-          // fonts in the application won't cover the full text height and thus leads to rendering
-          //
-          // However, fall back to horizontal if the hor-ascender is just as large or larger. This is
-          // important since the horizontal metric may include an additional line gap, which can result
-          // in a larger total heigth than the Win metrics. According to our tests this is
-          // only relevant if the horizontal is same or larger was WinMetric. If it is smaller, it has
-          // been set up NOT to cover the complete character.
-          //
-          // See [HS1367] for details.
-          // issues.
-          if ((FT_Short)face->os2.usWinAscent > face->horizontal.Ascender)
-          {
-            root->ascender  = (FT_Short)face->os2.usWinAscent;
-            root->descender = -(FT_Short)face->os2.usWinDescent;
-            root->height    = root->ascender - root->descender;
-          }
-          else
-          {
-            // From here on we have the FreeType default behavior again...
-            root->ascender  = face->horizontal.Ascender;
-            root->descender = face->horizontal.Descender;
-            root->height    = root->ascender - root->descender +
-                              face->horizontal.Line_Gap;
-          }
-
-          if (!(root->ascender || root->descender))
-          {
-              root->ascender = face->horizontal.Ascender;
-              root->descender = face->horizontal.Descender;
-              root->height = root->ascender - root->descender +
-                  face->horizontal.Line_Gap;
-          }
+          root->ascender  = face->horizontal.Ascender;
+          root->descender = face->horizontal.Descender;
+          root->height    = root->ascender - root->descender +
+                            face->horizontal.Line_Gap;
 
           if ( !( root->ascender || root->descender ) )
           {
@@ -1489,6 +1485,11 @@
     /* freeing the kerning table */
     tt_face_done_kern( face );
 
+#ifdef TT_CONFIG_OPTION_GPOS_KERNING
+    /* freeing the GPOS table */
+    tt_face_done_gpos( face );
+#endif
+
     /* freeing the collection table */
     FT_FREE( face->ttc_header.offsets );
     face->ttc_header.count = 0;
@@ -1538,6 +1539,7 @@
 
 #ifdef TT_CONFIG_OPTION_GX_VAR_SUPPORT
     FT_FREE( face->var_postscript_prefix );
+    FT_FREE( face->non_var_style_name );
 #endif
 
     /* freeing glyph color palette data */

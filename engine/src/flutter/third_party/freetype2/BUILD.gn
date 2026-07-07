@@ -36,13 +36,6 @@ config("freetype_config") {
     "include/freetype-flutter-config",
     "include",
   ]
-}
-
-config("freetype_private_config") {
-  include_dirs = [
-    "include/freetype-flutter-config",
-    "include",
-  ]
 
   cflags = []
 
@@ -52,6 +45,10 @@ config("freetype_private_config") {
       "-Wno-unused-variable",
     ]
   }
+}
+
+config("freetype_private_config") {
+  cflags = []
 
   if ((is_mac || is_ios) && is_clang) {
     cflags += [
@@ -85,7 +82,7 @@ target(default_library_type, "freetype2") {
     "src/sfnt/sfnt.c",
     "src/smooth/smooth.c",
 
-    # Font drivers. Drivers need to be enabled in ftmodule.h explicitly.
+    # Font Drivers. Drivers need to be enabled in ftmodule.h explicitly.
     "src/cff/cff.c",           # OpenType, (.cff, .cef)
     "src/truetype/truetype.c", # TrueType
   ]
@@ -93,10 +90,9 @@ target(default_library_type, "freetype2") {
   defines = [
     "FT2_BUILD_LIBRARY",
     "DARWIN_NO_CARBON",
-    # Keep Flutter's module list, but use FreeType 2.13.0's option file so the
-    # TrueType interpreter config matches the Qt reference path.
+    # Long directory name to avoid accidentally using wrong headers.
     "FT_CONFIG_MODULES_H=<freetype-flutter-config/ftmodule.h>",
-    "FT_CONFIG_OPTIONS_H=<freetype/config/ftoption.h>",
+    "FT_CONFIG_OPTIONS_H=<freetype-flutter-config/ftoption.h>",
   ]
 
   configs += [ ":freetype_private_config" ]
