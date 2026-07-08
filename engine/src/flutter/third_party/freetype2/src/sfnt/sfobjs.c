@@ -1377,6 +1377,12 @@
          *    2. Otherwise, use the OS/2 table's usWin* metrics.
          */
 
+        // [SCHOOLCRAFT]:
+        // Commented out. Do not evaluate the "Really use typo" flag. We found fonts, such as Lato, which set this flag
+        // but still do not include the full chars in the typo metrics (historical reasons). Instead prioritize the larger
+        // one of Win or Horizontal, see next paragraph.
+        // See [HS1367] for details.
+        /*
         if ( face->os2.version != 0xFFFFU && face->os2.fsSelection & 128 )
         {
           root->ascender  = face->os2.sTypoAscender;
@@ -1385,11 +1391,35 @@
                             face->os2.sTypoLineGap;
         }
         else
+        */
         {
-          root->ascender  = face->horizontal.Ascender;
-          root->descender = face->horizontal.Descender;
-          root->height    = root->ascender - root->descender +
-                            face->horizontal.Line_Gap;
+          // [SCHOOLCRAFT]
+          // For Worksheet Crafter it is essential that the ascender and descender cover the
+          // full character. Otherwise a) characters may be truncated at the top and b) selecting
+          // fonts in the application won't cover the full text height and thus leads to rendering
+          //
+          // However, fall back to horizontal if the hor-ascender is just as large or larger. This is
+          // important since the horizontal metric may include an additional line gap, which can result
+          // in a larger total heigth than the Win metrics. According to our tests this is
+          // only relevant if the horizontal is same or larger was WinMetric. If it is smaller, it has
+          // been set up NOT to cover the complete character.
+          //
+          // See [HS1367] for details.
+          // issues.
+          if ((FT_Short)face->os2.usWinAscent > face->horizontal.Ascender)
+          {
+            root->ascender  = (FT_Short)face->os2.usWinAscent;
+            root->descender = -(FT_Short)face->os2.usWinDescent;
+            root->height    = root->ascender - root->descender;
+          }
+          else
+          {
+            // From here on we have the FreeType default behavior again...
+            root->ascender  = face->horizontal.Ascender;
+            root->descender = face->horizontal.Descender;
+            root->height    = root->ascender - root->descender +
+                              face->horizontal.Line_Gap;
+          }
 
           if ( !( root->ascender || root->descender ) )
           {
