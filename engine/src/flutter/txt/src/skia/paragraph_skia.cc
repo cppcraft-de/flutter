@@ -263,6 +263,11 @@ std::vector<LineMetrics>& ParagraphSkia::GetLineMetrics() {
   return line_metrics_.value();
 }
 
+std::vector<skt::Paragraph::GlyphDiagnostic>
+ParagraphSkia::GetGlyphDiagnostics() {
+  return paragraph_->getGlyphDiagnostics();
+}
+
 bool ParagraphSkia::GetLineMetricsAt(int lineNumber,
                                      skt::LineMetrics* lineMetrics) const {
   return paragraph_->getLineMetricsAt(lineNumber, lineMetrics);

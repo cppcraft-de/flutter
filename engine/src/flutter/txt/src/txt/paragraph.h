@@ -179,6 +179,9 @@ class Paragraph {
 
   virtual std::vector<LineMetrics>& GetLineMetrics() = 0;
 
+  virtual std::vector<skia::textlayout::Paragraph::GlyphDiagnostic>
+  GetGlyphDiagnostics() = 0;
+
   virtual bool GetLineMetricsAt(
       int lineNumber,
       skia::textlayout::LineMetrics* lineMetrics) const = 0;

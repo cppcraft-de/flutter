@@ -1,0 +1,115 @@
+﻿diff --git a/modules/canvaskit/paragraph_bindings.cpp b/modules/canvaskit/paragraph_bindings.cpp
+index f5d80b3476..aaf354e5e6 100644
+--- a/modules/canvaskit/paragraph_bindings.cpp
++++ b/modules/canvaskit/paragraph_bindings.cpp
+@@ -354,6 +354,19 @@ JSObject JSObjectFromLineMetrics(skia::textlayout::LineMetrics& metrics) {
+     m.set("left", metrics.fLeft);
+     m.set("baseline", metrics.fBaseline);
+     m.set("lineNumber", metrics.fLineNumber);
++    m.set("rawAscent", metrics.fRawAscent);
++    m.set("rawDescent", metrics.fRawDescent);
++    m.set("rawLeading", metrics.fRawLeading);
++    m.set("effectiveAscent", metrics.fEffectiveAscent);
++    m.set("effectiveDescent", metrics.fEffectiveDescent);
++    m.set("effectiveLeading", metrics.fEffectiveLeading);
++    m.set("heightInputAscent", metrics.fHeightInputAscent);
++    m.set("heightInputDescent", metrics.fHeightInputDescent);
++    m.set("heightInputLeading", metrics.fHeightInputLeading);
++    m.set("heightInputRawLeading", metrics.fHeightInputRawLeading);
++    m.set("lineHeightBranch", metrics.fLineHeightBranch);
++    m.set("nextLineBaselinePitch", metrics.fNextLineBaselinePitch);
++    m.set("lineBoxHeight", metrics.fLineBoxHeight);
+     return m;
+ }
+ 
+@@ -387,6 +400,82 @@ JSArray GetLineMetrics(para::Paragraph& self) {
+     return result;
+ }
+ 
++JSArray GetGlyphDiagnostics(para::Paragraph& self) {
++    const auto glyphs = self.getGlyphDiagnostics();
++    JSArray result = emscripten::val::array();
++    for (const auto& glyph : glyphs) {
++        JSArray record = emscripten::val::array();
++        auto add_number = [&](double value) {
++            record.call<void>("push", value);
++        };
++        add_number(glyph.fLineNumber);
++        add_number(glyph.fRunIndex);
++        SkString family;
++        SkTypefaceID typefaceID = 0;
++        if (glyph.fFont.getTypeface() != nullptr) {
++            glyph.fFont.getTypeface()->getFamilyName(&family);
++            typefaceID = glyph.fFont.getTypeface()->uniqueID();
++        }
++        record.call<void>("push", std::string(family.c_str()));
++        add_number(typefaceID);
++        add_number(glyph.fFont.getSize());
++        add_number(glyph.fFont.isSubpixel() ? 1 : 0);
++        add_number(glyph.fFont.isLinearMetrics() ? 1 : 0);
++        add_number(static_cast<int>(glyph.fFont.getHinting()));
++        add_number(static_cast<int>(glyph.fFont.getEdging()));
++        add_number(glyph.fFontMetrics.fTop);
++        add_number(glyph.fFontMetrics.fAscent);
++        add_number(glyph.fFontMetrics.fDescent);
++        add_number(glyph.fFontMetrics.fBottom);
++        add_number(glyph.fFontMetrics.fLeading);
++        add_number(glyph.fGlyph);
++        add_number(glyph.fUtf8Cluster);
++        add_number(glyph.fRawShapePosition.fX);
++        add_number(glyph.fRawShapePosition.fY);
++        add_number(glyph.fRawAdvance.fX);
++        add_number(glyph.fRawAdvance.fY);
++        add_number(glyph.fLegacyPairKerningX);
++        add_number(glyph.fLegacyPairKerningAvailable ? 1 : 0);
++        add_number(glyph.fQtLikeAdvanceX);
++        add_number(glyph.fQtLikeAdvanceAvailable ? 1 : 0);
++        add_number(glyph.fShapePosition.fX);
++        add_number(glyph.fShapePosition.fY);
++        add_number(glyph.fOffset.fX);
++        add_number(glyph.fOffset.fY);
++        add_number(glyph.fAdvance.fX);
++        add_number(glyph.fAdvance.fY);
++        add_number(glyph.fFinalOrigin.fX);
++        add_number(glyph.fFinalOrigin.fY);
++        add_number(glyph.fBounds.fLeft);
++        add_number(glyph.fBounds.fTop);
++        add_number(glyph.fBounds.fRight);
++        add_number(glyph.fBounds.fBottom);
++        add_number(glyph.fInkBounds.fLeft);
++        add_number(glyph.fInkBounds.fTop);
++        add_number(glyph.fInkBounds.fRight);
++        add_number(glyph.fInkBounds.fBottom);
++        if (glyph.fFont.getTypeface() != nullptr) {
++            SkFontStyle style = glyph.fFont.getTypeface()->fontStyle();
++            add_number(style.weight());
++            add_number(style.width());
++            add_number(static_cast<int>(style.slant()));
++        } else {
++            add_number(0);
++            add_number(0);
++            add_number(0);
++        }
++        add_number(glyph.fUtf8RangeBegin);
++        add_number(glyph.fUtf8RangeEnd);
++        add_number(glyph.fBidiLevel);
++        add_number(glyph.fScript);
++        record.call<void>("push", std::string(glyph.fLanguage.c_str()));
++        add_number(glyph.fShapingFeatureCount);
++        add_number(glyph.fShapingFeatureMask);
++        result.call<void>("push", record);
++    }
++    return result;
++}
++
+ JSObject GetLineMetricsAt(para::Paragraph& self, size_t lineNumber) {
+     skia::textlayout::LineMetrics metrics;
+     return self.getLineMetricsAt(lineNumber, &metrics)
+@@ -528,6 +617,7 @@ EMSCRIPTEN_BINDINGS(Paragraph) {
+         .function("getGlyphPositionAtCoordinate", &para::Paragraph::getGlyphPositionAtCoordinate)
+         .function("getHeight", &para::Paragraph::getHeight)
+         .function("getIdeographicBaseline", &para::Paragraph::getIdeographicBaseline)
++        .function("getGlyphDiagnostics", &GetGlyphDiagnostics)
+         .function("getLineMetrics", &GetLineMetrics)
+         .function("getLineMetricsAt", &GetLineMetricsAt)
+         .function("getLineNumberAt", &para::Paragraph::getLineNumberAt)

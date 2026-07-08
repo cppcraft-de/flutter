@@ -50,6 +50,15 @@ analyzer_wrapper =
 #  - llvm_objcopy
 #      Location of the llvm-objcopy executable. Used as strip instead of strip
 #      when specified.
+#  - alink_pre_command
+#      Optional command fragment to remove an existing static library before
+#      archive creation.
+#  - alink_post_command
+#      Optional command fragment appended after archive creation.
+#  - stamp_command
+#      Optional complete command for stamp files.
+#  - copy_command
+#      Optional complete command for copy edges.
 template("gcc_toolchain") {
   toolchain(target_name) {
     assert(defined(invoker.asm), "gcc_toolchain() must specify a \"asm\" value")
@@ -152,7 +161,17 @@ template("gcc_toolchain") {
     tool("alink") {
       pool = "//build/toolchain:toolchain_pool($current_toolchain)"
       rspfile = "{{output}}.rsp"
-      command = "rm -f {{output}} && $ar rcs {{output}} @$rspfile"
+      if (defined(invoker.alink_pre_command)) {
+        alink_pre_command = invoker.alink_pre_command
+      } else {
+        alink_pre_command = "rm -f {{output}} &&"
+      }
+      if (defined(invoker.alink_post_command)) {
+        alink_post_command = invoker.alink_post_command
+      } else {
+        alink_post_command = ""
+      }
+      command = "$alink_pre_command $ar rcs {{output}} @$rspfile$alink_post_command"
       description = "AR {{output}}"
       rspfile_content = "{{inputs}}"
       outputs =
@@ -270,12 +289,20 @@ template("gcc_toolchain") {
     }
 
     tool("stamp") {
-      command = "touch {{output}}"
+      if (defined(invoker.stamp_command)) {
+        command = invoker.stamp_command
+      } else {
+        command = "touch {{output}}"
+      }
       description = "STAMP {{output}}"
     }
 
     tool("copy") {
-      command = "ln -f {{source}} {{output}} 2>/dev/null || (rm -rf {{output}} && cp -af {{source}} {{output}})"
+      if (defined(invoker.copy_command)) {
+        command = invoker.copy_command
+      } else {
+        command = "ln -f {{source}} {{output}} 2>/dev/null || (rm -rf {{output}} && cp -af {{source}} {{output}})"
+      }
       description = "COPY {{source}} {{output}}"
     }
 

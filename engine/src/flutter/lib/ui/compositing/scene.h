@@ -33,6 +33,12 @@ class Scene : public RefCountedDartWrappable<Scene> {
                       uint32_t height,
                       Dart_Handle raw_image_handle);
 
+  static Dart_Handle toPdf(Dart_Handle scenes_handle,
+                           Dart_Handle page_sizes_handle,
+                           double page_width,
+                           double page_height,
+                           Dart_Handle pdf_callback);
+
   void dispose();
 
  private:

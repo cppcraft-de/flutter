@@ -8,7 +8,7 @@
 /// @docImport 'sliver.dart';
 library;
 
-import 'dart:ui' as ui show Color, Gradient, Image, ImageFilter;
+import 'dart:ui' as ui show Color, Gradient, Image, ImageFilter, PdfPageFormat, PdfPageOrientation;
 
 import 'package:flutter/animation.dart';
 import 'package:flutter/foundation.dart';
@@ -3553,6 +3553,53 @@ class RenderRepaintBoundary extends RenderProxyBox {
     assert(!debugNeedsPaint);
     final offsetLayer = layer! as OffsetLayer;
     return offsetLayer.toImage(Offset.zero & size, pixelRatio: pixelRatio);
+  }
+
+  /// Capture a PDF document containing the current state of this render object
+  /// and its children as a single page.
+  ///
+  /// To use [toPdf], the render object must have gone through the paint phase
+  /// (i.e. [debugNeedsPaint] must be false).
+  ///
+  /// The render object bounds are scaled to fill the selected PDF page [format]
+  /// and [orientation].
+  Future<Uint8List> toPdf({
+    ui.PdfPageFormat format = ui.PdfPageFormat.a4,
+    ui.PdfPageOrientation orientation = ui.PdfPageOrientation.portrait,
+  }) {
+    assert(!debugNeedsPaint);
+    final offsetLayer = layer! as OffsetLayer;
+    return offsetLayer.toPdf(Offset.zero & size, format: format, orientation: orientation);
+  }
+
+  /// Capture a PDF document containing one page for each repaint boundary in
+  /// [pages].
+  ///
+  /// Each repaint boundary must have gone through the paint phase. Every output
+  /// page uses the same [format] and [orientation].
+  static Future<Uint8List> toPdfDocument(
+    List<RenderRepaintBoundary> pages, {
+    ui.PdfPageFormat format = ui.PdfPageFormat.a4,
+    ui.PdfPageOrientation orientation = ui.PdfPageOrientation.portrait,
+  }) {
+    assert(() {
+      for (final page in pages) {
+        if (page.debugNeedsPaint) {
+          throw FlutterError(
+            'RenderRepaintBoundary.toPdfDocument called before paint was complete.',
+          );
+        }
+      }
+      return true;
+    }());
+    return OffsetLayer.toPdfDocument(
+      <OffsetLayerPdfPage>[
+        for (final page in pages)
+          OffsetLayerPdfPage(layer: page.layer! as OffsetLayer, bounds: Offset.zero & page.size),
+      ],
+      format: format,
+      orientation: orientation,
+    );
   }
 
   /// Capture an image of the current state of this render object and its

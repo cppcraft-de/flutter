@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:meta/meta.dart';
 import 'package:ui/ui.dart' as ui;
@@ -994,6 +995,12 @@ class WebParagraph implements ui.Paragraph {
     WebParagraphDebug.apiTrace('computeLineMetrics("$text": $metrics');
     return metrics;
   }
+
+  @override
+  Float64List computeDetailedLineMetricsForDiagnostics() => Float64List(0);
+
+  @override
+  List<Object?> computeGlyphMetricsForDiagnostics() => const <Object?>[];
 
   @override
   ui.LineMetrics? getLineMetricsAt(int lineNumber) {

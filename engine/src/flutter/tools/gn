@@ -843,6 +843,7 @@ def to_gn_wasm_args(args, gn_args):
   gn_args['is_clang'] = True
   gn_args['target_os'] = 'wasm'
   gn_args['target_cpu'] = 'wasm'
+  gn_args['current_os'] = 'wasm'
   gn_args['wasm_use_dwarf'] = args.wasm_use_dwarf
   gn_args['wasm_prioritize_size'] = args.optimize_for_size
   gn_args['skia_use_angle'] = False
