@@ -130,10 +130,8 @@ def main(argv):
       nargs='+',
       default=DEFAULT_GROUPS,
       metavar='GROUP',
-      help=(
-          'Patch groups to apply: all, diagnostics, pdf. '
-          'Defaults to diagnostics and pdf.'
-      ),
+      help=('Patch groups to apply: all, diagnostics, pdf. '
+            'Defaults to diagnostics and pdf.'),
   )
   args = parser.parse_args(argv[1:])
 
