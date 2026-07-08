@@ -997,13 +997,19 @@
         /* we check the size of the `fpgm' and `prep' tables, too -- */
         /* the assumption is that there don't exist real TTFs where  */
         /* both `fpgm' and `prep' tables are missing                 */
+        // [SCHOOLCRAFT]: we reverted a FreeType fix here to achieve WSC-compatible font rendering.
+        // See https://gitlab.freedesktop.org/freetype/freetype/-/work_items/1320
+        // and https://gitlab.freedesktop.org/freetype/freetype/-/commit/202297eb5c88d22be2fe4ce8382cd6f4a8820f37
+        // for details.
+        // This affects a number of Google Fonts as well as FibelNord..., LRSABCNumber2, LRSNordFenster and possibly others.
         if ( ( mode == FT_RENDER_MODE_LIGHT           &&
                ( !FT_DRIVER_HINTS_LIGHTLY( driver ) &&
                  !is_light_type1                    ) )         ||
              ( FT_IS_SFNT( face )                             &&
                ttface->num_locations                          &&
+               ttface->max_profile.maxSizeOfInstructions == 0 &&
                ttface->font_program_size == 0                 &&
-               ttface->cvt_program_size <= 7                  ) )
+               ttface->cvt_program_size == 0                  ) )
           autohint = TRUE;
       }
     }
