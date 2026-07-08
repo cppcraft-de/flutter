@@ -22,7 +22,7 @@ index f5d80b3476..aaf354e5e6 100644
      return m;
  }
  
-@@ -387,6 +400,80 @@ JSArray GetLineMetrics(para::Paragraph& self) {
+@@ -387,6 +400,84 @@ JSArray GetLineMetrics(para::Paragraph& self) {
      return result;
  }
  
@@ -62,6 +62,10 @@ index f5d80b3476..aaf354e5e6 100644
 +        add_number(glyph.fRawAdvance.fY);
 +        add_number(glyph.fLegacyPairKerningX);
 +        add_number(glyph.fLegacyPairKerningAvailable ? 1 : 0);
++        // CanvasKit does not expose the Qt-like advance probe here, but the
++        // framework decoder expects the shared raw/legacy/qt-like record shape.
++        add_number(0);
++        add_number(0);
 +        add_number(glyph.fShapePosition.fX);
 +        add_number(glyph.fShapePosition.fY);
 +        add_number(glyph.fOffset.fX);
