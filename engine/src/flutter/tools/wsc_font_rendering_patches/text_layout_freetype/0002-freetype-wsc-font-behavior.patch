@@ -1,0 +1,82 @@
+diff --git a/src/base/ftobjs.c b/src/base/ftobjs.c
+index cced4fed0..a40dac613 100644
+--- a/src/base/ftobjs.c
++++ b/src/base/ftobjs.c
+@@ -997,13 +997,19 @@
+         /* we check the size of the `fpgm' and `prep' tables, too -- */
+         /* the assumption is that there don't exist real TTFs where  */
+         /* both `fpgm' and `prep' tables are missing                 */
++        // [SCHOOLCRAFT]: we reverted a FreeType fix here to achieve WSC-compatible font rendering.
++        // See https://gitlab.freedesktop.org/freetype/freetype/-/work_items/1320
++        // and https://gitlab.freedesktop.org/freetype/freetype/-/commit/202297eb5c88d22be2fe4ce8382cd6f4a8820f37
++        // for details.
++        // This affects a number of Google Fonts as well as FibelNord..., LRSABCNumber2, LRSNordFenster and possibly others.
+         if ( ( mode == FT_RENDER_MODE_LIGHT           &&
+                ( !FT_DRIVER_HINTS_LIGHTLY( driver ) &&
+                  !is_light_type1                    ) )         ||
+              ( FT_IS_SFNT( face )                             &&
+                ttface->num_locations                          &&
++               ttface->max_profile.maxSizeOfInstructions == 0 &&
+                ttface->font_program_size == 0                 &&
+-               ttface->cvt_program_size <= 7                  ) )
++               ttface->cvt_program_size == 0                  ) )
+           autohint = TRUE;
+       }
+     }
+diff --git a/src/sfnt/sfobjs.c b/src/sfnt/sfobjs.c
+index 6af35787e..6ce762331 100644
+--- a/src/sfnt/sfobjs.c
++++ b/src/sfnt/sfobjs.c
+@@ -1377,6 +1377,12 @@
+          *    2. Otherwise, use the OS/2 table's usWin* metrics.
+          */
+ 
++        // [SCHOOLCRAFT]:
++        // Commented out. Do not evaluate the "Really use typo" flag. We found fonts, such as Lato, which set this flag
++        // but still do not include the full chars in the typo metrics (historical reasons). Instead prioritize the larger
++        // one of Win or Horizontal, see next paragraph.
++        // See [HS1367] for details.
++        /*
+         if ( face->os2.version != 0xFFFFU && face->os2.fsSelection & 128 )
+         {
+           root->ascender  = face->os2.sTypoAscender;
+@@ -1385,11 +1391,35 @@
+                             face->os2.sTypoLineGap;
+         }
+         else
++        */
+         {
+-          root->ascender  = face->horizontal.Ascender;
+-          root->descender = face->horizontal.Descender;
+-          root->height    = root->ascender - root->descender +
+-                            face->horizontal.Line_Gap;
++          // [SCHOOLCRAFT]
++          // For Worksheet Crafter it is essential that the ascender and descender cover the
++          // full character. Otherwise a) characters may be truncated at the top and b) selecting
++          // fonts in the application won't cover the full text height and thus leads to rendering
++          //
++          // However, fall back to horizontal if the hor-ascender is just as large or larger. This is
++          // important since the horizontal metric may include an additional line gap, which can result
++          // in a larger total heigth than the Win metrics. According to our tests this is
++          // only relevant if the horizontal is same or larger was WinMetric. If it is smaller, it has
++          // been set up NOT to cover the complete character.
++          //
++          // See [HS1367] for details.
++          // issues.
++          if ((FT_Short)face->os2.usWinAscent > face->horizontal.Ascender)
++          {
++            root->ascender  = (FT_Short)face->os2.usWinAscent;
++            root->descender = -(FT_Short)face->os2.usWinDescent;
++            root->height    = root->ascender - root->descender;
++          }
++          else
++          {
++            // From here on we have the FreeType default behavior again...
++            root->ascender  = face->horizontal.Ascender;
++            root->descender = face->horizontal.Descender;
++            root->height    = root->ascender - root->descender +
++                              face->horizontal.Line_Gap;
++          }
+ 
+           if ( !( root->ascender || root->descender ) )
+           {

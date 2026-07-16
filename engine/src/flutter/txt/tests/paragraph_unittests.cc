@@ -4,9 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdlib>
 #include <memory>
-#include <optional>
 #include "display_list/dl_color.h"
 #include "display_list/dl_paint.h"
 #include "display_list/dl_tile_mode.h"
@@ -22,41 +20,6 @@
 
 namespace flutter {
 namespace testing {
-
-namespace {
-
-class ScopedEnvironmentVariable {
- public:
-  ScopedEnvironmentVariable(const char* key, const char* value) : key_(key) {
-    const char* original = std::getenv(key);
-    if (original != nullptr) {
-      original_ = original;
-    }
-    Set(value);
-  }
-
-  ~ScopedEnvironmentVariable() {
-    Set(original_ ? original_->c_str() : nullptr);
-  }
-
- private:
-  void Set(const char* value) {
-#ifdef _WIN32
-    _putenv_s(key_.c_str(), value == nullptr ? "" : value);
-#else
-    if (value == nullptr) {
-      unsetenv(key_.c_str());
-    } else {
-      setenv(key_.c_str(), value, 1);
-    }
-#endif
-  }
-
-  std::string key_;
-  std::optional<std::string> original_;
-};
-
-}  // namespace
 
 [[maybe_unused]]
 static const std::string kEmojiFontFile =
@@ -269,10 +232,7 @@ TEST_F(PainterTest, DetailedLineMetricsComeFromFinalLayout) {
             glyphs.front().fBounds.makeOffset(glyphs.front().fFinalOrigin));
 }
 
-TEST_F(PainterTest, QtLikeIntegerLineMetricsUseSignedPitchAndOccupiedBox) {
-  ScopedEnvironmentVariable environment("FLUTTER_QT_LINE_METRICS", "true");
-  ScopedEnvironmentVariable alternative_line_height(
-      "FLUTTER_USE_ALTERNATIVE_LINE_HEIGHT", nullptr);
+TEST_F(PainterTest, SchoolcraftIntegerLineMetricsUseSignedPitchAndOccupiedBox) {
   auto style = makeStyle();
   style.font_size = 19;
   auto paragraph = layoutText(style, u"HHHH");
@@ -299,40 +259,6 @@ TEST_F(PainterTest, QtLikeIntegerLineMetricsUseSignedPitchAndOccupiedBox) {
   EXPECT_DOUBLE_EQ(line.line_box_height, expected_occupied_height);
   EXPECT_DOUBLE_EQ(line.height, expected_baseline_pitch);
   EXPECT_DOUBLE_EQ(glyphs.front().fFinalOrigin.fY, line.baseline);
-}
-
-TEST_F(PainterTest, AlternativeLineHeightEnvKeepsSignedPitch) {
-  ScopedEnvironmentVariable environment("FLUTTER_QT_LINE_METRICS", "true");
-  ScopedEnvironmentVariable alternative_line_height(
-      "FLUTTER_USE_ALTERNATIVE_LINE_HEIGHT", "true");
-  auto style = makeStyle();
-  style.font_size = 19;
-  auto paragraph = layoutText(style, u"HHHH");
-  const auto& metrics = paragraph->GetLineMetrics();
-
-  ASSERT_EQ(metrics.size(), 1u);
-  const txt::LineMetrics& line = metrics.front();
-  const double expected_baseline_pitch =
-      std::ceil(line.raw_ascent + line.raw_descent + line.raw_leading);
-
-  EXPECT_DOUBLE_EQ(line.line_height_branch, 2);
-  EXPECT_DOUBLE_EQ(line.next_line_baseline_pitch, expected_baseline_pitch);
-  EXPECT_DOUBLE_EQ(line.height, expected_baseline_pitch);
-  EXPECT_DOUBLE_EQ(line.line_box_height,
-                   std::ceil(line.raw_ascent + line.raw_descent +
-                             std::max(0.0, line.raw_leading)));
-}
-
-TEST_F(PainterTest, QtLikeIntegerLineMetricsCanOptOutToVanilla) {
-  ScopedEnvironmentVariable environment("FLUTTER_QT_LINE_METRICS", "false");
-  auto style = makeStyle();
-  style.font_size = 19;
-  auto paragraph = layoutText(style, u"HHHH");
-  const auto& metrics = paragraph->GetLineMetrics();
-
-  ASSERT_EQ(metrics.size(), 1u);
-  const txt::LineMetrics& line = metrics.front();
-  EXPECT_DOUBLE_EQ(line.line_height_branch, 0);
 }
 
 TEST_F(PainterTest, DrawsSolidLineSkia) {

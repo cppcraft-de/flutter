@@ -11,7 +11,7 @@ import subprocess
 import sys
 
 EXPECTED_SKIA_REVISION = 'e9ed4fc9f1544c58d8a9347c1fc9471d8dd7c465'
-EXPECTED_HARFBUZZ_REVISION = '6f4c5cec306d31e6822303f5ba248a14293d588e'
+EXPECTED_FREETYPE_REVISION = 'be4bcb57914154fc1b9e2900bf8e4b516057e2b8'
 
 PATCH_GROUP_ORDER = (
     'text_layout',
@@ -25,17 +25,26 @@ GROUP_DEPENDENCIES = {
 
 GROUP_MARKERS = {
     'text_layout': {
-        ('skia', 'modules/skparagraph/src/TextStyle.cpp'): 'fSubpixel == that.fSubpixel',
-        ('skia', 'modules/skparagraph/src/Run.h'): 'environmentVariableDisabled',
-        ('skia', 'modules/skparagraph/src/Run.cpp'): 'Run::commit()',
-        ('skia', 'modules/skparagraph/src/TextLine.cpp'): 'fNextLineBaselinePitch',
+        ('skia', 'modules/skparagraph/src/Run.cpp'):
+            '[SCHOOLCRAFT] WSC uses integer glyph advances.',
+        ('skia', 'modules/skparagraph/src/Run.h'):
+            '[SCHOOLCRAFT] WSC advances baselines',
+        ('skia', 'modules/skparagraph/src/TextLine.cpp'):
+            'fNextLineBaselinePitch',
         ('skia', 'modules/skparagraph/include/TextStyle.h'):
-            ('SkFontHinting fHinting = SkFontHinting::kFull'),
-        ('skia', 'modules/canvaskit/paragraph.js'): 'registerTypeface = function(typeface, family)',
-        ('skia', 'modules/skparagraph/include/FontCollection.h'): 'clearFontLookupCaches',
-        ('skia', 'modules/skshaper/src/SkShaper_harfbuzz.cpp'): 'skhb_qt_style_script',
-        ('skia', 'src/ports/SkFontHost_FreeType.cpp'): 'FT_Size_Metrics& sizeMetrics',
-        ('harfbuzz', 'src/hb-ot-shape.cc'): 'plan.apply_fallback_kern = true;',
+            '[SCHOOLCRAFT] Match WSC on every SkParagraph target',
+        ('skia', 'modules/canvaskit/paragraph.js'):
+            'registerTypeface = function(typeface, family)',
+        ('skia', 'modules/skparagraph/include/FontCollection.h'):
+            'clearFontLookupCaches',
+        ('skia', 'src/ports/SkFontHost_FreeType.cpp'):
+            '[SCHOOLCRAFT] WSC obtains line metrics',
+        ('freetype', 'include/freetype-flutter-config/ftoption.h'):
+            '[SCHOOLCRAFT] Match the FreeType configuration used by WSC.',
+        ('freetype', 'src/base/ftobjs.c'):
+            '[SCHOOLCRAFT]: we reverted a FreeType fix here',
+        ('freetype', 'src/sfnt/sfobjs.c'):
+            'For Worksheet Crafter it is essential that the ascender',
     },
     'diagnostics': {
         ('skia', 'modules/skparagraph/src/ParagraphImpl.cpp'): ('getLegacyPairKerningX'),
@@ -51,15 +60,13 @@ GROUP_MARKERS = {
 
 PATCH_SUBDIRS = {
     'skia': '{group}',
-    'harfbuzz': '{group}_harfbuzz',
+    'freetype': '{group}_freetype',
 }
 
 EXPECTED_REVISIONS = {
     'skia': EXPECTED_SKIA_REVISION,
-    'harfbuzz': EXPECTED_HARFBUZZ_REVISION,
+    'freetype': EXPECTED_FREETYPE_REVISION,
 }
-
-STALE_GCLIENT_ENTRIES = ("'engine/src/flutter/third_party/freetype2':",)
 
 LEGACY_WSC_PATCH_PATHS = {
     'skia': {
@@ -255,25 +262,6 @@ def reset_patch_owned_repos(repo_dirs, patch_files, *, strict_unknown_dirty):
   return True
 
 
-def remove_stale_gclient_entries(flutter_dir):
-  gclient_root = Path.cwd()
-  if not (gclient_root / '.gclient_entries').exists():
-    gclient_root = flutter_dir.parents[2]
-  gclient_entries = gclient_root / '.gclient_entries'
-  if not gclient_entries.exists():
-    return
-
-  lines = gclient_entries.read_text(encoding='utf-8').splitlines(keepends=True)
-  filtered_lines = [
-      line for line in lines if not any(entry in line for entry in STALE_GCLIENT_ENTRIES)
-  ]
-  if filtered_lines == lines:
-    return
-
-  gclient_entries.write_text(''.join(filtered_lines), encoding='utf-8')
-  print('Removed stale freetype2 entry from .gclient_entries.')
-
-
 def main(argv):
   parser = argparse.ArgumentParser()
   default_flutter_dir = Path(__file__).resolve().parents[2]
@@ -284,10 +272,10 @@ def main(argv):
       help='Path to the Skia checkout to patch.',
   )
   parser.add_argument(
-      '--harfbuzz-dir',
+      '--freetype-dir',
       type=Path,
-      default=default_flutter_dir / 'third_party' / 'harfbuzz',
-      help='Path to the HarfBuzz checkout to patch.',
+      default=default_flutter_dir / 'third_party' / 'freetype2',
+      help='Path to the FreeType checkout to patch.',
   )
   parser.add_argument(
       '--reverse',
@@ -313,7 +301,7 @@ def main(argv):
 
   repo_dirs = {
       'skia': args.skia_dir.resolve(),
-      'harfbuzz': args.harfbuzz_dir.resolve(),
+      'freetype': args.freetype_dir.resolve(),
   }
   patch_dir = Path(__file__).resolve().parent
   groups = expand_groups(args.groups)
@@ -331,9 +319,6 @@ def main(argv):
   if not patch_files:
     print('No WSC font-rendering patch files found.')
     return 0
-
-  if args.reverse:
-    remove_stale_gclient_entries(default_flutter_dir)
 
   needed_repos = {repo_name for repo_name, _ in patch_files}
   if not ensure_repos_available(repo_dirs, needed_repos, reverse=args.reverse):

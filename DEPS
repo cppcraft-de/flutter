@@ -472,6 +472,9 @@ deps = {
   'engine/src/flutter/third_party/expat':
    Var('chromium_git') + '/external/github.com/libexpat/libexpat.git' + '@' + '8e49998f003d693213b538ef765814c7d21abada',
 
+  'engine/src/flutter/third_party/freetype2':
+   Var('flutter_git') + '/third_party/freetype2' + '@' + 'be4bcb57914154fc1b9e2900bf8e4b516057e2b8',
+
   'engine/src/flutter/third_party/skia':
    Var('skia_git') + '/skia.git' + '@' +  Var('skia_revision'),
 
