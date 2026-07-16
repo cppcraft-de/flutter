@@ -10,9 +10,9 @@ family, style, and fallback face wins. The wrapper then constructs the selected
 font from the same font data using FreeType, preserving collection index,
 variation coordinates, and palette arguments when Skia exposes them.
 
-Existing WSC diagnostics and Qt parity adjustments remain part of the contract:
-Qt-like integer metrics, subpixel-off behavior, advance diagnostics, line
-diagnostics, and the existing third-party patch hooks stay active.
+Existing WSC parity adjustments remain part of the contract: Qt-like integer
+metrics, subpixel-off behavior, and the existing third-party patch hooks stay
+active.
 
 Supported exact-parity paths are SkParagraph/HarfBuzz/FreeType-backed paths,
 including native Skia raster and Impeller when text enters Impeller as

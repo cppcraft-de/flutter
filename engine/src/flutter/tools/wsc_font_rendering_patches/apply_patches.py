@@ -15,13 +15,10 @@ EXPECTED_FREETYPE_REVISION = 'be4bcb57914154fc1b9e2900bf8e4b516057e2b8'
 
 PATCH_GROUP_ORDER = (
     'text_layout',
-    'diagnostics',
     'pdf',
 )
 
-GROUP_DEPENDENCIES = {
-    'diagnostics': ('text_layout',),
-}
+GROUP_DEPENDENCIES = {}
 
 GROUP_MARKERS = {
     'text_layout': {
@@ -45,11 +42,6 @@ GROUP_MARKERS = {
             '[SCHOOLCRAFT]: we reverted a FreeType fix here',
         ('freetype', 'src/sfnt/sfobjs.c'):
             'For Worksheet Crafter it is essential that the ascender',
-    },
-    'diagnostics': {
-        ('skia', 'modules/skparagraph/src/ParagraphImpl.cpp'): ('getLegacyPairKerningX'),
-        ('skia', 'modules/skparagraph/include/Paragraph.h'): 'fRawShapePosition',
-        ('skia', 'modules/canvaskit/paragraph_bindings.cpp'): 'getGlyphDiagnostics',
     },
     'pdf': {
         ('skia', 'modules/canvaskit/canvaskit_bindings.cpp'): 'MakePdf(JSArray pictures',
@@ -292,10 +284,7 @@ def main(argv):
       nargs='+',
       default=['all'],
       metavar='GROUP',
-      help=(
-          'Patch groups to apply: all, text_layout, diagnostics, pdf. '
-          'Diagnostics includes text_layout.'
-      ),
+      help=('Patch groups to apply: all, text_layout, pdf.'),
   )
   args = parser.parse_args(argv[1:])
 
