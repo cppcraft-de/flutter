@@ -208,6 +208,133 @@ def runMacGenerators(Set<String> modes, boolean buildMacOS, boolean buildIOS) {
     }
 }
 
+def shouldStageEnginePayload() {
+    return params.PUBLISH_ENGINE_ARTIFACTS || params.KEEP_ENGINE_PAYLOAD_IN_JENKINS
+}
+
+def buildWindowsTarget() {
+    def targets = csvValues(params.TARGETS)
+    def modes = csvValues(params.MODES)
+    def hosts = csvValues(params.HOST_SDKS)
+    def windowsBuilds = ['ci\\host_debug']
+    if (modes.contains('profile')) {
+        windowsBuilds << 'ci\\host_profile'
+    }
+    if (modes.contains('release')) {
+        windowsBuilds << 'ci\\host_release'
+    }
+    windowsBuilds.each { runEngineBuildWindows('windows_host_engine', it) }
+
+    // Android AOT snapshots are host-specific. A Windows SDK needs these in
+    // addition to the Android engine artifacts built on flutter_mac.
+    def androidBuilds = []
+    if (targets.contains('android') && hosts.contains('windows') && modes.contains('profile')) {
+        androidBuilds.addAll(['ci\\android_profile', 'ci\\android_profile_arm64', 'ci\\android_profile_x64'])
+    }
+    if (targets.contains('android') && hosts.contains('windows') && modes.contains('release')) {
+        androidBuilds.addAll(['ci\\android_release', 'ci\\android_release_arm64', 'ci\\android_release_x64'])
+    }
+    androidBuilds.each { runEngineBuildWindows('windows_android_aot_engine', it) }
+
+    if (shouldStageEnginePayload()) {
+        collectArtifactsWindows('windows_host_engine', windowsBuilds)
+        if (!androidBuilds.isEmpty()) {
+            collectArtifactsWindows('windows_android_aot_engine', androidBuilds)
+        }
+    }
+}
+
+def buildMacosTarget() {
+    def modes = csvValues(params.MODES)
+    def builds = ['ci/host_debug', 'ci/mac_debug_arm64']
+    if (modes.contains('debug')) {
+        builds.addAll(['ci/host_debug_framework', 'ci/host_debug_gen_snapshot', 'ci/mac_debug_framework_arm64', 'ci/mac_debug_gen_snapshot_arm64'])
+    }
+    if (modes.contains('profile')) {
+        builds.addAll(['ci/host_profile', 'ci/host_profile_framework', 'ci/host_profile_gen_snapshot', 'ci/mac_profile_arm64', 'ci/mac_profile_framework_arm64', 'ci/mac_profile_gen_snapshot_arm64'])
+    }
+    if (modes.contains('release')) {
+        builds.addAll(['ci/host_release', 'ci/host_release_framework', 'ci/host_release_gen_snapshot', 'ci/mac_release_arm64', 'ci/mac_release_framework_arm64', 'ci/mac_release_gen_snapshot_arm64'])
+    }
+    builds.each { runEngineBuildUnix('mac_host_engine', it) }
+    runMacGenerators(modes, true, false)
+    if (shouldStageEnginePayload()) {
+        collectArtifactsUnix('mac_host_engine', builds, true)
+    }
+}
+
+def buildIosTarget() {
+    def modes = csvValues(params.MODES)
+    def builds = ['ci/ios_debug_sim', 'ci/ios_debug_sim_arm64']
+    if (modes.contains('debug')) { builds << 'ci/ios_debug' }
+    if (modes.contains('profile')) { builds << 'ci/ios_profile' }
+    if (modes.contains('release')) { builds << 'ci/ios_release' }
+    builds.each { runEngineBuildUnix('mac_ios_engine', it) }
+    runMacGenerators(modes, false, true)
+    if (shouldStageEnginePayload()) {
+        collectArtifactsUnix('mac_ios_engine', builds, true)
+    }
+}
+
+def buildCommonArtifactsOnMac() {
+    def modes = csvValues(params.MODES)
+    def builds = ['ci/host_debug']
+    if (modes.contains('release')) {
+        builds << 'ci/host_release'
+    }
+    builds.each { runEngineBuildUnix('linux_host_engine', it) }
+    sh 'engine/src/flutter/bin/et stamp'
+    def stamp = new JsonSlurperClassic().parseText(readFile('engine/src/out/engine_stamp.json'))
+    if (stamp.git_revision != env.ENGINE_ID) {
+        error("Generated engine stamp ${stamp.git_revision} does not match bin/internal/engine.version ${env.ENGINE_ID}")
+    }
+    if (shouldStageEnginePayload()) {
+        // Upstream declares these host-neutral patched SDK archives in its
+        // Linux builder. On macOS, ignore the Linux-only host outputs.
+        collectArtifactsUnix('linux_host_engine', builds, true, true)
+    }
+}
+
+def buildAndroidTarget() {
+    def modes = csvValues(params.MODES)
+    buildCommonArtifactsOnMac()
+
+    def debugBuilds = []
+    if (modes.contains('debug')) {
+        debugBuilds.addAll(['ci/android_debug', 'ci/android_debug_arm64', 'ci/android_debug_x86', 'ci/android_debug_x64'])
+        debugBuilds.each { runEngineBuildUnix('linux_android_debug_engine', it) }
+    }
+    def aotBuilds = []
+    if (modes.contains('profile')) {
+        aotBuilds.addAll(['ci/android_profile', 'ci/android_profile_arm64', 'ci/android_profile_x64'])
+    }
+    if (modes.contains('release')) {
+        aotBuilds.addAll(['ci/android_release', 'ci/android_release_arm64', 'ci/android_release_x64'])
+    }
+    aotBuilds.each { runEngineBuildUnix('mac_android_aot_engine', it) }
+
+    if (shouldStageEnginePayload()) {
+        if (!debugBuilds.isEmpty()) {
+            collectArtifactsUnix('linux_android_debug_engine', debugBuilds)
+        }
+        if (!aotBuilds.isEmpty()) {
+            collectArtifactsUnix('mac_android_aot_engine', aotBuilds)
+        }
+    }
+}
+
+def buildWebTarget() {
+    // Android normally contributes the shared patched SDK archives. A Web-only
+    // selection still needs them, so build them in this cell as a fallback.
+    if (!csvHas(params.TARGETS, 'android')) {
+        buildCommonArtifactsOnMac()
+    }
+    runEngineBuildUnix('linux_web_engine_build', 'ci/wasm_release')
+    if (shouldStageEnginePayload()) {
+        collectArtifactsUnix('linux_web_engine_build', ['ci/wasm_release'])
+    }
+}
+
 def createSdkArchiveUnix(String host) {
     def outputDirectory = "build/sdk-output/${host}"
     withEnv(["FLUTTER_STORAGE_BASE_URL=${params.ARTIFACT_BASE_URL}"]) {
@@ -275,14 +402,12 @@ pipeline {
         string(name: 'TRANSFER_REMOTE_DIRECTORY', defaultValue: '', description: 'Remote directory below the configured FTP/SFTP server root. Empty publishes at its root.')
         booleanParam(name: 'KEEP_ENGINE_PAYLOAD_IN_JENKINS', defaultValue: false, description: 'Also retain the complete mirror payload as Jenkins build artifacts. This can be very large.')
         booleanParam(name: 'SYNC_ENGINE_DEPS', defaultValue: true, description: 'Run gclient sync on every build agent. Disable only for pre-provisioned persistent workspaces.')
-        string(name: 'WINDOWS_AGENT_LABEL', defaultValue: 'flutter_win', description: 'Jenkins label for Windows builds, release resolution, and publishing.')
-        string(name: 'MACOS_AGENT_LABEL', defaultValue: 'flutter_mac', description: 'Jenkins label for macOS, iOS, Android, and Web builds.')
         string(name: 'WINDOWS_PYTHON', defaultValue: 'python', description: 'Python 3 command on Windows agents.')
     }
 
     stages {
         stage('Resolve release') {
-            agent { label "${params.WINDOWS_AGENT_LABEL}" }
+            agent { label 'flutter_win' }
             steps {
                 checkout scm
                 script {
@@ -365,175 +490,99 @@ pipeline {
         }
 
         stage('Build engine artifacts') {
-            parallel {
-                stage('Windows host artifacts') {
-                    when {
-                        beforeAgent true
-                        expression {
-                            env.REUSE_ENGINE_ARTIFACTS != 'true' &&
-                                (csvHas(params.TARGETS, 'windows') ||
-                                    (csvHas(params.TARGETS, 'android') && csvHas(params.HOST_SDKS, 'windows')) ||
-                                    csvHas(params.HOST_SDKS, 'windows'))
+            matrix {
+                axes {
+                    axis {
+                        name 'BUILD_TARGET'
+                        values 'windows', 'macos', 'ios', 'android', 'web'
+                    }
+                    axis {
+                        name 'BUILD_AGENT'
+                        values 'flutter_win', 'flutter_mac'
+                    }
+                }
+                excludes {
+                    exclude {
+                        axis {
+                            name 'BUILD_TARGET'
+                            values 'windows'
+                        }
+                        axis {
+                            name 'BUILD_AGENT'
+                            values 'flutter_mac'
                         }
                     }
-                    agent { label "${params.WINDOWS_AGENT_LABEL}" }
-                    steps {
-                        checkout scm
-                        script {
-                            if (params.BUILD_POLICY == 'full_rebuild') {
-                                dir('engine/src/out') { deleteDir() }
-                            }
-                            dir('build/artifact-payload') { deleteDir() }
-                            def targets = csvValues(params.TARGETS)
-                            def modes = csvValues(params.MODES)
-                            def hosts = csvValues(params.HOST_SDKS)
-                            bootstrapEngineDependenciesWindows()
-
-                            def windowsBuilds = ['ci\\host_debug']
-                            if (targets.contains('windows') && modes.contains('profile')) {
-                                windowsBuilds << 'ci\\host_profile'
-                            }
-                            if (targets.contains('windows') && modes.contains('release')) {
-                                windowsBuilds << 'ci\\host_release'
-                            }
-                            windowsBuilds.each { runEngineBuildWindows('windows_host_engine', it) }
-
-                            def androidBuilds = []
-                            if (targets.contains('android') && hosts.contains('windows') && modes.contains('profile')) {
-                                androidBuilds.addAll(['ci\\android_profile', 'ci\\android_profile_arm64', 'ci\\android_profile_x64'])
-                            }
-                            if (targets.contains('android') && hosts.contains('windows') && modes.contains('release')) {
-                                androidBuilds.addAll(['ci\\android_release', 'ci\\android_release_arm64', 'ci\\android_release_x64'])
-                            }
-                            androidBuilds.each { runEngineBuildWindows('windows_android_aot_engine', it) }
-
-                            if (params.PUBLISH_ENGINE_ARTIFACTS || params.KEEP_ENGINE_PAYLOAD_IN_JENKINS) {
-                                collectArtifactsWindows('windows_host_engine', windowsBuilds)
-                                if (!androidBuilds.isEmpty()) {
-                                    collectArtifactsWindows('windows_android_aot_engine', androidBuilds)
-                                }
-                                stash name: 'engine-artifacts-windows', includes: 'build/artifact-payload/**', useDefaultExcludes: false
-                            }
+                    exclude {
+                        axis {
+                            name 'BUILD_TARGET'
+                            values 'macos', 'ios', 'android', 'web'
+                        }
+                        axis {
+                            name 'BUILD_AGENT'
+                            values 'flutter_win'
                         }
                     }
                 }
-
-                stage('macOS, iOS, Android, and Web artifacts') {
-                    when {
-                        beforeAgent true
-                        expression {
-                            env.REUSE_ENGINE_ARTIFACTS != 'true' &&
-                                (csvHas(params.TARGETS, 'macos') || csvHas(params.TARGETS, 'ios') ||
-                                    csvHas(params.TARGETS, 'android') || csvHas(params.TARGETS, 'web') ||
-                                    (csvHas(params.TARGETS, 'android') && csvHas(params.HOST_SDKS, 'macos')) ||
-                                    csvHas(params.HOST_SDKS, 'macos'))
+                when {
+                    beforeAgent true
+                    expression {
+                        env.REUSE_ENGINE_ARTIFACTS != 'true' &&
+                            csvHas(params.TARGETS, env.BUILD_TARGET)
+                    }
+                }
+                agent { label "${BUILD_AGENT}" }
+                stages {
+                    stage('Prepare target workspace') {
+                        steps {
+                            checkout scm
+                            script {
+                                if (params.BUILD_POLICY == 'full_rebuild') {
+                                    dir('engine/src/out') { deleteDir() }
+                                }
+                                dir('build/artifact-payload') { deleteDir() }
+                                if (env.BUILD_TARGET == 'windows') {
+                                    bootstrapEngineDependenciesWindows()
+                                } else {
+                                    bootstrapEngineDependenciesMac(env.BUILD_TARGET == 'web')
+                                }
+                            }
                         }
                     }
-                    agent { label "${params.MACOS_AGENT_LABEL}" }
-                    steps {
-                        checkout scm
-                        script {
-                            if (params.BUILD_POLICY == 'full_rebuild') {
-                                dir('engine/src/out') { deleteDir() }
-                            }
-                            dir('build/artifact-payload') { deleteDir() }
-                            def targets = csvValues(params.TARGETS)
-                            def modes = csvValues(params.MODES)
-                            def hosts = csvValues(params.HOST_SDKS)
-                            bootstrapEngineDependenciesMac(targets.contains('web'))
 
-                            // The patched Dart SDK archives are host-neutral,
-                            // although upstream declares them in its Linux
-                            // builder. The same GN/Ninja targets run on macOS;
-                            // collect only outputs that actually exist there.
-                            if (targets.contains('android') || targets.contains('web')) {
-                                def commonBuilds = ['ci/host_debug']
-                                if (modes.contains('release')) {
-                                    commonBuilds << 'ci/host_release'
-                                }
-                                commonBuilds.each { runEngineBuildUnix('linux_host_engine', it) }
-                                sh 'engine/src/flutter/bin/et stamp'
-                                def stamp = new JsonSlurperClassic().parseText(readFile('engine/src/out/engine_stamp.json'))
-                                if (stamp.git_revision != env.ENGINE_ID) {
-                                    error("Generated engine stamp ${stamp.git_revision} does not match bin/internal/engine.version ${env.ENGINE_ID}")
-                                }
-                                if (params.PUBLISH_ENGINE_ARTIFACTS || params.KEEP_ENGINE_PAYLOAD_IN_JENKINS) {
-                                    collectArtifactsUnix('linux_host_engine', commonBuilds, true, true)
+                    stage('Build selected modes') {
+                        steps {
+                            script {
+                                switch (env.BUILD_TARGET) {
+                                    case 'windows':
+                                        buildWindowsTarget()
+                                        break
+                                    case 'macos':
+                                        buildMacosTarget()
+                                        break
+                                    case 'ios':
+                                        buildIosTarget()
+                                        break
+                                    case 'android':
+                                        buildAndroidTarget()
+                                        break
+                                    case 'web':
+                                        buildWebTarget()
+                                        break
+                                    default:
+                                        error("Unsupported matrix target: ${env.BUILD_TARGET}")
                                 }
                             }
+                        }
+                    }
 
-                            def macHostBuilds = []
-                            if (targets.contains('macos') || targets.contains('ios') || hosts.contains('macos')) {
-                                macHostBuilds.addAll(['ci/host_debug', 'ci/mac_debug_arm64'])
-                                macHostBuilds.each { runEngineBuildUnix('mac_host_engine', it) }
-                            }
-
-                            if (targets.contains('macos')) {
-                                if (modes.contains('debug')) {
-                                    def builds = ['ci/host_debug_framework', 'ci/host_debug_gen_snapshot', 'ci/mac_debug_framework_arm64', 'ci/mac_debug_gen_snapshot_arm64']
-                                    builds.each { runEngineBuildUnix('mac_host_engine', it) }
-                                    macHostBuilds.addAll(builds)
-                                }
-                                if (modes.contains('profile')) {
-                                    def builds = ['ci/host_profile', 'ci/host_profile_framework', 'ci/host_profile_gen_snapshot', 'ci/mac_profile_arm64', 'ci/mac_profile_framework_arm64', 'ci/mac_profile_gen_snapshot_arm64']
-                                    builds.each { runEngineBuildUnix('mac_host_engine', it) }
-                                    macHostBuilds.addAll(builds)
-                                }
-                                if (modes.contains('release')) {
-                                    def builds = ['ci/host_release', 'ci/host_release_framework', 'ci/host_release_gen_snapshot', 'ci/mac_release_arm64', 'ci/mac_release_framework_arm64', 'ci/mac_release_gen_snapshot_arm64']
-                                    builds.each { runEngineBuildUnix('mac_host_engine', it) }
-                                    macHostBuilds.addAll(builds)
-                                }
-                            }
-
-                            def iosBuilds = []
-                            if (targets.contains('ios')) {
-                                iosBuilds.addAll(['ci/ios_debug_sim', 'ci/ios_debug_sim_arm64'])
-                                if (modes.contains('debug')) { iosBuilds << 'ci/ios_debug' }
-                                if (modes.contains('profile')) { iosBuilds << 'ci/ios_profile' }
-                                if (modes.contains('release')) { iosBuilds << 'ci/ios_release' }
-                                iosBuilds.each { runEngineBuildUnix('mac_ios_engine', it) }
-                            }
-
-                            def androidDebugBuilds = []
-                            if (targets.contains('android') && modes.contains('debug')) {
-                                androidDebugBuilds.addAll(['ci/android_debug', 'ci/android_debug_arm64', 'ci/android_debug_x86', 'ci/android_debug_x64'])
-                                androidDebugBuilds.each { runEngineBuildUnix('linux_android_debug_engine', it) }
-                            }
-                            def androidAotBuilds = []
-                            if (targets.contains('android') && modes.contains('profile')) {
-                                androidAotBuilds.addAll(['ci/android_profile', 'ci/android_profile_arm64', 'ci/android_profile_x64'])
-                            }
-                            if (targets.contains('android') && modes.contains('release')) {
-                                androidAotBuilds.addAll(['ci/android_release', 'ci/android_release_arm64', 'ci/android_release_x64'])
-                            }
-                            androidAotBuilds.each { runEngineBuildUnix('mac_android_aot_engine', it) }
-
-                            def webBuilds = []
-                            if (targets.contains('web')) {
-                                webBuilds << 'ci/wasm_release'
-                                runEngineBuildUnix('linux_web_engine_build', 'ci/wasm_release')
-                            }
-
-                            runMacGenerators(modes, targets.contains('macos'), targets.contains('ios'))
-                            if (params.PUBLISH_ENGINE_ARTIFACTS || params.KEEP_ENGINE_PAYLOAD_IN_JENKINS) {
-                                if (!macHostBuilds.isEmpty()) {
-                                    collectArtifactsUnix('mac_host_engine', macHostBuilds, targets.contains('macos'))
-                                }
-                                if (!iosBuilds.isEmpty()) {
-                                    collectArtifactsUnix('mac_ios_engine', iosBuilds, true)
-                                }
-                                if (!androidDebugBuilds.isEmpty()) {
-                                    collectArtifactsUnix('linux_android_debug_engine', androidDebugBuilds)
-                                }
-                                if (!androidAotBuilds.isEmpty()) {
-                                    collectArtifactsUnix('mac_android_aot_engine', androidAotBuilds)
-                                }
-                                if (!webBuilds.isEmpty()) {
-                                    collectArtifactsUnix('linux_web_engine_build', webBuilds)
-                                }
-                                stash name: 'engine-artifacts-macos', includes: 'build/artifact-payload/**', useDefaultExcludes: false
-                            }
+                    stage('Stage target artifacts') {
+                        when { expression { shouldStageEnginePayload() } }
+                        steps {
+                            stash(
+                                name: "engine-artifacts-${env.BUILD_TARGET}",
+                                includes: 'build/artifact-payload/**',
+                                useDefaultExcludes: false,
+                            )
                         }
                     }
                 }
@@ -548,18 +597,13 @@ pipeline {
                         (params.PUBLISH_ENGINE_ARTIFACTS || params.KEEP_ENGINE_PAYLOAD_IN_JENKINS)
                 }
             }
-            agent { label "${params.WINDOWS_AGENT_LABEL}" }
+            agent { label 'flutter_win' }
             steps {
                 checkout scm
                 script {
                     dir('build/artifact-payload') { deleteDir() }
-                    if (csvHas(params.TARGETS, 'windows') || csvHas(params.HOST_SDKS, 'windows')) {
-                        unstash 'engine-artifacts-windows'
-                    }
-                    if (csvHas(params.TARGETS, 'macos') || csvHas(params.TARGETS, 'ios') ||
-                        csvHas(params.TARGETS, 'android') || csvHas(params.TARGETS, 'web') ||
-                        csvHas(params.HOST_SDKS, 'macos')) {
-                        unstash 'engine-artifacts-macos'
+                    csvValues(params.TARGETS).toList().sort().each { target ->
+                        unstash "engine-artifacts-${target}"
                     }
 
                     if (params.PUBLISH_ENGINE_ARTIFACTS) {
@@ -591,7 +635,7 @@ pipeline {
             parallel {
                 stage('Windows SDK') {
                     when { expression { csvHas(params.HOST_SDKS, 'windows') } }
-                    agent { label "${params.WINDOWS_AGENT_LABEL}" }
+                    agent { label 'flutter_win' }
                     steps {
                         checkout scm
                         script { createSdkArchiveWindows() }
@@ -599,7 +643,7 @@ pipeline {
                 }
                 stage('macOS SDK') {
                     when { expression { csvHas(params.HOST_SDKS, 'macos') } }
-                    agent { label "${params.MACOS_AGENT_LABEL}" }
+                    agent { label 'flutter_mac' }
                     steps {
                         checkout scm
                         script { createSdkArchiveUnix('macos') }

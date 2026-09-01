@@ -110,6 +110,17 @@ Linux agent. Android debug and Web reuse upstream's host-independent archive
 declarations from the Linux-named builder JSON, but execute their GN/Ninja
 builds on macOS. Android profile/release use upstream's macOS AOT builder.
 
+Engine targets are a real Declarative Pipeline matrix axis. Invalid
+target/agent pairs are excluded, leaving Windows on `flutter_win` and macOS,
+iOS, Android, and Web on `flutter_mac`. `TARGETS` filters the static axis before
+an agent is allocated.
+
+Runtime mode is intentionally not a second matrix axis. A target's selected
+debug/profile/release configurations run sequentially in one matrix cell and
+workspace. This shares checkout, `gclient sync`, host bootstrap configurations,
+simulator prerequisites, and persistent Ninja outputs instead of repeating
+them in separate mode cells. Web ignores the mode list and builds once.
+
 ### Build reuse policy
 
 `BUILD_POLICY` controls whether engine work is performed:
@@ -150,9 +161,9 @@ agent instead of routing stashes through the controller.
 
 1. Create a multibranch Pipeline job pointed at this repository. Jenkins will
    discover and run the checked-in `Jenkinsfile` for each selected branch.
-2. Give the agents labels `flutter_win` and `flutter_mac`, or change
-   `WINDOWS_AGENT_LABEL` and `MACOS_AGENT_LABEL` to the labels already used by
-   the Jenkins installation.
+2. Give the agents labels `flutter_win` and `flutter_mac`. If those labels ever
+   change, update the matrix axis/exclusions and the three non-matrix agent
+   declarations in `Jenkinsfile.testing` together.
 3. Install `depot_tools` (including `gclient`), Git, Python 3, and the native
    build toolchain on every agent. Windows additionally needs Visual Studio and
    the Windows SDK; macOS needs Xcode plus the Android and Web dependencies used
