@@ -253,8 +253,15 @@ class ArchiveCreator {
     await _runGit(<String>['clone', '-b', branch.name, gobMirror], workingDirectory: tempDir);
     await _runGit(<String>['reset', '--hard', revision]);
 
-    // Make the origin point to github instead of the chromium mirror.
+    // Keep the packaged SDK's origin pointed at this fork.
     await _runGit(<String>['remote', 'set-url', 'origin', githubRepo]);
+
+    final String? storageBaseUrl = platform.environment['FLUTTER_STORAGE_BASE_URL'];
+    if (storageBaseUrl != null && storageBaseUrl.isNotEmpty) {
+      fs
+          .file(path.join(flutterRoot.path, 'bin', 'internal', 'flutter_storage_base_url'))
+          .writeAsStringSync('$storageBaseUrl\n');
+    }
 
     // Minify `.git` footprint (saving about ~100 MB as of Oct 2022)
     await _runGit(<String>['gc', '--prune=now', '--aggressive']);

@@ -1,0 +1,569 @@
+import groovy.json.JsonSlurperClassic
+
+def csvValues(String value) {
+    return value
+        .split(',')
+        .collect { it.trim().toLowerCase() }
+        .findAll { !it.isEmpty() }
+        .toSet()
+}
+
+def csvHas(String value, String item) {
+    return csvValues(value).contains(item)
+}
+
+def validateCsvParameter(String name, String value, Set<String> allowed) {
+    def values = csvValues(value)
+    def unknown = values - allowed
+    if (!unknown.isEmpty()) {
+        error("${name} contains unsupported values: ${unknown.sort().join(', ')}")
+    }
+    return values
+}
+
+def bootstrapEngineDependenciesUnix(boolean includeWeb) {
+    if (!params.SYNC_ENGINE_DEPS) {
+        return
+    }
+    def webArgument = includeWeb ? '--custom-var=download_emsdk=True' : ''
+    sh """
+        set -eu
+        if [ ! -f .gclient ]; then
+          cp engine/scripts/standard.gclient .gclient
+        fi
+        gclient sync -D ${webArgument}
+    """
+}
+
+def bootstrapEngineDependenciesWindows() {
+    if (!params.SYNC_ENGINE_DEPS) {
+        return
+    }
+    powershell '''
+        $ErrorActionPreference = 'Stop'
+        if (!(Test-Path -LiteralPath '.gclient')) {
+          Copy-Item -LiteralPath 'engine\scripts\standard.gclient' -Destination '.gclient'
+        }
+        gclient sync -D
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    '''
+}
+
+def runEngineBuildUnix(String builder, String buildName) {
+    dir('engine/src/flutter/tools/pkg/engine_build_configs') {
+        sh """
+            set -eu
+            case "\$(uname -s)" in
+              Linux) host_os=linux ;;
+              Darwin) host_os=macos ;;
+              *) echo 'Unsupported Unix host' >&2; exit 1 ;;
+            esac
+            case "\$(uname -m)" in
+              x86_64) host_cpu=x64 ;;
+              arm64|aarch64) host_cpu=arm64 ;;
+              *) echo 'Unsupported Unix CPU' >&2; exit 1 ;;
+            esac
+            dart="../../../prebuilts/\${host_os}-\${host_cpu}/dart-sdk/bin/dart"
+            "\${dart}" bin/run.dart '${builder}' '${buildName}'
+        """
+    }
+}
+
+def runEngineBuildWindows(String builder, String buildName) {
+    dir('engine/src/flutter/tools/pkg/engine_build_configs') {
+        bat "\"%WORKSPACE%\\engine\\src\\flutter\\prebuilts\\windows-x64\\dart-sdk\\bin\\dart.exe\" bin\\run.dart ${builder} \"${buildName}\""
+    }
+}
+
+def collectArtifactsUnix(String builder, List<String> buildNames, boolean includeGlobal = false) {
+    def builds = buildNames.collect { "--build '${it}'" }.join(' ')
+    def globalArgument = includeGlobal ? '--include-global' : ''
+    sh """
+        python3 dev/bots/collect_engine_artifacts.py \
+          --engine-src engine/src \
+          --engine-id '${env.ENGINE_ID}' \
+          --output build/artifact-payload \
+          --builder '${builder}' \
+          ${builds} ${globalArgument}
+    """
+}
+
+def collectArtifactsWindows(String builder, List<String> buildNames, boolean includeGlobal = false) {
+    def builds = buildNames.collect { "--build \"${it}\"" }.join(' ')
+    def globalArgument = includeGlobal ? '--include-global' : ''
+    bat "${params.WINDOWS_PYTHON} dev\\bots\\collect_engine_artifacts.py --engine-src engine\\src --engine-id ${env.ENGINE_ID} --output build\\artifact-payload --builder ${builder} ${builds} ${globalArgument}"
+}
+
+def runMacGenerators(Set<String> modes, boolean buildMacOS, boolean buildIOS) {
+    dir('engine/src') {
+        if (buildMacOS) {
+            if (modes.contains('debug')) {
+                sh '''
+                    python3 flutter/sky/tools/create_embedder_framework.py --dst out/debug/framework --arm64-out-dir out/ci/mac_debug_framework_arm64 --x64-out-dir out/ci/host_debug_framework --zip
+                    python3 flutter/sky/tools/create_macos_framework.py --dst out/debug/framework --arm64-out-dir out/ci/mac_debug_framework_arm64 --x64-out-dir out/ci/host_debug_framework --zip
+                    python3 flutter/sky/tools/create_macos_gen_snapshots.py --dst out/debug/snapshot --arm64-path out/ci/mac_debug_gen_snapshot_arm64/universal/gen_snapshot_arm64 --x64-path out/ci/host_debug_gen_snapshot/universal/gen_snapshot_x64 --zip
+                '''
+            }
+            if (modes.contains('profile')) {
+                sh '''
+                    python3 flutter/sky/tools/create_macos_framework.py --dst out/profile/framework --arm64-out-dir out/ci/mac_profile_framework_arm64 --x64-out-dir out/ci/host_profile_framework --zip
+                    python3 flutter/sky/tools/create_macos_gen_snapshots.py --dst out/profile/snapshot --arm64-path out/ci/mac_profile_gen_snapshot_arm64/universal/gen_snapshot_arm64 --x64-path out/ci/host_profile_gen_snapshot/universal/gen_snapshot_x64 --zip
+                '''
+            }
+            if (modes.contains('release')) {
+                sh '''
+                    python3 flutter/sky/tools/create_macos_framework.py --dst out/release/framework --arm64-out-dir out/ci/mac_release_framework_arm64 --x64-out-dir out/ci/host_release_framework --dsym --strip --zip
+                    python3 flutter/sky/tools/create_macos_gen_snapshots.py --dst out/release/snapshot --arm64-path out/ci/mac_release_gen_snapshot_arm64/universal/gen_snapshot_arm64 --x64-path out/ci/host_release_gen_snapshot/universal/gen_snapshot_x64 --zip
+                '''
+            }
+        }
+
+        if (buildIOS) {
+            if (modes.contains('debug')) {
+                sh 'python3 flutter/sky/tools/create_ios_framework.py --dst out/debug --arm64-out-dir out/ci/ios_debug --simulator-x64-out-dir out/ci/ios_debug_sim --simulator-arm64-out-dir out/ci/ios_debug_sim_arm64'
+            }
+            if (modes.contains('profile')) {
+                sh 'python3 flutter/sky/tools/create_ios_framework.py --dst out/profile --arm64-out-dir out/ci/ios_profile --simulator-x64-out-dir out/ci/ios_debug_sim --simulator-arm64-out-dir out/ci/ios_debug_sim_arm64'
+            }
+            if (modes.contains('release')) {
+                sh 'python3 flutter/sky/tools/create_ios_framework.py --dst out/release --arm64-out-dir out/ci/ios_release --simulator-x64-out-dir out/ci/ios_debug_sim --simulator-arm64-out-dir out/ci/ios_debug_sim_arm64 --dsym --strip'
+            }
+        }
+    }
+}
+
+def createSdkArchiveUnix(String host) {
+    def outputDirectory = "build/sdk-output/${host}"
+    withEnv(["FLUTTER_STORAGE_BASE_URL=${params.ARTIFACT_BASE_URL}"]) {
+        sh """
+            set -eu
+            ./bin/flutter --version
+            ./bin/cache/dart-sdk/bin/dart pub get --directory dev/bots
+            mkdir -p '${outputDirectory}'
+            ./bin/cache/dart-sdk/bin/dart dev/bots/prepare_package.dart \
+              --revision '${env.FRAMEWORK_REVISION}' \
+              --branch '${params.RELEASE_BRANCH}' \
+              --output '${outputDirectory}'
+        """
+    }
+    archiveArtifacts artifacts: "${outputDirectory}/*", fingerprint: true
+}
+
+def createSdkArchiveWindows() {
+    def outputDirectory = 'build\\sdk-output\\windows'
+    withEnv(["FLUTTER_STORAGE_BASE_URL=${params.ARTIFACT_BASE_URL}"]) {
+        bat """
+            call bin\\flutter.bat --version || exit /b 1
+            bin\\cache\\dart-sdk\\bin\\dart.exe pub get --directory dev\\bots || exit /b 1
+            if not exist ${outputDirectory} mkdir ${outputDirectory}
+            bin\\cache\\dart-sdk\\bin\\dart.exe dev\\bots\\prepare_package.dart --revision ${env.FRAMEWORK_REVISION} --branch ${params.RELEASE_BRANCH} --output ${outputDirectory} || exit /b 1
+        """
+    }
+    archiveArtifacts artifacts: 'build/sdk-output/windows/*', fingerprint: true
+}
+
+pipeline {
+    agent none
+
+    options {
+        timestamps()
+        skipDefaultCheckout(true)
+        disableConcurrentBuilds()
+    }
+
+    parameters {
+        string(
+            name: 'TARGETS',
+            defaultValue: 'android,ios,windows,macos,web',
+            description: 'Comma-separated engine targets: android, ios, windows, macos, web.',
+        )
+        string(
+            name: 'MODES',
+            defaultValue: 'debug,profile,release',
+            description: 'Comma-separated runtime modes: debug, profile, release. Web is built once and ignores this axis.',
+        )
+        string(
+            name: 'HOST_SDKS',
+            defaultValue: 'windows,macos',
+            description: 'Comma-separated host SDK archives to create: windows, macos. Leave empty to skip SDK archives.',
+        )
+        choice(name: 'RELEASE_BRANCH', choices: ['main', 'stable', 'beta', 'master'], description: 'Branch/channel stored in the SDK archive.')
+        string(name: 'ARTIFACT_BASE_URL', defaultValue: '', description: 'HTTP(S) download root, without /flutter_infra_release and without a trailing slash.')
+        booleanParam(name: 'PUBLISH_ENGINE_ARTIFACTS', defaultValue: true, description: 'Publish the staged engine artifact tree.')
+        choice(name: 'UPLOAD_TRANSPORT', choices: ['http_put', 'ftp', 'sftp'], description: 'HTTP PUT helper, Publish Over FTP, or Publish Over SSH/SFTP.')
+        string(name: 'HTTP_UPLOAD_BASE_URL', defaultValue: '', description: 'HTTP PUT destination root. Empty means ARTIFACT_BASE_URL.')
+        choice(name: 'UPLOAD_AUTH', choices: ['none', 'basic', 'bearer'], description: 'Authentication used by the HTTP PUT endpoint.')
+        string(name: 'UPLOAD_CREDENTIALS_ID', defaultValue: '', description: 'HTTP PUT username/password or secret-text Jenkins credential ID.')
+        string(name: 'TRANSFER_CONFIG_NAME', defaultValue: '', description: 'Jenkins Publish Over FTP or Publish Over SSH server configuration name.')
+        string(name: 'TRANSFER_REMOTE_DIRECTORY', defaultValue: '', description: 'Remote directory below the configured FTP/SFTP server root. Empty publishes at its root.')
+        booleanParam(name: 'KEEP_ENGINE_PAYLOAD_IN_JENKINS', defaultValue: false, description: 'Also retain the complete mirror payload as Jenkins build artifacts. This can be very large.')
+        booleanParam(name: 'SYNC_ENGINE_DEPS', defaultValue: true, description: 'Run gclient sync on every build agent. Disable only for pre-provisioned persistent workspaces.')
+        string(name: 'LINUX_AGENT_LABEL', defaultValue: 'linux && x86_64', description: 'Jenkins label expression for Linux engine builds.')
+        string(name: 'WINDOWS_AGENT_LABEL', defaultValue: 'windows && x86_64', description: 'Jenkins label expression for Windows engine builds.')
+        string(name: 'MACOS_AGENT_LABEL', defaultValue: 'macos', description: 'Jenkins label expression for macOS engine builds.')
+        string(name: 'WINDOWS_PYTHON', defaultValue: 'python', description: 'Python 3 command on Windows agents.')
+    }
+
+    stages {
+        stage('Resolve release') {
+            agent { label "${params.LINUX_AGENT_LABEL}" }
+            steps {
+                checkout scm
+                script {
+                    def targets = validateCsvParameter('TARGETS', params.TARGETS, ['android', 'ios', 'windows', 'macos', 'web'] as Set)
+                    def modes = validateCsvParameter('MODES', params.MODES, ['debug', 'profile', 'release'] as Set)
+                    def hosts = validateCsvParameter('HOST_SDKS', params.HOST_SDKS, ['windows', 'macos'] as Set)
+                    if (targets.isEmpty()) {
+                        error('TARGETS must select at least one engine target.')
+                    }
+                    if (modes.isEmpty()) {
+                        error('MODES must select at least one runtime mode.')
+                    }
+                    if ((params.PUBLISH_ENGINE_ARTIFACTS || !hosts.isEmpty()) && params.ARTIFACT_BASE_URL.trim().isEmpty()) {
+                        error('ARTIFACT_BASE_URL is required when publishing artifacts or creating SDK archives.')
+                    }
+                    if (!params.ARTIFACT_BASE_URL.trim().isEmpty() &&
+                        (!(params.ARTIFACT_BASE_URL ==~ /https?:\/\/[^\s'\"]+/) || params.ARTIFACT_BASE_URL.endsWith('/'))) {
+                        error('ARTIFACT_BASE_URL must be an HTTP(S) base URL without whitespace, quotes, or a trailing slash.')
+                    }
+                    if (!hosts.isEmpty() && !params.PUBLISH_ENGINE_ARTIFACTS) {
+                        error('HOST_SDKS requires PUBLISH_ENGINE_ARTIFACTS so precache can consume the newly built artifacts.')
+                    }
+                    if (!hosts.isEmpty() && modes != (['debug', 'profile', 'release'] as Set)) {
+                        error('Upstream SDK packaging runs an unfiltered precache; select all modes or leave HOST_SDKS empty.')
+                    }
+                    def requiredTargets = [
+                        windows: ['android', 'web', 'windows'] as Set,
+                        macos: ['android', 'ios', 'web', 'macos'] as Set,
+                    ]
+                    hosts.each { host ->
+                        def missing = requiredTargets[host] - targets
+                        if (!missing.isEmpty()) {
+                            error("${host} SDK packaging precaches its standard target set; add ${missing.sort().join(', ')} to TARGETS or omit ${host} from HOST_SDKS.")
+                        }
+                    }
+                    if (params.PUBLISH_ENGINE_ARTIFACTS && params.UPLOAD_TRANSPORT == 'http_put' &&
+                        params.UPLOAD_AUTH != 'none' && params.UPLOAD_CREDENTIALS_ID.trim().isEmpty()) {
+                        error('UPLOAD_CREDENTIALS_ID is required for authenticated uploads.')
+                    }
+                    if (params.PUBLISH_ENGINE_ARTIFACTS && params.UPLOAD_TRANSPORT != 'http_put' &&
+                        params.TRANSFER_CONFIG_NAME.trim().isEmpty()) {
+                        error('TRANSFER_CONFIG_NAME is required for FTP/SFTP publishing.')
+                    }
+                    if (!params.HTTP_UPLOAD_BASE_URL.trim().isEmpty() &&
+                        (!(params.HTTP_UPLOAD_BASE_URL ==~ /https?:\/\/[^\s'\"]+/) || params.HTTP_UPLOAD_BASE_URL.endsWith('/'))) {
+                        error('HTTP_UPLOAD_BASE_URL must be an HTTP(S) URL without whitespace, quotes, or a trailing slash.')
+                    }
+
+                    env.FRAMEWORK_REVISION = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+                    env.ENGINE_ID = readFile('bin/internal/engine.version').trim()
+                    if (!(env.FRAMEWORK_REVISION ==~ /[0-9a-fA-F]{40}/)) {
+                        error("Invalid framework revision: ${env.FRAMEWORK_REVISION}")
+                    }
+                    if (!(env.ENGINE_ID ==~ /[0-9a-fA-F]{40}/)) {
+                        error("bin/internal/engine.version is not a full artifact ID: ${env.ENGINE_ID}")
+                    }
+                    currentBuild.description = "${env.FRAMEWORK_REVISION.take(10)} / engine ${env.ENGINE_ID.take(10)}"
+                }
+            }
+        }
+
+        stage('Build engine artifacts') {
+            parallel {
+                stage('Linux, Android, Web, Common') {
+                    agent { label "${params.LINUX_AGENT_LABEL}" }
+                    steps {
+                        checkout scm
+                        script {
+                            dir('build/artifact-payload') { deleteDir() }
+                            def targets = csvValues(params.TARGETS)
+                            def modes = csvValues(params.MODES)
+                            bootstrapEngineDependenciesUnix(targets.contains('web'))
+
+                            def linuxHostBuilds = ['ci/host_debug']
+                            if (modes.contains('release')) {
+                                linuxHostBuilds << 'ci/host_release'
+                            }
+                            linuxHostBuilds.each { runEngineBuildUnix('linux_host_engine', it) }
+
+                            def androidDebugBuilds = []
+                            def androidAotBuilds = []
+                            if (targets.contains('android') && modes.contains('debug')) {
+                                androidDebugBuilds.addAll(['ci/android_debug', 'ci/android_debug_arm64', 'ci/android_debug_x86', 'ci/android_debug_x64'])
+                                androidDebugBuilds.each { runEngineBuildUnix('linux_android_debug_engine', it) }
+                            }
+                            if (targets.contains('android') && modes.contains('profile')) {
+                                androidAotBuilds.addAll(['ci/android_profile', 'ci/android_profile_arm64', 'ci/android_profile_x64'])
+                            }
+                            if (targets.contains('android') && modes.contains('release')) {
+                                androidAotBuilds.addAll(['ci/android_release', 'ci/android_release_arm64', 'ci/android_release_x64'])
+                            }
+                            androidAotBuilds.each { runEngineBuildUnix('linux_android_aot_engine', it) }
+
+                            def webBuilds = []
+                            if (targets.contains('web')) {
+                                webBuilds << 'ci/wasm_release'
+                                runEngineBuildUnix('linux_web_engine_build', 'ci/wasm_release')
+                            }
+
+                            sh 'engine/src/flutter/bin/et stamp'
+                            def stamp = new JsonSlurperClassic().parseText(readFile('engine/src/out/engine_stamp.json'))
+                            if (stamp.git_revision != env.ENGINE_ID) {
+                                error("Generated engine stamp ${stamp.git_revision} does not match bin/internal/engine.version ${env.ENGINE_ID}")
+                            }
+
+                            collectArtifactsUnix('linux_host_engine', linuxHostBuilds, true)
+                            if (!androidDebugBuilds.isEmpty()) {
+                                collectArtifactsUnix('linux_android_debug_engine', androidDebugBuilds)
+                            }
+                            if (!androidAotBuilds.isEmpty()) {
+                                collectArtifactsUnix('linux_android_aot_engine', androidAotBuilds)
+                            }
+                            if (!webBuilds.isEmpty()) {
+                                collectArtifactsUnix('linux_web_engine_build', webBuilds)
+                            }
+                            stash name: 'engine-artifacts-linux', includes: 'build/artifact-payload/**', useDefaultExcludes: false
+                        }
+                    }
+                }
+
+                stage('Windows host artifacts') {
+                    when {
+                        expression {
+                            csvHas(params.TARGETS, 'windows') ||
+                                (csvHas(params.TARGETS, 'android') && csvHas(params.HOST_SDKS, 'windows')) ||
+                                csvHas(params.HOST_SDKS, 'windows')
+                        }
+                    }
+                    agent { label "${params.WINDOWS_AGENT_LABEL}" }
+                    steps {
+                        checkout scm
+                        script {
+                            dir('build/artifact-payload') { deleteDir() }
+                            def targets = csvValues(params.TARGETS)
+                            def modes = csvValues(params.MODES)
+                            def hosts = csvValues(params.HOST_SDKS)
+                            bootstrapEngineDependenciesWindows()
+
+                            def windowsBuilds = ['ci\\host_debug']
+                            if (targets.contains('windows') && modes.contains('profile')) {
+                                windowsBuilds << 'ci\\host_profile'
+                            }
+                            if (targets.contains('windows') && modes.contains('release')) {
+                                windowsBuilds << 'ci\\host_release'
+                            }
+                            windowsBuilds.each { runEngineBuildWindows('windows_host_engine', it) }
+
+                            def androidBuilds = []
+                            if (targets.contains('android') && hosts.contains('windows') && modes.contains('profile')) {
+                                androidBuilds.addAll(['ci\\android_profile', 'ci\\android_profile_arm64', 'ci\\android_profile_x64'])
+                            }
+                            if (targets.contains('android') && hosts.contains('windows') && modes.contains('release')) {
+                                androidBuilds.addAll(['ci\\android_release', 'ci\\android_release_arm64', 'ci\\android_release_x64'])
+                            }
+                            androidBuilds.each { runEngineBuildWindows('windows_android_aot_engine', it) }
+
+                            collectArtifactsWindows('windows_host_engine', windowsBuilds)
+                            if (!androidBuilds.isEmpty()) {
+                                collectArtifactsWindows('windows_android_aot_engine', androidBuilds)
+                            }
+                            stash name: 'engine-artifacts-windows', includes: 'build/artifact-payload/**', useDefaultExcludes: false
+                        }
+                    }
+                }
+
+                stage('macOS and iOS artifacts') {
+                    when {
+                        expression {
+                            csvHas(params.TARGETS, 'macos') || csvHas(params.TARGETS, 'ios') ||
+                                (csvHas(params.TARGETS, 'android') && csvHas(params.HOST_SDKS, 'macos')) ||
+                                csvHas(params.HOST_SDKS, 'macos')
+                        }
+                    }
+                    agent { label "${params.MACOS_AGENT_LABEL}" }
+                    steps {
+                        checkout scm
+                        script {
+                            dir('build/artifact-payload') { deleteDir() }
+                            def targets = csvValues(params.TARGETS)
+                            def modes = csvValues(params.MODES)
+                            def hosts = csvValues(params.HOST_SDKS)
+                            bootstrapEngineDependenciesUnix(false)
+
+                            def macHostBuilds = ['ci/host_debug', 'ci/mac_debug_arm64']
+                            macHostBuilds.each { runEngineBuildUnix('mac_host_engine', it) }
+
+                            if (targets.contains('macos')) {
+                                if (modes.contains('debug')) {
+                                    def builds = ['ci/host_debug_framework', 'ci/host_debug_gen_snapshot', 'ci/mac_debug_framework_arm64', 'ci/mac_debug_gen_snapshot_arm64']
+                                    builds.each { runEngineBuildUnix('mac_host_engine', it) }
+                                    macHostBuilds.addAll(builds)
+                                }
+                                if (modes.contains('profile')) {
+                                    def builds = ['ci/host_profile', 'ci/host_profile_framework', 'ci/host_profile_gen_snapshot', 'ci/mac_profile_arm64', 'ci/mac_profile_framework_arm64', 'ci/mac_profile_gen_snapshot_arm64']
+                                    builds.each { runEngineBuildUnix('mac_host_engine', it) }
+                                    macHostBuilds.addAll(builds)
+                                }
+                                if (modes.contains('release')) {
+                                    def builds = ['ci/host_release', 'ci/host_release_framework', 'ci/host_release_gen_snapshot', 'ci/mac_release_arm64', 'ci/mac_release_framework_arm64', 'ci/mac_release_gen_snapshot_arm64']
+                                    builds.each { runEngineBuildUnix('mac_host_engine', it) }
+                                    macHostBuilds.addAll(builds)
+                                }
+                            }
+
+                            def iosBuilds = []
+                            if (targets.contains('ios')) {
+                                iosBuilds.addAll(['ci/ios_debug_sim', 'ci/ios_debug_sim_arm64'])
+                                if (modes.contains('debug')) { iosBuilds << 'ci/ios_debug' }
+                                if (modes.contains('profile')) { iosBuilds << 'ci/ios_profile' }
+                                if (modes.contains('release')) { iosBuilds << 'ci/ios_release' }
+                                iosBuilds.each { runEngineBuildUnix('mac_ios_engine', it) }
+                            }
+
+                            def androidBuilds = []
+                            if (targets.contains('android') && hosts.contains('macos') && modes.contains('profile')) {
+                                androidBuilds.addAll(['ci/android_profile', 'ci/android_profile_arm64', 'ci/android_profile_x64'])
+                            }
+                            if (targets.contains('android') && hosts.contains('macos') && modes.contains('release')) {
+                                androidBuilds.addAll(['ci/android_release', 'ci/android_release_arm64', 'ci/android_release_x64'])
+                            }
+                            androidBuilds.each { runEngineBuildUnix('mac_android_aot_engine', it) }
+
+                            runMacGenerators(modes, targets.contains('macos'), targets.contains('ios'))
+                            collectArtifactsUnix('mac_host_engine', macHostBuilds, targets.contains('macos'))
+                            if (!iosBuilds.isEmpty()) {
+                                collectArtifactsUnix('mac_ios_engine', iosBuilds, true)
+                            }
+                            if (!androidBuilds.isEmpty()) {
+                                collectArtifactsUnix('mac_android_aot_engine', androidBuilds)
+                            }
+                            stash name: 'engine-artifacts-macos', includes: 'build/artifact-payload/**', useDefaultExcludes: false
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Upload engine artifacts') {
+            agent { label "${params.LINUX_AGENT_LABEL}" }
+            steps {
+                checkout scm
+                script {
+                    dir('build/artifact-payload') { deleteDir() }
+                    unstash 'engine-artifacts-linux'
+                    if (csvHas(params.TARGETS, 'windows') || csvHas(params.HOST_SDKS, 'windows')) {
+                        unstash 'engine-artifacts-windows'
+                    }
+                    if (csvHas(params.TARGETS, 'macos') || csvHas(params.TARGETS, 'ios') || csvHas(params.HOST_SDKS, 'macos')) {
+                        unstash 'engine-artifacts-macos'
+                    }
+
+                    if (params.PUBLISH_ENGINE_ARTIFACTS) {
+                        if (params.UPLOAD_TRANSPORT == 'http_put') {
+                            def uploadBaseUrl = params.HTTP_UPLOAD_BASE_URL.trim().isEmpty() ? params.ARTIFACT_BASE_URL : params.HTTP_UPLOAD_BASE_URL
+                            def upload = {
+                                sh "python3 dev/bots/upload_artifact_tree.py --root build/artifact-payload --base-url '${uploadBaseUrl}'"
+                            }
+                            if (params.UPLOAD_AUTH == 'basic') {
+                                withCredentials([usernamePassword(credentialsId: params.UPLOAD_CREDENTIALS_ID, usernameVariable: 'ARTIFACT_UPLOAD_USER', passwordVariable: 'ARTIFACT_UPLOAD_PASSWORD')]) {
+                                    upload()
+                                }
+                            } else if (params.UPLOAD_AUTH == 'bearer') {
+                                withCredentials([string(credentialsId: params.UPLOAD_CREDENTIALS_ID, variable: 'ARTIFACT_UPLOAD_BEARER_TOKEN')]) {
+                                    upload()
+                                }
+                            } else {
+                                upload()
+                            }
+                        } else if (params.UPLOAD_TRANSPORT == 'ftp') {
+                            ftpPublisher(
+                                alwaysPublishFromMaster: false,
+                                continueOnError: false,
+                                failOnError: true,
+                                publishers: [[
+                                    configName: params.TRANSFER_CONFIG_NAME,
+                                    transfers: [[
+                                        asciiMode: false,
+                                        cleanRemote: false,
+                                        excludes: '',
+                                        flatten: false,
+                                        makeEmptyDirs: true,
+                                        noDefaultExcludes: true,
+                                        patternSeparator: '[, ]+',
+                                        remoteDirectory: params.TRANSFER_REMOTE_DIRECTORY,
+                                        remoteDirectorySDF: false,
+                                        removePrefix: 'build/artifact-payload',
+                                        sourceFiles: 'build/artifact-payload/**',
+                                    ]],
+                                    usePromotionTimestamp: false,
+                                    useWorkspaceInPromotion: false,
+                                    verbose: true,
+                                ]],
+                            )
+                        } else {
+                            sshPublisher(
+                                alwaysPublishFromMaster: false,
+                                continueOnError: false,
+                                failOnError: true,
+                                publishers: [[
+                                    configName: params.TRANSFER_CONFIG_NAME,
+                                    transfers: [[
+                                        cleanRemote: false,
+                                        excludes: '',
+                                        execCommand: '',
+                                        execTimeout: 120000,
+                                        flatten: false,
+                                        makeEmptyDirs: true,
+                                        noDefaultExcludes: true,
+                                        patternSeparator: '[, ]+',
+                                        remoteDirectory: params.TRANSFER_REMOTE_DIRECTORY,
+                                        remoteDirectorySDF: false,
+                                        removePrefix: 'build/artifact-payload',
+                                        sourceFiles: 'build/artifact-payload/**',
+                                    ]],
+                                    usePromotionTimestamp: false,
+                                    useWorkspaceInPromotion: false,
+                                    verbose: true,
+                                ]],
+                            )
+                        }
+                    }
+
+                    if (params.KEEP_ENGINE_PAYLOAD_IN_JENKINS) {
+                        archiveArtifacts artifacts: 'build/artifact-payload/**', fingerprint: true
+                    }
+                }
+            }
+        }
+
+        stage('Create host SDK archives') {
+            when {
+                expression { !csvValues(params.HOST_SDKS).isEmpty() }
+            }
+            parallel {
+                stage('Windows SDK') {
+                    when { expression { csvHas(params.HOST_SDKS, 'windows') } }
+                    agent { label "${params.WINDOWS_AGENT_LABEL}" }
+                    steps {
+                        checkout scm
+                        script { createSdkArchiveWindows() }
+                    }
+                }
+                stage('macOS SDK') {
+                    when { expression { csvHas(params.HOST_SDKS, 'macos') } }
+                    agent { label "${params.MACOS_AGENT_LABEL}" }
+                    steps {
+                        checkout scm
+                        script { createSdkArchiveUnix('macos') }
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo "Framework: ${env.FRAMEWORK_REVISION ?: 'unresolved'}; engine: ${env.ENGINE_ID ?: 'unresolved'}"
+        }
+    }
+}
