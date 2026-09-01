@@ -42,7 +42,7 @@ def bootstrapEngineDependenciesWindows() {
     powershell '''
         $ErrorActionPreference = 'Stop'
         if (!(Test-Path -LiteralPath '.gclient')) {
-          Copy-Item -LiteralPath 'engine\scripts\standard.gclient' -Destination '.gclient'
+          Copy-Item -LiteralPath 'engine/scripts/standard.gclient' -Destination '.gclient'
         }
         gclient sync -D
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
