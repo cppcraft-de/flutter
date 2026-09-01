@@ -46,6 +46,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--build", action="append", default=[])
     parser.add_argument("--include-global", action="store_true")
     parser.add_argument("--include-symbols", action="store_true")
+    parser.add_argument(
+        "--allow-missing",
+        action="store_true",
+        help="Skip declared outputs absent on this host. Use only for cross-host common archives.",
+    )
     return parser.parse_args()
 
 
@@ -82,6 +87,8 @@ def main() -> None:
                     continue
                 source = args.engine_src / relative_source
                 if not source.exists():
+                    if args.allow_missing:
+                        continue
                     raise FileNotFoundError(f"Expected engine artifact was not built: {source}")
                 relative_destination = relative_source.relative_to(base_path)
                 # Android Maven artifacts are fetched from

@@ -102,6 +102,38 @@ Web, and Windows artifacts, while a macOS SDK requires Android, iOS, Web, and
 macOS artifacts. Both require all three native modes. Use an empty `HOST_SDKS`
 value for intentionally partial engine-only builds.
 
+`Jenkinsfile.testing` intentionally starts with a much smaller default while
+the pipeline is being commissioned: `TARGETS=windows`, `MODES=debug`, and an
+empty `HOST_SDKS`. It uses the `flutter_win` node. macOS, iOS, Android, and Web
+work uses `flutter_mac`; this testing pipeline does not require or schedule a
+Linux agent. Android debug and Web reuse upstream's host-independent archive
+declarations from the Linux-named builder JSON, but execute their GN/Ninja
+builds on macOS. Android profile/release use upstream's macOS AOT builder.
+
+### Build reuse policy
+
+`BUILD_POLICY` controls whether engine work is performed:
+
+- `auto` (default) sends an HTTP `HEAD` request for a completion marker. It
+  reuses the published artifact set when present and builds otherwise.
+- `full_rebuild` deletes `engine/src/out` on each participating build agent,
+  invokes the selected engine builds from scratch, and overwrites the
+  immutable-revision artifact paths when publishing is enabled.
+- `reuse` requires the completion marker and fails immediately when it is not
+  available.
+
+Markers are specific to the engine ID and the canonical target, mode, and host
+SDK selections. They live below
+`jenkins_build_markers/<engine-id>/...` on `ARTIFACT_BASE_URL`. CI publishes the
+marker only after the full artifact payload succeeds. Therefore its presence
+means that an exact prior matrix completed; merely finding one engine ZIP is
+not treated as sufficient.
+
+Server reuse requires `ARTIFACT_BASE_URL`. A local test without an artifact
+server may leave `PUBLISH_ENGINE_ARTIFACTS=false`; `auto` then builds, while a
+repeated build in the same persistent agent workspace remains incremental and
+Ninja reuses unchanged outputs.
+
 Configure Jenkins agents with depot_tools/gclient and the native platform
 toolchains. Publishing can use the small HTTP PUT helper, Jenkins Publish Over
 FTP, or Publish Over SSH (SFTP). If the artifact server uses a provider-specific protocol such as an S3
@@ -118,13 +150,13 @@ agent instead of routing stashes through the controller.
 
 1. Create a multibranch Pipeline job pointed at this repository. Jenkins will
    discover and run the checked-in `Jenkinsfile` for each selected branch.
-2. Give the agents labels matching `LINUX_AGENT`, `WINDOWS_AGENT`, and
-   `MACOS_AGENT`, or change those parameters to the label expressions already
-   used by the Jenkins installation.
+2. Give the agents labels `flutter_win` and `flutter_mac`, or change
+   `WINDOWS_AGENT_LABEL` and `MACOS_AGENT_LABEL` to the labels already used by
+   the Jenkins installation.
 3. Install `depot_tools` (including `gclient`), Git, Python 3, and the native
    build toolchain on every agent. Windows additionally needs Visual Studio and
-   the Windows SDK; macOS needs Xcode; Linux needs the compiler/sysroot packages
-   used by the engine checkout. Set `WINDOWS_PYTHON` if `python3` is not the
+   the Windows SDK; macOS needs Xcode plus the Android and Web dependencies used
+   by the selected engine configurations. Set `WINDOWS_PYTHON` if `python3` is not the
    Python command on Windows. Install Jenkins Publish Over FTP when using
    `UPLOAD_TRANSPORT=ftp`, or Publish Over SSH when using `sftp`.
 4. Ensure that every SDK-packaging agent can authenticate to the fork URL
@@ -147,9 +179,10 @@ The principal release parameters are:
 
 | Parameter | Purpose |
 | --- | --- |
-| `TARGETS` | Comma-separated engine targets: Android, iOS, Windows, macOS, and/or Web. |
-| `MODES` | Comma-separated native modes: debug, profile, and/or release. Web does not use this axis. |
+| `TARGETS` | Comma-separated engine targets. Testing default: Windows only. |
+| `MODES` | Comma-separated native modes. Testing default: debug only. Web does not use this axis. |
 | `HOST_SDKS` | Windows and/or macOS host SDK archives. Leave empty for engine-only builds. SDK assembly requires all standard targets for that host and all three modes. |
+| `BUILD_POLICY` | `auto`, destructive `full_rebuild`, or strict `reuse`, using exact-matrix completion markers on the HTTP server. |
 | `RELEASE_BRANCH` | Channel/branch metadata written into the SDK archive. It is separate from the immutable framework revision. |
 | `ARTIFACT_BASE_URL` | HTTP(S) root used by the packager and packaged SDKs for artifact downloads. |
 | `PUBLISH_ENGINE_ARTIFACTS` | Allows build/stage validation without changing the artifact mirror. |

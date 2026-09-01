@@ -21,7 +21,7 @@ def validateCsvParameter(String name, String value, Set<String> allowed) {
     return values
 }
 
-def bootstrapEngineDependenciesUnix(boolean includeWeb) {
+def bootstrapEngineDependenciesMac(boolean includeWeb) {
     if (!params.SYNC_ENGINE_DEPS) {
         return
     }
@@ -75,16 +75,17 @@ def runEngineBuildWindows(String builder, String buildName) {
     }
 }
 
-def collectArtifactsUnix(String builder, List<String> buildNames, boolean includeGlobal = false) {
+def collectArtifactsUnix(String builder, List<String> buildNames, boolean includeGlobal = false, boolean allowMissing = false) {
     def builds = buildNames.collect { "--build '${it}'" }.join(' ')
     def globalArgument = includeGlobal ? '--include-global' : ''
+    def missingArgument = allowMissing ? '--allow-missing' : ''
     sh """
         python3 dev/bots/collect_engine_artifacts.py \
           --engine-src engine/src \
           --engine-id '${env.ENGINE_ID}' \
           --output build/artifact-payload \
           --builder '${builder}' \
-          ${builds} ${globalArgument}
+          ${builds} ${globalArgument} ${missingArgument}
     """
 }
 
@@ -92,6 +93,81 @@ def collectArtifactsWindows(String builder, List<String> buildNames, boolean inc
     def builds = buildNames.collect { "--build \"${it}\"" }.join(' ')
     def globalArgument = includeGlobal ? '--include-global' : ''
     bat "${params.WINDOWS_PYTHON} dev\\bots\\collect_engine_artifacts.py --engine-src engine\\src --engine-id ${env.ENGINE_ID} --output build\\artifact-payload --builder ${builder} ${builds} ${globalArgument}"
+}
+
+def publishArtifactTree(String root) {
+    if (params.UPLOAD_TRANSPORT == 'http_put') {
+        def uploadBaseUrl = params.HTTP_UPLOAD_BASE_URL.trim().isEmpty() ? params.ARTIFACT_BASE_URL : params.HTTP_UPLOAD_BASE_URL
+        def upload = {
+            if (isUnix()) {
+                sh "python3 dev/bots/upload_artifact_tree.py --root '${root}' --base-url '${uploadBaseUrl}'"
+            } else {
+                bat "${params.WINDOWS_PYTHON} dev\\bots\\upload_artifact_tree.py --root \"${root}\" --base-url \"${uploadBaseUrl}\""
+            }
+        }
+        if (params.UPLOAD_AUTH == 'basic') {
+            withCredentials([usernamePassword(credentialsId: params.UPLOAD_CREDENTIALS_ID, usernameVariable: 'ARTIFACT_UPLOAD_USER', passwordVariable: 'ARTIFACT_UPLOAD_PASSWORD')]) {
+                upload()
+            }
+        } else if (params.UPLOAD_AUTH == 'bearer') {
+            withCredentials([string(credentialsId: params.UPLOAD_CREDENTIALS_ID, variable: 'ARTIFACT_UPLOAD_BEARER_TOKEN')]) {
+                upload()
+            }
+        } else {
+            upload()
+        }
+    } else if (params.UPLOAD_TRANSPORT == 'ftp') {
+        ftpPublisher(
+            alwaysPublishFromMaster: false,
+            continueOnError: false,
+            failOnError: true,
+            publishers: [[
+                configName: params.TRANSFER_CONFIG_NAME,
+                transfers: [[
+                    asciiMode: false,
+                    cleanRemote: false,
+                    excludes: '',
+                    flatten: false,
+                    makeEmptyDirs: true,
+                    noDefaultExcludes: true,
+                    patternSeparator: '[, ]+',
+                    remoteDirectory: params.TRANSFER_REMOTE_DIRECTORY,
+                    remoteDirectorySDF: false,
+                    removePrefix: root,
+                    sourceFiles: "${root}/**",
+                ]],
+                usePromotionTimestamp: false,
+                useWorkspaceInPromotion: false,
+                verbose: true,
+            ]],
+        )
+    } else {
+        sshPublisher(
+            alwaysPublishFromMaster: false,
+            continueOnError: false,
+            failOnError: true,
+            publishers: [[
+                configName: params.TRANSFER_CONFIG_NAME,
+                transfers: [[
+                    cleanRemote: false,
+                    excludes: '',
+                    execCommand: '',
+                    execTimeout: 120000,
+                    flatten: false,
+                    makeEmptyDirs: true,
+                    noDefaultExcludes: true,
+                    patternSeparator: '[, ]+',
+                    remoteDirectory: params.TRANSFER_REMOTE_DIRECTORY,
+                    remoteDirectorySDF: false,
+                    removePrefix: root,
+                    sourceFiles: "${root}/**",
+                ]],
+                usePromotionTimestamp: false,
+                useWorkspaceInPromotion: false,
+                verbose: true,
+            ]],
+        )
+    }
 }
 
 def runMacGenerators(Set<String> modes, boolean buildMacOS, boolean buildIOS) {
@@ -174,22 +250,23 @@ pipeline {
     parameters {
         string(
             name: 'TARGETS',
-            defaultValue: 'android,ios,windows,macos,web',
+            defaultValue: 'windows',
             description: 'Comma-separated engine targets: android, ios, windows, macos, web.',
         )
         string(
             name: 'MODES',
-            defaultValue: 'debug,profile,release',
+            defaultValue: 'debug',
             description: 'Comma-separated runtime modes: debug, profile, release. Web is built once and ignores this axis.',
         )
         string(
             name: 'HOST_SDKS',
-            defaultValue: 'windows,macos',
+            defaultValue: '',
             description: 'Comma-separated host SDK archives to create: windows, macos. Leave empty to skip SDK archives.',
         )
+        choice(name: 'BUILD_POLICY', choices: ['auto', 'full_rebuild', 'reuse'], description: 'auto reuses the server or local incremental outputs; full_rebuild deletes engine/src/out; reuse requires a matching published set.')
         choice(name: 'RELEASE_BRANCH', choices: ['main', 'stable', 'beta', 'master'], description: 'Branch/channel stored in the SDK archive.')
         string(name: 'ARTIFACT_BASE_URL', defaultValue: '', description: 'HTTP(S) download root, without /flutter_infra_release and without a trailing slash.')
-        booleanParam(name: 'PUBLISH_ENGINE_ARTIFACTS', defaultValue: true, description: 'Publish the staged engine artifact tree.')
+        booleanParam(name: 'PUBLISH_ENGINE_ARTIFACTS', defaultValue: false, description: 'Publish the staged engine artifact tree and its completion marker.')
         choice(name: 'UPLOAD_TRANSPORT', choices: ['http_put', 'ftp', 'sftp'], description: 'HTTP PUT helper, Publish Over FTP, or Publish Over SSH/SFTP.')
         string(name: 'HTTP_UPLOAD_BASE_URL', defaultValue: '', description: 'HTTP PUT destination root. Empty means ARTIFACT_BASE_URL.')
         choice(name: 'UPLOAD_AUTH', choices: ['none', 'basic', 'bearer'], description: 'Authentication used by the HTTP PUT endpoint.')
@@ -198,15 +275,14 @@ pipeline {
         string(name: 'TRANSFER_REMOTE_DIRECTORY', defaultValue: '', description: 'Remote directory below the configured FTP/SFTP server root. Empty publishes at its root.')
         booleanParam(name: 'KEEP_ENGINE_PAYLOAD_IN_JENKINS', defaultValue: false, description: 'Also retain the complete mirror payload as Jenkins build artifacts. This can be very large.')
         booleanParam(name: 'SYNC_ENGINE_DEPS', defaultValue: true, description: 'Run gclient sync on every build agent. Disable only for pre-provisioned persistent workspaces.')
-        string(name: 'LINUX_AGENT_LABEL', defaultValue: 'linux && x86_64', description: 'Jenkins label expression for Linux engine builds.')
-        string(name: 'WINDOWS_AGENT_LABEL', defaultValue: 'windows && x86_64', description: 'Jenkins label expression for Windows engine builds.')
-        string(name: 'MACOS_AGENT_LABEL', defaultValue: 'macos', description: 'Jenkins label expression for macOS engine builds.')
+        string(name: 'WINDOWS_AGENT_LABEL', defaultValue: 'flutter_win', description: 'Jenkins label for Windows builds, release resolution, and publishing.')
+        string(name: 'MACOS_AGENT_LABEL', defaultValue: 'flutter_mac', description: 'Jenkins label for macOS, iOS, Android, and Web builds.')
         string(name: 'WINDOWS_PYTHON', defaultValue: 'python', description: 'Python 3 command on Windows agents.')
     }
 
     stages {
         stage('Resolve release') {
-            agent { label "${params.LINUX_AGENT_LABEL}" }
+            agent { label "${params.WINDOWS_AGENT_LABEL}" }
             steps {
                 checkout scm
                 script {
@@ -219,15 +295,12 @@ pipeline {
                     if (modes.isEmpty()) {
                         error('MODES must select at least one runtime mode.')
                     }
-                    if ((params.PUBLISH_ENGINE_ARTIFACTS || !hosts.isEmpty()) && params.ARTIFACT_BASE_URL.trim().isEmpty()) {
-                        error('ARTIFACT_BASE_URL is required when publishing artifacts or creating SDK archives.')
+                    if ((params.PUBLISH_ENGINE_ARTIFACTS || !hosts.isEmpty() || params.BUILD_POLICY == 'reuse') && params.ARTIFACT_BASE_URL.trim().isEmpty()) {
+                        error('ARTIFACT_BASE_URL is required when publishing, reusing, or creating SDK archives.')
                     }
                     if (!params.ARTIFACT_BASE_URL.trim().isEmpty() &&
                         (!(params.ARTIFACT_BASE_URL ==~ /https?:\/\/[^\s'\"]+/) || params.ARTIFACT_BASE_URL.endsWith('/'))) {
                         error('ARTIFACT_BASE_URL must be an HTTP(S) base URL without whitespace, quotes, or a trailing slash.')
-                    }
-                    if (!hosts.isEmpty() && !params.PUBLISH_ENGINE_ARTIFACTS) {
-                        error('HOST_SDKS requires PUBLISH_ENGINE_ARTIFACTS so precache can consume the newly built artifacts.')
                     }
                     if (!hosts.isEmpty() && modes != (['debug', 'profile', 'release'] as Set)) {
                         error('Upstream SDK packaging runs an unfiltered precache; select all modes or leave HOST_SDKS empty.')
@@ -255,7 +328,7 @@ pipeline {
                         error('HTTP_UPLOAD_BASE_URL must be an HTTP(S) URL without whitespace, quotes, or a trailing slash.')
                     }
 
-                    env.FRAMEWORK_REVISION = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+                    env.FRAMEWORK_REVISION = bat(script: '@git rev-parse HEAD', returnStdout: true).trim()
                     env.ENGINE_ID = readFile('bin/internal/engine.version').trim()
                     if (!(env.FRAMEWORK_REVISION ==~ /[0-9a-fA-F]{40}/)) {
                         error("Invalid framework revision: ${env.FRAMEWORK_REVISION}")
@@ -263,82 +336,53 @@ pipeline {
                     if (!(env.ENGINE_ID ==~ /[0-9a-fA-F]{40}/)) {
                         error("bin/internal/engine.version is not a full artifact ID: ${env.ENGINE_ID}")
                     }
-                    currentBuild.description = "${env.FRAMEWORK_REVISION.take(10)} / engine ${env.ENGINE_ID.take(10)}"
+                    def targetKey = targets.toList().sort().join('-')
+                    def modeKey = modes.toList().sort().join('-')
+                    def hostKey = hosts.isEmpty() ? 'none' : hosts.toList().sort().join('-')
+                    env.REUSE_MARKER_DIR = "jenkins_build_markers/${env.ENGINE_ID}"
+                    env.REUSE_MARKER_FILE = "${targetKey}__${modeKey}__${hostKey}.txt"
+                    env.REUSE_MARKER = "${env.REUSE_MARKER_DIR}/${env.REUSE_MARKER_FILE}"
+                    def markerExists = false
+                    if (!params.ARTIFACT_BASE_URL.trim().isEmpty() && params.BUILD_POLICY != 'full_rebuild') {
+                        def markerUrl = "${params.ARTIFACT_BASE_URL}/${env.REUSE_MARKER}"
+                        markerExists = bat(
+                            script: "@curl.exe --fail --silent --head --output NUL \"${markerUrl}\"",
+                            returnStatus: true,
+                        ) == 0
+                    }
+                    if (params.BUILD_POLICY == 'reuse' && !markerExists) {
+                        error("BUILD_POLICY=reuse requested, but no completed artifact set exists at ${params.ARTIFACT_BASE_URL}/${env.REUSE_MARKER}")
+                    }
+                    env.REUSE_ENGINE_ARTIFACTS = markerExists ? 'true' : 'false'
+                    if (!hosts.isEmpty() && !params.PUBLISH_ENGINE_ARTIFACTS && !markerExists) {
+                        error('Host SDK packaging needs an existing reusable artifact set or PUBLISH_ENGINE_ARTIFACTS=true.')
+                    }
+                    def disposition = markerExists ? 'reuse' : 'build'
+                    currentBuild.description = "${env.FRAMEWORK_REVISION.take(10)} / engine ${env.ENGINE_ID.take(10)} / ${disposition}"
+                    echo "Artifact policy ${params.BUILD_POLICY}: ${disposition} (${env.REUSE_MARKER})"
                 }
             }
         }
 
         stage('Build engine artifacts') {
             parallel {
-                stage('Linux, Android, Web, Common') {
-                    agent { label "${params.LINUX_AGENT_LABEL}" }
-                    steps {
-                        checkout scm
-                        script {
-                            dir('build/artifact-payload') { deleteDir() }
-                            def targets = csvValues(params.TARGETS)
-                            def modes = csvValues(params.MODES)
-                            bootstrapEngineDependenciesUnix(targets.contains('web'))
-
-                            def linuxHostBuilds = ['ci/host_debug']
-                            if (modes.contains('release')) {
-                                linuxHostBuilds << 'ci/host_release'
-                            }
-                            linuxHostBuilds.each { runEngineBuildUnix('linux_host_engine', it) }
-
-                            def androidDebugBuilds = []
-                            def androidAotBuilds = []
-                            if (targets.contains('android') && modes.contains('debug')) {
-                                androidDebugBuilds.addAll(['ci/android_debug', 'ci/android_debug_arm64', 'ci/android_debug_x86', 'ci/android_debug_x64'])
-                                androidDebugBuilds.each { runEngineBuildUnix('linux_android_debug_engine', it) }
-                            }
-                            if (targets.contains('android') && modes.contains('profile')) {
-                                androidAotBuilds.addAll(['ci/android_profile', 'ci/android_profile_arm64', 'ci/android_profile_x64'])
-                            }
-                            if (targets.contains('android') && modes.contains('release')) {
-                                androidAotBuilds.addAll(['ci/android_release', 'ci/android_release_arm64', 'ci/android_release_x64'])
-                            }
-                            androidAotBuilds.each { runEngineBuildUnix('linux_android_aot_engine', it) }
-
-                            def webBuilds = []
-                            if (targets.contains('web')) {
-                                webBuilds << 'ci/wasm_release'
-                                runEngineBuildUnix('linux_web_engine_build', 'ci/wasm_release')
-                            }
-
-                            sh 'engine/src/flutter/bin/et stamp'
-                            def stamp = new JsonSlurperClassic().parseText(readFile('engine/src/out/engine_stamp.json'))
-                            if (stamp.git_revision != env.ENGINE_ID) {
-                                error("Generated engine stamp ${stamp.git_revision} does not match bin/internal/engine.version ${env.ENGINE_ID}")
-                            }
-
-                            collectArtifactsUnix('linux_host_engine', linuxHostBuilds, true)
-                            if (!androidDebugBuilds.isEmpty()) {
-                                collectArtifactsUnix('linux_android_debug_engine', androidDebugBuilds)
-                            }
-                            if (!androidAotBuilds.isEmpty()) {
-                                collectArtifactsUnix('linux_android_aot_engine', androidAotBuilds)
-                            }
-                            if (!webBuilds.isEmpty()) {
-                                collectArtifactsUnix('linux_web_engine_build', webBuilds)
-                            }
-                            stash name: 'engine-artifacts-linux', includes: 'build/artifact-payload/**', useDefaultExcludes: false
-                        }
-                    }
-                }
-
                 stage('Windows host artifacts') {
                     when {
+                        beforeAgent true
                         expression {
-                            csvHas(params.TARGETS, 'windows') ||
-                                (csvHas(params.TARGETS, 'android') && csvHas(params.HOST_SDKS, 'windows')) ||
-                                csvHas(params.HOST_SDKS, 'windows')
+                            env.REUSE_ENGINE_ARTIFACTS != 'true' &&
+                                (csvHas(params.TARGETS, 'windows') ||
+                                    (csvHas(params.TARGETS, 'android') && csvHas(params.HOST_SDKS, 'windows')) ||
+                                    csvHas(params.HOST_SDKS, 'windows'))
                         }
                     }
                     agent { label "${params.WINDOWS_AGENT_LABEL}" }
                     steps {
                         checkout scm
                         script {
+                            if (params.BUILD_POLICY == 'full_rebuild') {
+                                dir('engine/src/out') { deleteDir() }
+                            }
                             dir('build/artifact-payload') { deleteDir() }
                             def targets = csvValues(params.TARGETS)
                             def modes = csvValues(params.MODES)
@@ -363,35 +407,66 @@ pipeline {
                             }
                             androidBuilds.each { runEngineBuildWindows('windows_android_aot_engine', it) }
 
-                            collectArtifactsWindows('windows_host_engine', windowsBuilds)
-                            if (!androidBuilds.isEmpty()) {
-                                collectArtifactsWindows('windows_android_aot_engine', androidBuilds)
+                            if (params.PUBLISH_ENGINE_ARTIFACTS || params.KEEP_ENGINE_PAYLOAD_IN_JENKINS) {
+                                collectArtifactsWindows('windows_host_engine', windowsBuilds)
+                                if (!androidBuilds.isEmpty()) {
+                                    collectArtifactsWindows('windows_android_aot_engine', androidBuilds)
+                                }
+                                stash name: 'engine-artifacts-windows', includes: 'build/artifact-payload/**', useDefaultExcludes: false
                             }
-                            stash name: 'engine-artifacts-windows', includes: 'build/artifact-payload/**', useDefaultExcludes: false
                         }
                     }
                 }
 
-                stage('macOS and iOS artifacts') {
+                stage('macOS, iOS, Android, and Web artifacts') {
                     when {
+                        beforeAgent true
                         expression {
-                            csvHas(params.TARGETS, 'macos') || csvHas(params.TARGETS, 'ios') ||
-                                (csvHas(params.TARGETS, 'android') && csvHas(params.HOST_SDKS, 'macos')) ||
-                                csvHas(params.HOST_SDKS, 'macos')
+                            env.REUSE_ENGINE_ARTIFACTS != 'true' &&
+                                (csvHas(params.TARGETS, 'macos') || csvHas(params.TARGETS, 'ios') ||
+                                    csvHas(params.TARGETS, 'android') || csvHas(params.TARGETS, 'web') ||
+                                    (csvHas(params.TARGETS, 'android') && csvHas(params.HOST_SDKS, 'macos')) ||
+                                    csvHas(params.HOST_SDKS, 'macos'))
                         }
                     }
                     agent { label "${params.MACOS_AGENT_LABEL}" }
                     steps {
                         checkout scm
                         script {
+                            if (params.BUILD_POLICY == 'full_rebuild') {
+                                dir('engine/src/out') { deleteDir() }
+                            }
                             dir('build/artifact-payload') { deleteDir() }
                             def targets = csvValues(params.TARGETS)
                             def modes = csvValues(params.MODES)
                             def hosts = csvValues(params.HOST_SDKS)
-                            bootstrapEngineDependenciesUnix(false)
+                            bootstrapEngineDependenciesMac(targets.contains('web'))
 
-                            def macHostBuilds = ['ci/host_debug', 'ci/mac_debug_arm64']
-                            macHostBuilds.each { runEngineBuildUnix('mac_host_engine', it) }
+                            // The patched Dart SDK archives are host-neutral,
+                            // although upstream declares them in its Linux
+                            // builder. The same GN/Ninja targets run on macOS;
+                            // collect only outputs that actually exist there.
+                            if (targets.contains('android') || targets.contains('web')) {
+                                def commonBuilds = ['ci/host_debug']
+                                if (modes.contains('release')) {
+                                    commonBuilds << 'ci/host_release'
+                                }
+                                commonBuilds.each { runEngineBuildUnix('linux_host_engine', it) }
+                                sh 'engine/src/flutter/bin/et stamp'
+                                def stamp = new JsonSlurperClassic().parseText(readFile('engine/src/out/engine_stamp.json'))
+                                if (stamp.git_revision != env.ENGINE_ID) {
+                                    error("Generated engine stamp ${stamp.git_revision} does not match bin/internal/engine.version ${env.ENGINE_ID}")
+                                }
+                                if (params.PUBLISH_ENGINE_ARTIFACTS || params.KEEP_ENGINE_PAYLOAD_IN_JENKINS) {
+                                    collectArtifactsUnix('linux_host_engine', commonBuilds, true, true)
+                                }
+                            }
+
+                            def macHostBuilds = []
+                            if (targets.contains('macos') || targets.contains('ios') || hosts.contains('macos')) {
+                                macHostBuilds.addAll(['ci/host_debug', 'ci/mac_debug_arm64'])
+                                macHostBuilds.each { runEngineBuildUnix('mac_host_engine', it) }
+                            }
 
                             if (targets.contains('macos')) {
                                 if (modes.contains('debug')) {
@@ -420,24 +495,45 @@ pipeline {
                                 iosBuilds.each { runEngineBuildUnix('mac_ios_engine', it) }
                             }
 
-                            def androidBuilds = []
-                            if (targets.contains('android') && hosts.contains('macos') && modes.contains('profile')) {
-                                androidBuilds.addAll(['ci/android_profile', 'ci/android_profile_arm64', 'ci/android_profile_x64'])
+                            def androidDebugBuilds = []
+                            if (targets.contains('android') && modes.contains('debug')) {
+                                androidDebugBuilds.addAll(['ci/android_debug', 'ci/android_debug_arm64', 'ci/android_debug_x86', 'ci/android_debug_x64'])
+                                androidDebugBuilds.each { runEngineBuildUnix('linux_android_debug_engine', it) }
                             }
-                            if (targets.contains('android') && hosts.contains('macos') && modes.contains('release')) {
-                                androidBuilds.addAll(['ci/android_release', 'ci/android_release_arm64', 'ci/android_release_x64'])
+                            def androidAotBuilds = []
+                            if (targets.contains('android') && modes.contains('profile')) {
+                                androidAotBuilds.addAll(['ci/android_profile', 'ci/android_profile_arm64', 'ci/android_profile_x64'])
                             }
-                            androidBuilds.each { runEngineBuildUnix('mac_android_aot_engine', it) }
+                            if (targets.contains('android') && modes.contains('release')) {
+                                androidAotBuilds.addAll(['ci/android_release', 'ci/android_release_arm64', 'ci/android_release_x64'])
+                            }
+                            androidAotBuilds.each { runEngineBuildUnix('mac_android_aot_engine', it) }
+
+                            def webBuilds = []
+                            if (targets.contains('web')) {
+                                webBuilds << 'ci/wasm_release'
+                                runEngineBuildUnix('linux_web_engine_build', 'ci/wasm_release')
+                            }
 
                             runMacGenerators(modes, targets.contains('macos'), targets.contains('ios'))
-                            collectArtifactsUnix('mac_host_engine', macHostBuilds, targets.contains('macos'))
-                            if (!iosBuilds.isEmpty()) {
-                                collectArtifactsUnix('mac_ios_engine', iosBuilds, true)
+                            if (params.PUBLISH_ENGINE_ARTIFACTS || params.KEEP_ENGINE_PAYLOAD_IN_JENKINS) {
+                                if (!macHostBuilds.isEmpty()) {
+                                    collectArtifactsUnix('mac_host_engine', macHostBuilds, targets.contains('macos'))
+                                }
+                                if (!iosBuilds.isEmpty()) {
+                                    collectArtifactsUnix('mac_ios_engine', iosBuilds, true)
+                                }
+                                if (!androidDebugBuilds.isEmpty()) {
+                                    collectArtifactsUnix('linux_android_debug_engine', androidDebugBuilds)
+                                }
+                                if (!androidAotBuilds.isEmpty()) {
+                                    collectArtifactsUnix('mac_android_aot_engine', androidAotBuilds)
+                                }
+                                if (!webBuilds.isEmpty()) {
+                                    collectArtifactsUnix('linux_web_engine_build', webBuilds)
+                                }
+                                stash name: 'engine-artifacts-macos', includes: 'build/artifact-payload/**', useDefaultExcludes: false
                             }
-                            if (!androidBuilds.isEmpty()) {
-                                collectArtifactsUnix('mac_android_aot_engine', androidBuilds)
-                            }
-                            stash name: 'engine-artifacts-macos', includes: 'build/artifact-payload/**', useDefaultExcludes: false
                         }
                     }
                 }
@@ -445,88 +541,40 @@ pipeline {
         }
 
         stage('Upload engine artifacts') {
-            agent { label "${params.LINUX_AGENT_LABEL}" }
+            when {
+                beforeAgent true
+                expression {
+                    env.REUSE_ENGINE_ARTIFACTS != 'true' &&
+                        (params.PUBLISH_ENGINE_ARTIFACTS || params.KEEP_ENGINE_PAYLOAD_IN_JENKINS)
+                }
+            }
+            agent { label "${params.WINDOWS_AGENT_LABEL}" }
             steps {
                 checkout scm
                 script {
                     dir('build/artifact-payload') { deleteDir() }
-                    unstash 'engine-artifacts-linux'
                     if (csvHas(params.TARGETS, 'windows') || csvHas(params.HOST_SDKS, 'windows')) {
                         unstash 'engine-artifacts-windows'
                     }
-                    if (csvHas(params.TARGETS, 'macos') || csvHas(params.TARGETS, 'ios') || csvHas(params.HOST_SDKS, 'macos')) {
+                    if (csvHas(params.TARGETS, 'macos') || csvHas(params.TARGETS, 'ios') ||
+                        csvHas(params.TARGETS, 'android') || csvHas(params.TARGETS, 'web') ||
+                        csvHas(params.HOST_SDKS, 'macos')) {
                         unstash 'engine-artifacts-macos'
                     }
 
                     if (params.PUBLISH_ENGINE_ARTIFACTS) {
-                        if (params.UPLOAD_TRANSPORT == 'http_put') {
-                            def uploadBaseUrl = params.HTTP_UPLOAD_BASE_URL.trim().isEmpty() ? params.ARTIFACT_BASE_URL : params.HTTP_UPLOAD_BASE_URL
-                            def upload = {
-                                sh "python3 dev/bots/upload_artifact_tree.py --root build/artifact-payload --base-url '${uploadBaseUrl}'"
-                            }
-                            if (params.UPLOAD_AUTH == 'basic') {
-                                withCredentials([usernamePassword(credentialsId: params.UPLOAD_CREDENTIALS_ID, usernameVariable: 'ARTIFACT_UPLOAD_USER', passwordVariable: 'ARTIFACT_UPLOAD_PASSWORD')]) {
-                                    upload()
-                                }
-                            } else if (params.UPLOAD_AUTH == 'bearer') {
-                                withCredentials([string(credentialsId: params.UPLOAD_CREDENTIALS_ID, variable: 'ARTIFACT_UPLOAD_BEARER_TOKEN')]) {
-                                    upload()
-                                }
-                            } else {
-                                upload()
-                            }
-                        } else if (params.UPLOAD_TRANSPORT == 'ftp') {
-                            ftpPublisher(
-                                alwaysPublishFromMaster: false,
-                                continueOnError: false,
-                                failOnError: true,
-                                publishers: [[
-                                    configName: params.TRANSFER_CONFIG_NAME,
-                                    transfers: [[
-                                        asciiMode: false,
-                                        cleanRemote: false,
-                                        excludes: '',
-                                        flatten: false,
-                                        makeEmptyDirs: true,
-                                        noDefaultExcludes: true,
-                                        patternSeparator: '[, ]+',
-                                        remoteDirectory: params.TRANSFER_REMOTE_DIRECTORY,
-                                        remoteDirectorySDF: false,
-                                        removePrefix: 'build/artifact-payload',
-                                        sourceFiles: 'build/artifact-payload/**',
-                                    ]],
-                                    usePromotionTimestamp: false,
-                                    useWorkspaceInPromotion: false,
-                                    verbose: true,
-                                ]],
-                            )
-                        } else {
-                            sshPublisher(
-                                alwaysPublishFromMaster: false,
-                                continueOnError: false,
-                                failOnError: true,
-                                publishers: [[
-                                    configName: params.TRANSFER_CONFIG_NAME,
-                                    transfers: [[
-                                        cleanRemote: false,
-                                        excludes: '',
-                                        execCommand: '',
-                                        execTimeout: 120000,
-                                        flatten: false,
-                                        makeEmptyDirs: true,
-                                        noDefaultExcludes: true,
-                                        patternSeparator: '[, ]+',
-                                        remoteDirectory: params.TRANSFER_REMOTE_DIRECTORY,
-                                        remoteDirectorySDF: false,
-                                        removePrefix: 'build/artifact-payload',
-                                        sourceFiles: 'build/artifact-payload/**',
-                                    ]],
-                                    usePromotionTimestamp: false,
-                                    useWorkspaceInPromotion: false,
-                                    verbose: true,
-                                ]],
+                        publishArtifactTree('build/artifact-payload')
+
+                        // Publish the marker last. Its presence proves that the
+                        // complete payload for this exact matrix was uploaded.
+                        dir('build/reuse-marker') { deleteDir() }
+                        dir("build/reuse-marker/${env.REUSE_MARKER_DIR}") {
+                            writeFile(
+                                file: env.REUSE_MARKER_FILE,
+                                text: "engine=${env.ENGINE_ID}\nframework=${env.FRAMEWORK_REVISION}\ntargets=${params.TARGETS}\nmodes=${params.MODES}\nhost_sdks=${params.HOST_SDKS}\n",
                             )
                         }
+                        publishArtifactTree('build/reuse-marker')
                     }
 
                     if (params.KEEP_ENGINE_PAYLOAD_IN_JENKINS) {
