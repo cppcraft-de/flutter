@@ -39,14 +39,23 @@ def bootstrapEngineDependenciesWindows() {
     if (!params.SYNC_ENGINE_DEPS) {
         return
     }
-    powershell '''
-        $ErrorActionPreference = 'Stop'
-        if (!(Test-Path -LiteralPath '.gclient')) {
-          Copy-Item -LiteralPath 'engine/scripts/standard.gclient' -Destination '.gclient'
-        }
-        gclient sync -D
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    '''
+    // Apply long-path support to every Git process spawned by gclient. A local
+    // setting on the framework checkout does not propagate into its child
+    // dependency repositories.
+    withEnv([
+        'GIT_CONFIG_COUNT=1',
+        'GIT_CONFIG_KEY_0=core.longpaths',
+        'GIT_CONFIG_VALUE_0=true',
+    ]) {
+        powershell '''
+            $ErrorActionPreference = 'Stop'
+            if (!(Test-Path -LiteralPath '.gclient')) {
+              Copy-Item -LiteralPath 'engine/scripts/standard.gclient' -Destination '.gclient'
+            }
+            gclient sync -D
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        '''
+    }
 }
 
 def runEngineBuildUnix(String builder, String buildName) {
