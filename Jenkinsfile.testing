@@ -558,8 +558,15 @@ pipeline {
                                 if (env.BUILD_TARGET == 'windows') {
                                     bat 'if not exist .git git init .'
                                     bat 'git config core.longpaths true'
+                                    checkout scm
+                                } else {
+                                    // Inbound macOS agents launched from Terminal inherit a TTY.
+                                    // Force OpenSSH to use Jenkins' generated askpass helper so
+                                    // encrypted SSH credentials remain fully non-interactive.
+                                    withEnv(['SSH_ASKPASS_REQUIRE=force']) {
+                                        checkout scm
+                                    }
                                 }
-                                checkout scm
                                 echo "Persistent target workspace: ${pwd()}"
                                 if (params.BUILD_POLICY == 'full_rebuild') {
                                     dir('engine/src/out') { deleteDir() }
@@ -670,7 +677,9 @@ pipeline {
                     when { expression { csvHas(params.HOST_SDKS, 'macos') } }
                     agent { label 'flutter_macos' }
                     steps {
-                        checkout scm
+                        withEnv(['SSH_ASKPASS_REQUIRE=force']) {
+                            checkout scm
+                        }
                         script { createSdkArchiveUnix('macos') }
                     }
                 }
