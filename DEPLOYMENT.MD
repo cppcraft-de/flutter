@@ -121,6 +121,20 @@ workspace. This shares checkout, `gclient sync`, host bootstrap configurations,
 simulator prerequisites, and persistent Ninja outputs instead of repeating
 them in separate mode cells. Web ignores the mode list and builds once.
 
+Each matrix cell uses a deterministic custom workspace below the agent root:
+
+```text
+engine-workspaces/<Jenkins JOB_NAME>/<BUILD_TARGET>
+```
+
+Including the full multibranch `JOB_NAME` prevents different branches from
+sharing incompatible outputs, while the target suffix prevents target cells
+from reconfiguring each other's GN output directories. This also avoids
+executor-dependent `@2`/`@3` workspace allocation, so `engine/src/out` is
+available to the same branch and target on later runs. The pipeline deletes
+only `build/artifact-payload` during normal `auto` builds; `full_rebuild` is the
+explicit operation that removes `engine/src/out`.
+
 ### Build reuse policy
 
 `BUILD_POLICY` controls whether engine work is performed:
@@ -144,6 +158,12 @@ Server reuse requires `ARTIFACT_BASE_URL`. A local test without an artifact
 server may leave `PUBLISH_ENGINE_ARTIFACTS=false`; `auto` then builds, while a
 repeated build in the same persistent agent workspace remains incremental and
 Ninja reuses unchanged outputs.
+
+Do not enable Jenkins Git options such as "Wipe out repository before build"
+or an external workspace cleanup step for this job. They defeat local reuse.
+These custom workspaces are deliberately outside normal build-number rotation;
+clean obsolete branch directories explicitly when branches are deleted or disk
+pressure requires it.
 
 Configure Jenkins agents with depot_tools/gclient and the native platform
 toolchains. Publishing can use the small HTTP PUT helper, Jenkins Publish Over

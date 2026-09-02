@@ -392,8 +392,8 @@ pipeline {
         )
         choice(name: 'BUILD_POLICY', choices: ['auto', 'full_rebuild', 'reuse'], description: 'auto reuses the server or local incremental outputs; full_rebuild deletes engine/src/out; reuse requires a matching published set.')
         choice(name: 'RELEASE_BRANCH', choices: ['main', 'stable', 'beta', 'master'], description: 'Branch/channel stored in the SDK archive.')
-        string(name: 'ARTIFACT_BASE_URL', defaultValue: '', description: 'HTTP(S) download root, without /flutter_infra_release and without a trailing slash.')
-        booleanParam(name: 'PUBLISH_ENGINE_ARTIFACTS', defaultValue: false, description: 'Publish the staged engine artifact tree and its completion marker.')
+        string(name: 'ARTIFACT_BASE_URL', defaultValue: 'http://192.168.0.63:8765/', description: 'HTTP(S) download root, without /flutter_infra_release and without a trailing slash.')
+        booleanParam(name: 'PUBLISH_ENGINE_ARTIFACTS', defaultValue: true, description: 'Publish the staged engine artifact tree and its completion marker.')
         choice(name: 'UPLOAD_TRANSPORT', choices: ['http_put', 'ftp', 'sftp'], description: 'HTTP PUT helper, Publish Over FTP, or Publish Over SSH/SFTP.')
         string(name: 'HTTP_UPLOAD_BASE_URL', defaultValue: '', description: 'HTTP PUT destination root. Empty means ARTIFACT_BASE_URL.')
         choice(name: 'UPLOAD_AUTH', choices: ['none', 'basic', 'bearer'], description: 'Authentication used by the HTTP PUT endpoint.')
@@ -530,12 +530,21 @@ pipeline {
                             csvHas(params.TARGETS, env.BUILD_TARGET)
                     }
                 }
-                agent { label "${BUILD_AGENT}" }
+                agent {
+                    node {
+                        label "${BUILD_AGENT}"
+                        // Matrix cells otherwise receive opportunistic @2/@3
+                        // workspaces. Pin each branch/target combination so
+                        // engine/src/out remains available to later builds.
+                        customWorkspace "engine-workspaces/${JOB_NAME}/${BUILD_TARGET}"
+                    }
+                }
                 stages {
                     stage('Prepare target workspace') {
                         steps {
                             checkout scm
                             script {
+                                echo "Persistent target workspace: ${pwd()}"
                                 if (params.BUILD_POLICY == 'full_rebuild') {
                                     dir('engine/src/out') { deleteDir() }
                                 }
