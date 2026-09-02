@@ -226,7 +226,7 @@ def buildWindowsTarget() {
     windowsBuilds.each { runEngineBuildWindows('windows_host_engine', it) }
 
     // Android AOT snapshots are host-specific. A Windows SDK needs these in
-    // addition to the Android engine artifacts built on flutter_mac.
+    // addition to the Android engine artifacts built on flutter_macos.
     def androidBuilds = []
     if (targets.contains('android') && hosts.contains('windows') && modes.contains('profile')) {
         androidBuilds.addAll(['ci\\android_profile', 'ci\\android_profile_arm64', 'ci\\android_profile_x64'])
@@ -392,7 +392,7 @@ pipeline {
         )
         choice(name: 'BUILD_POLICY', choices: ['auto', 'full_rebuild', 'reuse'], description: 'auto reuses the server or local incremental outputs; full_rebuild deletes engine/src/out; reuse requires a matching published set.')
         choice(name: 'RELEASE_BRANCH', choices: ['main', 'stable', 'beta', 'master'], description: 'Branch/channel stored in the SDK archive.')
-        string(name: 'ARTIFACT_BASE_URL', defaultValue: 'http://192.168.0.63:8765/', description: 'HTTP(S) download root, without /flutter_infra_release and without a trailing slash.')
+        string(name: 'ARTIFACT_BASE_URL', defaultValue: 'http://192.168.0.63:8765', description: 'HTTP(S) download root, without /flutter_infra_release and without a trailing slash.')
         booleanParam(name: 'PUBLISH_ENGINE_ARTIFACTS', defaultValue: true, description: 'Publish the staged engine artifact tree and its completion marker.')
         choice(name: 'UPLOAD_TRANSPORT', choices: ['http_put', 'ftp', 'sftp'], description: 'HTTP PUT helper, Publish Over FTP, or Publish Over SSH/SFTP.')
         string(name: 'HTTP_UPLOAD_BASE_URL', defaultValue: '', description: 'HTTP PUT destination root. Empty means ARTIFACT_BASE_URL.')
@@ -498,7 +498,7 @@ pipeline {
                     }
                     axis {
                         name 'BUILD_AGENT'
-                        values 'flutter_win', 'flutter_mac'
+                        values 'flutter_win', 'flutter_macos'
                     }
                 }
                 excludes {
@@ -509,7 +509,7 @@ pipeline {
                         }
                         axis {
                             name 'BUILD_AGENT'
-                            values 'flutter_mac'
+                            values 'flutter_macos'
                         }
                     }
                     exclude {
@@ -542,8 +542,15 @@ pipeline {
                 stages {
                     stage('Prepare target workspace') {
                         steps {
-                            checkout scm
                             script {
+                                // Git for Windows disables long paths per repository by
+                                // default. Set it before Jenkins checks out Flutter's
+                                // deeply nested iOS golden filenames.
+                                if (env.BUILD_TARGET == 'windows') {
+                                    bat 'if not exist .git git init .'
+                                    bat 'git config core.longpaths true'
+                                }
+                                checkout scm
                                 echo "Persistent target workspace: ${pwd()}"
                                 if (params.BUILD_POLICY == 'full_rebuild') {
                                     dir('engine/src/out') { deleteDir() }
@@ -652,7 +659,7 @@ pipeline {
                 }
                 stage('macOS SDK') {
                     when { expression { csvHas(params.HOST_SDKS, 'macos') } }
-                    agent { label 'flutter_mac' }
+                    agent { label 'flutter_macos' }
                     steps {
                         checkout scm
                         script { createSdkArchiveUnix('macos') }

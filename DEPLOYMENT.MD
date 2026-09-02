@@ -105,14 +105,14 @@ value for intentionally partial engine-only builds.
 `Jenkinsfile.testing` intentionally starts with a much smaller default while
 the pipeline is being commissioned: `TARGETS=windows`, `MODES=debug`, and an
 empty `HOST_SDKS`. It uses the `flutter_win` node. macOS, iOS, Android, and Web
-work uses `flutter_mac`; this testing pipeline does not require or schedule a
+work uses `flutter_macos`; this testing pipeline does not require or schedule a
 Linux agent. Android debug and Web reuse upstream's host-independent archive
 declarations from the Linux-named builder JSON, but execute their GN/Ninja
 builds on macOS. Android profile/release use upstream's macOS AOT builder.
 
 Engine targets are a real Declarative Pipeline matrix axis. Invalid
 target/agent pairs are excluded, leaving Windows on `flutter_win` and macOS,
-iOS, Android, and Web on `flutter_mac`. `TARGETS` filters the static axis before
+iOS, Android, and Web on `flutter_macos`. `TARGETS` filters the static axis before
 an agent is allocated.
 
 Runtime mode is intentionally not a second matrix axis. A target's selected
@@ -181,7 +181,7 @@ agent instead of routing stashes through the controller.
 
 1. Create a multibranch Pipeline job pointed at this repository. Jenkins will
    discover and run the checked-in `Jenkinsfile` for each selected branch.
-2. Give the agents labels `flutter_win` and `flutter_mac`. If those labels ever
+2. Give the agents labels `flutter_win` and `flutter_macos`. If those labels ever
    change, update the matrix axis/exclusions and the three non-matrix agent
    declarations in `Jenkinsfile.testing` together.
 3. Install `depot_tools` (including `gclient`), Git, Python 3, and the native
