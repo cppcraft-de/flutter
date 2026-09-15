@@ -381,6 +381,7 @@ pipeline {
         timestamps()
         skipDefaultCheckout(true)
         disableConcurrentBuilds()
+        preserveStashes(buildCount: 2)
     }
 
     parameters {
