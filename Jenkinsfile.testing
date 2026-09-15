@@ -1,5 +1,3 @@
-import groovy.json.JsonSlurperClassic
-
 def csvValues(String value) {
     return value
         .split(',')
@@ -313,9 +311,12 @@ def buildCommonArtifactsOnMac() {
         }
     }
     sh 'engine/src/flutter/bin/et stamp'
-    def stamp = new JsonSlurperClassic().parseText(readFile('engine/src/out/engine_stamp.json'))
-    if (stamp.git_revision != env.ENGINE_ID) {
-        error("Generated engine stamp ${stamp.git_revision} does not match bin/internal/engine.version ${env.ENGINE_ID}")
+    def stampRevision = sh(
+        script: '''python3 -c "import json; print(json.load(open('engine/src/out/engine_stamp.json'))['git_revision'])"''',
+        returnStdout: true,
+    ).trim()
+    if (stampRevision != env.ENGINE_ID) {
+        error("Generated engine stamp ${stampRevision} does not match bin/internal/engine.version ${env.ENGINE_ID}")
     }
     if (shouldStageEnginePayload()) {
         // Upstream declares these host-neutral patched SDK archives in its
