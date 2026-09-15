@@ -25,14 +25,12 @@ def bootstrapEngineDependenciesMac(boolean includeWeb) {
     if (!params.SYNC_ENGINE_DEPS) {
         return
     }
-    def webArgument = includeWeb ? '--custom-var=download_emsdk=True' : ''
-    sh """
-        set -eu
-        if [ ! -f .gclient ]; then
-          cp engine/scripts/standard.gclient .gclient
-        fi
-        gclient sync -D ${webArgument}
-    """
+    def gclientConfig = readFile('engine/scripts/standard.gclient')
+    if (includeWeb) {
+        gclientConfig += '\nsolutions[0]["custom_vars"] = {"download_emsdk": True}\n'
+    }
+    writeFile(file: '.gclient', text: gclientConfig)
+    sh 'gclient sync -D'
 }
 
 def bootstrapEngineDependenciesWindows() {
