@@ -320,6 +320,22 @@ def buildCommonArtifactsOnMac() {
     }
 }
 
+def runAndroidDebugBuildOnMac(String buildName, String cpu, boolean primaryArchitecture) {
+    def primaryTargets = primaryArchitecture ?
+        'flutter/sky/dist:zip_old_location flutter/lib/gpu/dist:zip_old_location flutter/shell/platform/android:embedding_jars' : ''
+    dir('engine/src') {
+        sh """
+            set -eu
+            flutter/tools/gn --target-dir '${buildName}' --android --android-cpu='${cpu}' --no-lto --no-rbe --no-goma
+            ../../third_party/ninja/ninja -C 'out/${buildName}' \
+              flutter ${primaryTargets} \
+              flutter/shell/platform/android:abi_jars \
+              flutter/shell/platform/embedder:embedder-archive \
+              flutter/impeller/toolkit/interop:sdk
+        """
+    }
+}
+
 def buildAndroidTarget() {
     def modes = csvValues(params.MODES)
     buildCommonArtifactsOnMac()
@@ -327,7 +343,10 @@ def buildAndroidTarget() {
     def debugBuilds = []
     if (modes.contains('debug')) {
         debugBuilds.addAll(['ci/android_debug', 'ci/android_debug_arm64', 'ci/android_debug_x86', 'ci/android_debug_x64'])
-        debugBuilds.each { runEngineBuildUnix('linux_android_debug_engine', it) }
+        runAndroidDebugBuildOnMac('ci/android_debug', 'arm', true)
+        runAndroidDebugBuildOnMac('ci/android_debug_arm64', 'arm64', false)
+        runAndroidDebugBuildOnMac('ci/android_debug_x86', 'x86', false)
+        runAndroidDebugBuildOnMac('ci/android_debug_x64', 'x64', false)
     }
     def aotBuilds = []
     if (modes.contains('profile')) {
