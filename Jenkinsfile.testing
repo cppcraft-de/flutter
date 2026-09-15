@@ -27,7 +27,16 @@ def bootstrapEngineDependenciesMac(boolean includeWeb) {
     }
     def gclientConfig = readFile('engine/scripts/standard.gclient')
     if (includeWeb) {
-        gclientConfig += '\nsolutions[0]["custom_vars"] = {"download_emsdk": True}\n'
+        def disabledWebVars = '''    # "custom_vars": {
+    #   "download_emsdk": True,
+    # },'''
+        def enabledWebVars = '''    "custom_vars": {
+      "download_emsdk": True,
+    },'''
+        if (!gclientConfig.contains(disabledWebVars)) {
+            error('standard.gclient no longer contains the documented Web custom_vars block')
+        }
+        gclientConfig = gclientConfig.replace(disabledWebVars, enabledWebVars)
     }
     writeFile(file: '.gclient', text: gclientConfig)
     sh 'gclient sync -D'
