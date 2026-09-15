@@ -298,7 +298,20 @@ def buildCommonArtifactsOnMac() {
     if (modes.contains('release')) {
         builds << 'ci/host_release'
     }
-    builds.each { runEngineBuildUnix('linux_host_engine', it) }
+    dir('engine/src') {
+        sh '''
+            set -eu
+            flutter/tools/gn --target-dir ci/host_debug --runtime-mode debug --prebuilt-dart-sdk --no-lto --no-rbe --no-goma
+            third_party/ninja/ninja -C out/ci/host_debug flutter/build/archives:flutter_patched_sdk
+        '''
+        if (modes.contains('release')) {
+            sh '''
+                set -eu
+                flutter/tools/gn --target-dir ci/host_release --runtime-mode release --prebuilt-dart-sdk --no-lto --no-rbe --no-goma
+                third_party/ninja/ninja -C out/ci/host_release flutter/build/archives:flutter_patched_sdk
+            '''
+        }
+    }
     sh 'engine/src/flutter/bin/et stamp'
     def stamp = new JsonSlurperClassic().parseText(readFile('engine/src/out/engine_stamp.json'))
     if (stamp.git_revision != env.ENGINE_ID) {
@@ -345,7 +358,13 @@ def buildWebTarget() {
     if (!csvHas(params.TARGETS, 'android')) {
         buildCommonArtifactsOnMac()
     }
-    runEngineBuildUnix('linux_web_engine_build', 'ci/wasm_release')
+    dir('engine/src') {
+        sh '''
+            set -eu
+            flutter/tools/gn --web --runtime-mode release --no-rbe --no-goma
+            third_party/ninja/ninja -C out/wasm_release flutter/web_sdk:flutter_web_sdk_archive
+        '''
+    }
     if (shouldStageEnginePayload()) {
         collectArtifactsUnix('linux_web_engine_build', ['ci/wasm_release'])
     }
