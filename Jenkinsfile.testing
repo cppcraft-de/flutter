@@ -39,7 +39,7 @@ def bootstrapEngineDependenciesUnix(boolean includeWeb) {
     writeFile(file: '.gclient', text: gclientConfig)
     // A fresh Web workspace clones many large googlesource repositories. Keep
     // that initial fan-out low enough to avoid HTTP 429 throttling.
-    sh(includeWeb ? 'gclient sync -D -j 4' : 'gclient sync -D')
+    sh(includeWeb ? 'gclient sync -D -j 1' : 'gclient sync -D')
 }
 
 def bootstrapEngineDependenciesWindows() {
