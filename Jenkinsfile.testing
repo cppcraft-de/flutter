@@ -19,11 +19,11 @@ def validateCsvParameter(String name, String value, Set<String> allowed) {
     return values
 }
 
-def bootstrapEngineDependenciesMac(boolean includeWeb) {
+def bootstrapEngineDependenciesUnix(boolean includeWeb) {
     if (!params.SYNC_ENGINE_DEPS) {
         return
     }
-    def gclientConfig = readFile('engine/scripts/standard.gclient').replace('\r\n', '\n')
+    def gclientConfig = readFile('engine/scripts/standard.gclient')
     if (includeWeb) {
         def disabledWebVars = '''    # "custom_vars": {
     #   "download_emsdk": True,
@@ -40,24 +40,10 @@ def bootstrapEngineDependenciesMac(boolean includeWeb) {
     sh 'gclient sync -D'
 }
 
-def bootstrapEngineDependenciesWindows(boolean includeAndroid) {
+def bootstrapEngineDependenciesWindows() {
     if (!params.SYNC_ENGINE_DEPS) {
         return
     }
-    def gclientConfig = readFile('engine/scripts/standard.gclient').replace('\r\n', '\n')
-    if (includeAndroid) {
-        def disabledCustomVars = '''    # "custom_vars": {
-    #   "download_emsdk": True,
-    # },'''
-        def enabledCustomVars = '''    "custom_vars": {
-      "download_android_deps": True,
-    },'''
-        if (!gclientConfig.contains(disabledCustomVars)) {
-            error('standard.gclient no longer contains the documented custom_vars block')
-        }
-        gclientConfig = gclientConfig.replace(disabledCustomVars, enabledCustomVars)
-    }
-    writeFile(file: '.gclient', text: gclientConfig)
     // Apply long-path support to every Git process spawned by gclient. A local
     // setting on the framework checkout does not propagate into its child
     // dependency repositories.
@@ -68,6 +54,9 @@ def bootstrapEngineDependenciesWindows(boolean includeAndroid) {
     ]) {
         powershell '''
             $ErrorActionPreference = 'Stop'
+            if (!(Test-Path -LiteralPath '.gclient')) {
+              Copy-Item -LiteralPath 'engine/scripts/standard.gclient' -Destination '.gclient'
+            }
             gclient sync -D
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         '''
@@ -114,11 +103,10 @@ def collectArtifactsUnix(String builder, List<String> buildNames, boolean includ
     """
 }
 
-def collectArtifactsWindows(String builder, List<String> buildNames, boolean includeGlobal = false, boolean allowMissing = false) {
+def collectArtifactsWindows(String builder, List<String> buildNames, boolean includeGlobal = false) {
     def builds = buildNames.collect { "--build \"${it}\"" }.join(' ')
     def globalArgument = includeGlobal ? '--include-global' : ''
-    def missingArgument = allowMissing ? '--allow-missing' : ''
-    bat "${params.WINDOWS_PYTHON} dev\\bots\\collect_engine_artifacts.py --engine-src engine\\src --engine-id ${env.ENGINE_ID} --output build\\artifact-payload --builder ${builder} ${builds} ${globalArgument} ${missingArgument}"
+    bat "${params.WINDOWS_PYTHON} dev\\bots\\collect_engine_artifacts.py --engine-src engine\\src --engine-id ${env.ENGINE_ID} --output build\\artifact-payload --builder ${builder} ${builds} ${globalArgument}"
 }
 
 def publishArtifactTree(String root) {
@@ -252,7 +240,7 @@ def buildWindowsTarget() {
     windowsBuilds.each { runEngineBuildWindows('windows_host_engine', it) }
 
     // Android AOT snapshots are host-specific. A Windows SDK needs these in
-    // addition to the Android engine artifacts built on flutter_macos.
+    // addition to the Android engine artifacts built on flutter_linux.
     def androidBuilds = []
     if (targets.contains('android') && hosts.contains('windows') && modes.contains('profile')) {
         androidBuilds.addAll(['ci\\android_profile', 'ci\\android_profile_arm64', 'ci\\android_profile_x64'])
@@ -302,7 +290,7 @@ def buildIosTarget() {
     }
 }
 
-def buildCommonArtifactsOnMac() {
+def buildCommonArtifactsOnUnix() {
     def modes = csvValues(params.MODES)
     def builds = ['ci/host_debug']
     if (modes.contains('release')) {
@@ -326,103 +314,20 @@ def buildCommonArtifactsOnMac() {
     // mirror path intentionally remains keyed by bin/internal/engine.version.
     sh 'engine/src/flutter/bin/et stamp'
     if (shouldStageEnginePayload()) {
-        // Upstream declares these host-neutral patched SDK archives in its
-        // Linux builder. On macOS, ignore the Linux-only host outputs.
+        // Only the host-neutral patched SDK archives are built here. Ignore
+        // the remaining outputs declared by the full Linux host builder.
         collectArtifactsUnix('linux_host_engine', builds, true, true)
-    }
-}
-
-def buildCommonArtifactsOnWindows() {
-    def modes = csvValues(params.MODES)
-    def builds = ['ci/host_debug']
-    if (modes.contains('release')) {
-        builds << 'ci/host_release'
-    }
-    dir('engine/src') {
-        withEnv(["WINDOWS_PYTHON_CMD=${params.WINDOWS_PYTHON}"]) {
-            powershell '''
-                $ErrorActionPreference = 'Stop'
-                & $env:WINDOWS_PYTHON_CMD flutter/tools/gn --target-dir ci/host_debug --runtime-mode debug --prebuilt-dart-sdk --no-lto --no-rbe --no-goma
-                if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-                & ../../third_party/ninja/ninja.exe -C out/ci/host_debug flutter/build/archives:flutter_patched_sdk
-                if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-            '''
-            if (modes.contains('release')) {
-                powershell '''
-                    $ErrorActionPreference = 'Stop'
-                    & $env:WINDOWS_PYTHON_CMD flutter/tools/gn --target-dir ci/host_release --runtime-mode release --prebuilt-dart-sdk --no-lto --no-rbe --no-goma
-                    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-                    & ../../third_party/ninja/ninja.exe -C out/ci/host_release flutter/build/archives:flutter_patched_sdk
-                    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-                '''
-            }
-        }
-    }
-    bat 'engine\\src\\flutter\\bin\\et.bat stamp'
-    if (shouldStageEnginePayload()) {
-        // Upstream declares these host-neutral patched SDK archives in its
-        // Linux builder. On Windows, ignore the Linux-only host outputs.
-        collectArtifactsWindows('linux_host_engine', builds, true, true)
-    }
-}
-
-def runAndroidDebugBuildOnWindows(String buildName, String cpu, boolean primaryArchitecture) {
-    withEnv([
-        "ANDROID_BUILD_NAME=${buildName}",
-        "ANDROID_CPU=${cpu}",
-        "ANDROID_PRIMARY=${primaryArchitecture}",
-        "WINDOWS_PYTHON_CMD=${params.WINDOWS_PYTHON}",
-    ]) {
-        dir('engine/src') {
-            powershell '''
-                $ErrorActionPreference = 'Stop'
-                $gnArgs = @(
-                  '--target-dir', $env:ANDROID_BUILD_NAME,
-                  '--android',
-                  "--android-cpu=$($env:ANDROID_CPU)",
-                  '--no-lto',
-                  '--no-rbe',
-                  '--no-goma'
-                )
-                if ($env:ANDROID_CPU -eq 'x86') {
-                  # Dart's IA32 gen_snapshot must itself be a 32-bit host tool.
-                  $gnArgs += '--gn-args=host_cpu="x86"'
-                }
-                & $env:WINDOWS_PYTHON_CMD flutter/tools/gn @gnArgs
-                if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-                $ninjaTargets = @(
-                  'flutter',
-                  'flutter/shell/platform/android:abi_jars',
-                  'flutter/shell/platform/embedder:embedder-archive',
-                  'flutter/impeller/toolkit/interop:sdk'
-                )
-                if ($env:ANDROID_PRIMARY -eq 'true') {
-                  $ninjaTargets += @(
-                    'flutter/sky/dist:zip_old_location',
-                    'flutter/lib/gpu/dist:zip_old_location',
-                    'flutter/shell/platform/android:embedding_jars'
-                  )
-                }
-                & ../../third_party/ninja/ninja.exe -C "out/$($env:ANDROID_BUILD_NAME)" @ninjaTargets
-                if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-            '''
-        }
     }
 }
 
 def buildAndroidTarget() {
     def modes = csvValues(params.MODES)
-    buildCommonArtifactsOnWindows()
+    buildCommonArtifactsOnUnix()
 
     def debugBuilds = []
     if (modes.contains('debug')) {
-        // Prove the architecture that cannot build on Apple Silicon first.
-        debugBuilds.addAll(['ci/android_debug_x86', 'ci/android_debug', 'ci/android_debug_arm64', 'ci/android_debug_x64'])
-        runAndroidDebugBuildOnWindows('ci/android_debug_x86', 'x86', false)
-        runAndroidDebugBuildOnWindows('ci/android_debug', 'arm', true)
-        runAndroidDebugBuildOnWindows('ci/android_debug_arm64', 'arm64', false)
-        runAndroidDebugBuildOnWindows('ci/android_debug_x64', 'x64', false)
+        debugBuilds.addAll(['ci/android_debug', 'ci/android_debug_arm64', 'ci/android_debug_x86', 'ci/android_debug_x64'])
+        debugBuilds.each { runEngineBuildUnix('linux_android_debug_engine', it) }
     }
     def aotBuilds = []
     if (modes.contains('profile')) {
@@ -431,14 +336,14 @@ def buildAndroidTarget() {
     if (modes.contains('release')) {
         aotBuilds.addAll(['ci/android_release', 'ci/android_release_arm64', 'ci/android_release_x64'])
     }
-    aotBuilds.each { runEngineBuildWindows('windows_android_aot_engine', it.replace('/', '\\')) }
+    aotBuilds.each { runEngineBuildUnix('linux_android_aot_engine', it) }
 
     if (shouldStageEnginePayload()) {
         if (!debugBuilds.isEmpty()) {
-            collectArtifactsWindows('linux_android_debug_engine', debugBuilds)
+            collectArtifactsUnix('linux_android_debug_engine', debugBuilds)
         }
         if (!aotBuilds.isEmpty()) {
-            collectArtifactsWindows('windows_android_aot_engine', aotBuilds.collect { it.replace('/', '\\') })
+            collectArtifactsUnix('linux_android_aot_engine', aotBuilds)
         }
     }
 }
@@ -447,7 +352,7 @@ def buildWebTarget() {
     // Android normally contributes the shared patched SDK archives. A Web-only
     // selection still needs them, so build them in this cell as a fallback.
     if (!csvHas(params.TARGETS, 'android')) {
-        buildCommonArtifactsOnMac()
+        buildCommonArtifactsOnUnix()
     }
     dir('engine/src') {
         sh '''
@@ -625,18 +530,18 @@ pipeline {
                     }
                     axis {
                         name 'BUILD_AGENT'
-                        values 'flutter_win', 'flutter_macos'
+                        values 'flutter_win', 'flutter_macos', 'flutter_linux'
                     }
                 }
                 excludes {
                     exclude {
                         axis {
                             name 'BUILD_TARGET'
-                            values 'windows', 'android'
+                            values 'windows'
                         }
                         axis {
                             name 'BUILD_AGENT'
-                            values 'flutter_macos'
+                            values 'flutter_macos', 'flutter_linux'
                         }
                     }
                     exclude {
@@ -646,7 +551,17 @@ pipeline {
                         }
                         axis {
                             name 'BUILD_AGENT'
-                            values 'flutter_win'
+                            values 'flutter_win', 'flutter_linux'
+                        }
+                    }
+                    exclude {
+                        axis {
+                            name 'BUILD_TARGET'
+                            values 'android'
+                        }
+                        axis {
+                            name 'BUILD_AGENT'
+                            values 'flutter_win', 'flutter_macos'
                         }
                     }
                 }
@@ -678,7 +593,7 @@ pipeline {
                                     bat 'git config core.longpaths true'
                                     checkout scm
                                 } else {
-                                    // Inbound macOS agents launched from Terminal inherit a TTY.
+                                    // Inbound Unix agents launched from Terminal inherit a TTY.
                                     // Force OpenSSH to use Jenkins' generated askpass helper so
                                     // encrypted SSH credentials remain fully non-interactive.
                                     withEnv(['SSH_ASKPASS_REQUIRE=force']) {
@@ -691,9 +606,9 @@ pipeline {
                                 }
                                 dir('build/artifact-payload') { deleteDir() }
                                 if (env.BUILD_AGENT == 'flutter_win') {
-                                    bootstrapEngineDependenciesWindows(env.BUILD_TARGET == 'android')
+                                    bootstrapEngineDependenciesWindows()
                                 } else {
-                                    bootstrapEngineDependenciesMac(env.BUILD_TARGET == 'web')
+                                    bootstrapEngineDependenciesUnix(env.BUILD_TARGET == 'web')
                                 }
                             }
                         }

@@ -93,28 +93,12 @@ final class StampCommand extends CommandBase {
   }
 
   Future<String> _getContentHash() async {
-    final String script = p.join(
-      environment.flutterBinInternal,
-      environment.platform.isWindows ? 'content_aware_hash.ps1' : 'content_aware_hash.sh',
-    );
-    final List<String> command = environment.platform.isWindows
-        ? <String>[
-            'powershell.exe',
-            '-NoProfile',
-            '-NonInteractive',
-            '-ExecutionPolicy',
-            'Bypass',
-            '-File',
-            script,
-          ]
-        : <String>[script];
-    final ProcessRunnerResult result = await environment.processRunner.runProcess(
-      command,
-      workingDirectory: environment.engine.srcDir,
-    );
+    final ProcessRunnerResult result = await environment.processRunner.runProcess([
+      '${environment.flutterBinInternal}/content_aware_hash.sh',
+    ], workingDirectory: environment.engine.srcDir);
     if (result.exitCode != 0) {
       environment.logger.error(
-        '${p.basename(script)} failed with exit code ${result.exitCode}'
+        'content_aware_hash.sh failed with exit code ${result.exitCode}'
         '\n\n'
         'STDOUT:\n${result.stdout}\n'
         'STDERR:\n${result.stderr}\n',

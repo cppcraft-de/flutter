@@ -120,7 +120,7 @@ void main() {
       expect(
         logStrings,
         containsAllInOrder([
-          endsWith('${p.join('src', 'out', 'engine_stamp.json')}:'),
+          endsWith('src/out/engine_stamp.json:'),
           contains(
             '{"build_date":"2025-06-27T12:30:00.000Z","build_time_ms":1751027400000,"git_revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","git_revision_date":"2025-06-27T17:11:53-07:00","content_hash":"1111111111111111111111111111111111111111"}',
           ),
@@ -150,56 +150,6 @@ void main() {
       expect(
         io.File(p.join(tempRoot.path, 'src/out/engine_stamp.json')).readAsStringSync().trim(),
         '{"build_date":"2025-06-27T12:30:00.000Z","build_time_ms":1751027400000,"git_revision":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","git_revision_date":"2025-06-27T17:11:53-07:00","content_hash":"1111111111111111111111111111111111111111"}',
-      );
-    });
-
-    test('uses the PowerShell content hash script on Windows', () async {
-      final processManager = FakeProcessManager(
-        canRun: (_, {workingDirectory}) => true,
-        onStart: (FakeCommandLogEntry entry) {
-          commandsRun.add(entry.command);
-          switch (entry.command) {
-            case ['git', 'rev-parse', 'HEAD']:
-              return FakeProcess(stdout: 'a' * 40);
-            case ['git', 'show', '-s', '--pretty=format:%ad', '--date=iso-strict']:
-              return FakeProcess(stdout: '2025-06-27T17:11:53-07:00');
-            default:
-              if (entry.command.first == 'powershell.exe') {
-                return FakeProcess(stdout: '1' * 40);
-              }
-              return FakeProcess();
-          }
-        },
-      );
-      final environment = Environment(
-        abi: Abi.windowsX64,
-        engine: testEngine,
-        logger: Logger.test((log) {
-          testLogs.add(log);
-        }),
-        platform: _fakePlatform(Platform.windows, pathSeparator: r'\'),
-        processRunner: ProcessRunner(
-          defaultWorkingDirectory: tempRoot,
-          processManager: processManager,
-        ),
-        now: () => DateTime.utc(2025, 6, 27, 12, 30),
-      );
-
-      await _engineTool(StampCommand(environment: environment)).run(['stamp', '--dry-run']);
-
-      expect(
-        commandsRun,
-        contains(
-          containsAllInOrder([
-            'powershell.exe',
-            '-NoProfile',
-            '-NonInteractive',
-            '-ExecutionPolicy',
-            'Bypass',
-            '-File',
-            endsWith('content_aware_hash.ps1'),
-          ]),
-        ),
       );
     });
   });
