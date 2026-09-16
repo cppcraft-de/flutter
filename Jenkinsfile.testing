@@ -23,7 +23,7 @@ def bootstrapEngineDependenciesMac(boolean includeWeb) {
     if (!params.SYNC_ENGINE_DEPS) {
         return
     }
-    def gclientConfig = readFile('engine/scripts/standard.gclient')
+    def gclientConfig = readFile('engine/scripts/standard.gclient').replace('\r\n', '\n')
     if (includeWeb) {
         def disabledWebVars = '''    # "custom_vars": {
     #   "download_emsdk": True,
@@ -44,7 +44,7 @@ def bootstrapEngineDependenciesWindows(boolean includeAndroid) {
     if (!params.SYNC_ENGINE_DEPS) {
         return
     }
-    def gclientConfig = readFile('engine/scripts/standard.gclient')
+    def gclientConfig = readFile('engine/scripts/standard.gclient').replace('\r\n', '\n')
     if (includeAndroid) {
         def disabledCustomVars = '''    # "custom_vars": {
     #   "download_emsdk": True,
