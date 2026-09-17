@@ -549,7 +549,7 @@ pipeline {
                     exclude {
                         axis {
                             name 'BUILD_TARGET'
-                            values 'macos', 'ios', 'web'
+                            values 'macos', 'ios'
                         }
                         axis {
                             name 'BUILD_AGENT'
@@ -559,7 +559,7 @@ pipeline {
                     exclude {
                         axis {
                             name 'BUILD_TARGET'
-                            values 'android'
+                            values 'android', 'web'
                         }
                         axis {
                             name 'BUILD_AGENT'
