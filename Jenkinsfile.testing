@@ -398,6 +398,24 @@ def createSdkArchiveWindows() {
     archiveArtifacts artifacts: 'build/sdk-output/windows/*', fingerprint: true
 }
 
+def checkoutSdkSource() {
+    // Flutter's release packager derives the SDK version from Git tags and
+    // history. The normal multibranch checkout is intentionally shallow, so
+    // override that behavior only for host SDK packaging.
+    checkout([
+        $class: 'GitSCM',
+        branches: scm.branches,
+        extensions: [[
+            $class: 'CloneOption',
+            depth: 0,
+            noTags: false,
+            shallow: false,
+            timeout: 30,
+        ]],
+        userRemoteConfigs: scm.userRemoteConfigs,
+    ])
+}
+
 pipeline {
     agent none
 
@@ -651,18 +669,22 @@ pipeline {
                     when { expression { csvHas(params.HOST_SDKS, 'windows') } }
                     agent { label 'flutter_win' }
                     steps {
-                        checkout scm
-                        script { createSdkArchiveWindows() }
+                        script {
+                            checkoutSdkSource()
+                            createSdkArchiveWindows()
+                        }
                     }
                 }
                 stage('macOS SDK') {
                     when { expression { csvHas(params.HOST_SDKS, 'macos') } }
                     agent { label 'flutter_macos' }
                     steps {
-                        withEnv(['SSH_ASKPASS_REQUIRE=force']) {
-                            checkout scm
+                        script {
+                            withEnv(['SSH_ASKPASS_REQUIRE=force']) {
+                                checkoutSdkSource()
+                            }
+                            createSdkArchiveUnix('macos')
                         }
-                        script { createSdkArchiveUnix('macos') }
                     }
                 }
             }
