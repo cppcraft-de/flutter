@@ -102,24 +102,78 @@ Web, and Windows artifacts, while a macOS SDK requires Android, iOS, Web, and
 macOS artifacts. Both require all three native modes. Use an empty `HOST_SDKS`
 value for intentionally partial engine-only builds.
 
-`Jenkinsfile.testing` intentionally starts with a much smaller default while
-the pipeline is being commissioned: `TARGETS=windows`, `MODES=debug`, and an
-empty `HOST_SDKS`. It uses the `flutter_win` node. macOS, iOS, Android, and Web
-work uses `flutter_macos`; this testing pipeline does not require or schedule a
-Linux agent. Android debug and Web reuse upstream's host-independent archive
-declarations from the Linux-named builder JSON, but execute their GN/Ninja
-builds on macOS. Android profile/release use upstream's macOS AOT builder.
+`Jenkinsfile.testing` intentionally starts with a smaller default while the
+pipeline is being commissioned: `TARGETS=windows,macos`, `MODES=debug`, and an
+empty `HOST_SDKS`. Windows uses `flutter_win`, macOS and iOS use
+`flutter_macos`, and Android and Web use `flutter_linux`. The Android and Web
+builders are Linux configurations and should remain on that agent rather than
+requiring local patches to make Flutter-owned build scripts run on Windows.
 
 Engine targets are a real Declarative Pipeline matrix axis. Invalid
-target/agent pairs are excluded, leaving Windows on `flutter_win` and macOS,
-iOS, Android, and Web on `flutter_macos`. `TARGETS` filters the static axis before
-an agent is allocated.
+target/agent pairs are excluded, leaving Windows on `flutter_win`, macOS and
+iOS on `flutter_macos`, and Android and Web on `flutter_linux`. `TARGETS`
+filters the static axis before an agent is allocated.
 
 Runtime mode is intentionally not a second matrix axis. A target's selected
 debug/profile/release configurations run sequentially in one matrix cell and
 workspace. This shares checkout, `gclient sync`, host bootstrap configurations,
 simulator prerequisites, and persistent Ninja outputs instead of repeating
 them in separate mode cells. Web ignores the mode list and builds once.
+
+### Choosing a reduced build matrix
+
+Distinguish quick engine validation from publishing a generally usable SDK.
+For routine smoke builds, select only the targets and modes under test and
+leave `HOST_SDKS` empty. For a closed Android appliance fleet, an ARM64-only
+debug/release smoke build is a reasonable minimum. Keep ARM64 profile available
+as an on-demand or scheduled build: debug-mode timings are not representative,
+and profile mode is the supported way to diagnose frame-time and startup
+problems on the real smart-board hardware.
+
+Before declaring the fleet ARM64-only, check every supported board model:
+
+```sh
+adb shell getprop ro.product.cpu.abilist
+```
+
+Do not infer the device ABI merely from the Windows or Linux architecture of
+the build agent. The Android artifact ABI is the target device ABI.
+
+The current Android list is hard-coded in `Jenkinsfile.testing`. If an
+`ANDROID_ARCHS` parameter is added, apply it consistently to Android debug
+engine builds, Android AOT engine builds, and the host-specific AOT snapshot
+artifacts built for each packaged SDK.
+
+Reduction candidates and their consequences are:
+
+- `android_debug_x86` (32-bit x86) is an upstream engine CI configuration and
+  remains part of `flutter precache --android`, but the current Flutter tool's
+  ordinary APK/App Bundle target choices do not include x86. It is therefore
+  the safest first omission from a smoke-only build when no old 32-bit Android
+  emulator is supported. Do not omit it from the current unfiltered SDK
+  packaging flow.
+- Android x64 can be omitted when developers use neither x86_64 emulators nor
+  x86_64 target devices.
+- 32-bit ARM can be omitted only when all supported physical devices are
+  ARM64 and the application build is explicitly restricted accordingly.
+- Omitting profile removes `flutter run --profile` and useful DevTools
+  performance analysis for that target. Prefer making it on-demand instead of
+  removing it from the published product contract.
+- Web has one release-style engine build and already ignores `MODES`.
+
+Vanilla `flutter build apk` and `flutter build appbundle` currently default to
+Android ARM, ARM64, and x64. If the private mirror publishes only ARM64, those
+commands can request missing artifacts. Projects must then consistently use,
+for example, `--target-platform android-arm64`, and acceptance tests must cover
+that workflow. This is a visible SDK policy change, not merely a CI
+optimization.
+
+Likewise, upstream SDK assembly performs an unfiltered precache. The current
+pipeline therefore requires all standard targets and all three modes when
+`HOST_SDKS` is non-empty. Keep the complete matrix for official, drop-in SDK
+publishing unless the packager and developer workflow are intentionally changed
+and documented together. A practical compromise is a reduced per-commit smoke
+matrix plus a complete release or scheduled publication matrix.
 
 Each matrix cell uses a deterministic custom workspace below the agent root:
 
@@ -132,32 +186,36 @@ sharing incompatible outputs, while the target suffix prevents target cells
 from reconfiguring each other's GN output directories. This also avoids
 executor-dependent `@2`/`@3` workspace allocation, so `engine/src/out` is
 available to the same branch and target on later runs. The pipeline deletes
-only `build/artifact-payload` during normal `auto` builds; `full_rebuild` is the
-explicit operation that removes `engine/src/out`.
+only `build/artifact-payload` during normal `incremental` builds;
+`full_rebuild` is the explicit operation that removes `engine/src/out`.
 
-### Build reuse policy
+### Build policy and release profiles
 
-`BUILD_POLICY` controls whether engine work is performed:
+`BUILD_POLICY` controls local workspace reuse:
 
-- `auto` (default) sends an HTTP `HEAD` request for a completion marker. It
-  reuses the published artifact set when present and builds otherwise.
+- `incremental` (default) always invokes the selected engine builds while
+  preserving `engine/src/out`, allowing GN and Ninja to reuse valid local
+  outputs.
 - `full_rebuild` deletes `engine/src/out` on each participating build agent,
-  invokes the selected engine builds from scratch, and overwrites the
-  immutable-revision artifact paths when publishing is enabled.
-- `reuse` requires the completion marker and fails immediately when it is not
-  available.
+  then invokes the selected builds from scratch.
 
-Markers are specific to the engine ID and the canonical target, mode, and host
-SDK selections. They live below
-`jenkins_build_markers/<engine-id>/...` on `ARTIFACT_BASE_URL`. CI publishes the
-marker only after the full artifact payload succeeds. Therefore its presence
-means that an exact prior matrix completed; merely finding one engine ZIP is
-not treated as sufficient.
+Neither policy consults the artifact server to suppress a build. This avoids
+reusing output after an untracked agent or toolchain change. Use three simple
+profiles:
 
-Server reuse requires `ARTIFACT_BASE_URL`. A local test without an artifact
-server may leave `PUBLISH_ENGINE_ARTIFACTS=false`; `auto` then builds, while a
-repeated build in the same persistent agent workspace remains incremental and
-Ninja reuses unchanged outputs.
+- A smoke build uses `incremental`, a reduced target/mode selection,
+  `PUBLISH_ENGINE_ARTIFACTS=false`, and an empty `HOST_SDKS`.
+- An SDK integration build uses `incremental`, the complete matrix required by
+  the selected `HOST_SDKS`, and publishes to a staging mirror. The resulting
+  SDK exercises the same download flow as a developer installation.
+- A production release uses `full_rebuild`, `SYNC_ENGINE_DEPS=true`, the
+  complete matrix, and the production mirror.
+
+The pipeline compares `bin/internal/engine.version` with Flutter's existing
+`last_engine_commit` calculation. A mismatch is a warning for incremental
+staging builds, but a clean publishing build fails before compilation. This
+prevents different engine source revisions from sharing a production artifact
+namespace.
 
 Do not enable Jenkins Git options such as "Wipe out repository before build"
 or an external workspace cleanup step for this job. They defeat local reuse.
@@ -171,24 +229,24 @@ FTP, or Publish Over SSH (SFTP). If the artifact server uses a provider-specific
 API, replace only the publishing step while preserving the staged directory
 layout.
 
-The pipeline uses Jenkins `stash`/`unstash` between the build agents and the
-separate upload stage. Because a full matrix is large even without symbols,
-configure a remote Jenkins Artifact Manager (for example, S3-backed storage)
-or change the pipeline to upload each staged tree directly from its build
-agent instead of routing stashes through the controller.
+Each target agent publishes its collected tree directly to the artifact
+server. Jenkins does not route the multi-gigabyte engine payload through
+`stash`/`unstash`. The SDK stage begins only after every requested matrix cell
+has built and uploaded successfully.
 
 ### Jenkins setup checklist
 
 1. Create a multibranch Pipeline job pointed at this repository. Jenkins will
    discover and run the checked-in `Jenkinsfile` for each selected branch.
-2. Give the agents labels `flutter_win` and `flutter_macos`. If those labels ever
-   change, update the matrix axis/exclusions and the three non-matrix agent
-   declarations in `Jenkinsfile.testing` together.
+2. Give the agents labels `flutter_win`, `flutter_macos`, and `flutter_linux`.
+   If those labels ever change, update the matrix axis/exclusions and the
+   non-matrix agent declarations in `Jenkinsfile.testing` together.
 3. Install `depot_tools` (including `gclient`), Git, Python 3, and the native
-   build toolchain on every agent. Windows additionally needs Visual Studio and
-   the Windows SDK; macOS needs Xcode plus the Android and Web dependencies used
-   by the selected engine configurations. Set `WINDOWS_PYTHON` if `python3` is not the
-   Python command on Windows. Install Jenkins Publish Over FTP when using
+   build toolchain on every agent. Windows additionally needs Visual Studio,
+   the Windows SDK, and Debugging Tools for Windows for every built host
+   architecture; macOS needs Xcode; Linux carries the Android and Web build
+   dependencies. Set `WINDOWS_PYTHON` if `python3` is not the Python command on
+   Windows. Install Jenkins Publish Over FTP when using
    `UPLOAD_TRANSPORT=ftp`, or Publish Over SSH when using `sftp`.
 4. Ensure that every SDK-packaging agent can authenticate to the fork URL
    declared in `dev/bots/prepare_package/common.dart` and fetch the exact commit
@@ -199,9 +257,10 @@ agent instead of routing stashes through the controller.
    `UPLOAD_TRANSPORT=http_put` and configure `UPLOAD_AUTH` plus
    `UPLOAD_CREDENTIALS_ID`, or select `ftp`/`sftp` and set the Jenkins
    `TRANSFER_CONFIG_NAME`.
-6. Use a remote Artifact Manager, or enough controller storage and bandwidth,
-   for the matrix stashes. Set suitable workspace and build-retention limits;
-   engine outputs are large even though the publishing payload omits symbols.
+6. Give each build agent network access and upload credentials for the selected
+   artifact transport. Set suitable workspace and artifact-server retention
+   limits; engine outputs are large even though the publishing payload omits
+   symbols.
 7. Run an intentionally small first build (one target and one mode, with
    `HOST_SDKS` empty), verify upload and download behavior, then enable the full
    release matrix.
@@ -210,18 +269,17 @@ The principal release parameters are:
 
 | Parameter | Purpose |
 | --- | --- |
-| `TARGETS` | Comma-separated engine targets. Testing default: Windows only. |
+| `TARGETS` | Comma-separated engine targets. Testing default: Windows and macOS. |
 | `MODES` | Comma-separated native modes. Testing default: debug only. Web does not use this axis. |
 | `HOST_SDKS` | Windows and/or macOS host SDK archives. Leave empty for engine-only builds. SDK assembly requires all standard targets for that host and all three modes. |
-| `BUILD_POLICY` | `auto`, destructive `full_rebuild`, or strict `reuse`, using exact-matrix completion markers on the HTTP server. |
+| `BUILD_POLICY` | `incremental` preserves local Ninja outputs; `full_rebuild` deletes `engine/src/out` first. Neither skips work based on remote artifacts. |
 | `RELEASE_BRANCH` | Channel/branch metadata written into the SDK archive. It is separate from the immutable framework revision. |
 | `ARTIFACT_BASE_URL` | HTTP(S) root used by the packager and packaged SDKs for artifact downloads. |
-| `PUBLISH_ENGINE_ARTIFACTS` | Allows build/stage validation without changing the artifact mirror. |
+| `PUBLISH_ENGINE_ARTIFACTS` | Uploads each selected target directly from its build agent. Required when `HOST_SDKS` is non-empty. |
 | `UPLOAD_TRANSPORT` | `http_put`, `ftp`, or `sftp`. |
 | `HTTP_UPLOAD_BASE_URL` | Optional HTTP PUT root when upload and download URLs differ. Empty uses `ARTIFACT_BASE_URL`. |
 | `TRANSFER_CONFIG_NAME` | Jenkins Publish Over FTP or Publish Over SSH server configuration name. Credentials live in that Jenkins configuration. |
 | `TRANSFER_REMOTE_DIRECTORY` | Optional directory below the configured FTP/SFTP server root. |
-| `KEEP_ENGINE_PAYLOAD_IN_JENKINS` | Retains the staged payload as a Jenkins build artifact for diagnostics. |
 
 ### Upload endpoint contract
 
@@ -230,8 +288,8 @@ For `UPLOAD_TRANSPORT=http_put`, `dev/bots/upload_artifact_tree.py` treats
 static-file root. The server must:
 
 - accept HTTP PUT requests to arbitrary nested paths and return a 2xx status;
-- allow an identical path to be overwritten safely so a retried Jenkins build
-  is idempotent;
+- allow an identical path to be overwritten safely while an unreleased build
+  is retried;
 - preserve the path below the base URL, especially
   `flutter_infra_release/flutter/<engine-id>/...` and
   `download.flutter.io/...`;
@@ -309,13 +367,15 @@ because its precache step immediately downloads from `ARTIFACT_BASE_URL`.
 
 For each release:
 
-1. Build the engine artifacts for each supported host, target, and build mode.
-2. Publish those artifact ZIPs to the HTTPS mirror under the pinned engine ID.
-3. Assemble a clean host SDK staging directory using the framework revision.
-4. Populate its basic cache/tooling and create the host-specific SDK archive.
-5. Publish the SDK archive and a manifest recording framework revision, engine
-   revision, host, and included/pre-cached targets.
-6. Keep PDBs and other debug symbols as separate Jenkins diagnostic artifacts,
+1. Verify that `bin/internal/engine.version` identifies the latest
+   engine-affecting commit.
+2. Build the engine artifacts for each supported host, target, and build mode.
+3. Publish each target's artifact ZIPs directly to the HTTPS mirror under that
+   engine ID.
+4. Assemble a clean host SDK staging directory using the framework revision.
+5. Populate its basic cache/tooling and create the host-specific SDK archive.
+6. Publish the SDK archive only after all requested target uploads succeed.
+7. Keep PDBs and other debug symbols as separate Jenkins diagnostic artifacts,
    with an appropriate retention policy. They are not normally required for
    Flutter runtime builds.
 

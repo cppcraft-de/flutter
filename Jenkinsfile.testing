@@ -224,8 +224,8 @@ def runMacGenerators(Set<String> modes, boolean buildMacOS, boolean buildIOS) {
     }
 }
 
-def shouldStageEnginePayload() {
-    return params.PUBLISH_ENGINE_ARTIFACTS || params.KEEP_ENGINE_PAYLOAD_IN_JENKINS
+def shouldCollectEnginePayload() {
+    return params.PUBLISH_ENGINE_ARTIFACTS
 }
 
 def buildWindowsTarget() {
@@ -252,7 +252,7 @@ def buildWindowsTarget() {
     }
     androidBuilds.each { runEngineBuildWindows('windows_android_aot_engine', it) }
 
-    if (shouldStageEnginePayload()) {
+    if (shouldCollectEnginePayload()) {
         collectArtifactsWindows('windows_host_engine', windowsBuilds)
         if (!androidBuilds.isEmpty()) {
             collectArtifactsWindows('windows_android_aot_engine', androidBuilds)
@@ -274,7 +274,7 @@ def buildMacosTarget() {
     }
     builds.each { runEngineBuildUnix('mac_host_engine', it) }
     runMacGenerators(modes, true, false)
-    if (shouldStageEnginePayload()) {
+    if (shouldCollectEnginePayload()) {
         collectArtifactsUnix('mac_host_engine', builds, true)
     }
 }
@@ -287,7 +287,7 @@ def buildIosTarget() {
     if (modes.contains('release')) { builds << 'ci/ios_release' }
     builds.each { runEngineBuildUnix('mac_ios_engine', it) }
     runMacGenerators(modes, false, true)
-    if (shouldStageEnginePayload()) {
+    if (shouldCollectEnginePayload()) {
         collectArtifactsUnix('mac_ios_engine', builds, true)
     }
 }
@@ -315,7 +315,7 @@ def buildCommonArtifactsOnUnix() {
     // The stamp identifies the fork commit that produced the binaries. The
     // mirror path intentionally remains keyed by bin/internal/engine.version.
     sh 'engine/src/flutter/bin/et stamp'
-    if (shouldStageEnginePayload()) {
+    if (shouldCollectEnginePayload()) {
         // Only the host-neutral patched SDK archives are built here. Ignore
         // the remaining outputs declared by the full Linux host builder.
         collectArtifactsUnix('linux_host_engine', builds, true, true)
@@ -340,7 +340,7 @@ def buildAndroidTarget() {
     }
     aotBuilds.each { runEngineBuildUnix('linux_android_aot_engine', it) }
 
-    if (shouldStageEnginePayload()) {
+    if (shouldCollectEnginePayload()) {
         if (!debugBuilds.isEmpty()) {
             collectArtifactsUnix('linux_android_debug_engine', debugBuilds)
         }
@@ -363,7 +363,7 @@ def buildWebTarget() {
             ../../third_party/ninja/ninja -C out/wasm_release flutter/web_sdk:flutter_web_sdk_archive
         '''
     }
-    if (shouldStageEnginePayload()) {
+    if (shouldCollectEnginePayload()) {
         collectArtifactsUnix('linux_web_engine_build', ['ci/wasm_release'])
     }
 }
@@ -405,7 +405,6 @@ pipeline {
         timestamps()
         skipDefaultCheckout(true)
         disableConcurrentBuilds()
-        preserveStashes(buildCount: 2)
     }
 
     parameters {
@@ -424,17 +423,16 @@ pipeline {
             defaultValue: '',
             description: 'Comma-separated host SDK archives to create: windows, macos. Leave empty to skip SDK archives.',
         )
-        choice(name: 'BUILD_POLICY', choices: ['auto', 'full_rebuild', 'reuse'], description: 'auto reuses the server or local incremental outputs; full_rebuild deletes engine/src/out; reuse requires a matching published set.')
+        choice(name: 'BUILD_POLICY', choices: ['incremental', 'full_rebuild'], description: 'incremental always invokes the selected builds and keeps local Ninja outputs; full_rebuild first deletes engine/src/out.')
         choice(name: 'RELEASE_BRANCH', choices: ['main', 'stable', 'beta', 'master'], description: 'Branch/channel stored in the SDK archive.')
         string(name: 'ARTIFACT_BASE_URL', defaultValue: 'http://192.168.0.63:8765', description: 'HTTP(S) download root, without /flutter_infra_release and without a trailing slash.')
-        booleanParam(name: 'PUBLISH_ENGINE_ARTIFACTS', defaultValue: true, description: 'Publish the staged engine artifact tree and its completion marker.')
+        booleanParam(name: 'PUBLISH_ENGINE_ARTIFACTS', defaultValue: true, description: 'Publish each target artifact tree directly from its build agent.')
         choice(name: 'UPLOAD_TRANSPORT', choices: ['http_put', 'ftp', 'sftp'], description: 'HTTP PUT helper, Publish Over FTP, or Publish Over SSH/SFTP.')
         string(name: 'HTTP_UPLOAD_BASE_URL', defaultValue: '', description: 'HTTP PUT destination root. Empty means ARTIFACT_BASE_URL.')
         choice(name: 'UPLOAD_AUTH', choices: ['none', 'basic', 'bearer'], description: 'Authentication used by the HTTP PUT endpoint.')
         string(name: 'UPLOAD_CREDENTIALS_ID', defaultValue: '', description: 'HTTP PUT username/password or secret-text Jenkins credential ID.')
         string(name: 'TRANSFER_CONFIG_NAME', defaultValue: '', description: 'Jenkins Publish Over FTP or Publish Over SSH server configuration name.')
         string(name: 'TRANSFER_REMOTE_DIRECTORY', defaultValue: '', description: 'Remote directory below the configured FTP/SFTP server root. Empty publishes at its root.')
-        booleanParam(name: 'KEEP_ENGINE_PAYLOAD_IN_JENKINS', defaultValue: false, description: 'Also retain the complete mirror payload as Jenkins build artifacts. This can be very large.')
         booleanParam(name: 'SYNC_ENGINE_DEPS', defaultValue: true, description: 'Run gclient sync on every build agent. Disable only for pre-provisioned persistent workspaces.')
         string(name: 'WINDOWS_PYTHON', defaultValue: 'python', description: 'Python 3 command on Windows agents.')
     }
@@ -454,8 +452,8 @@ pipeline {
                     if (modes.isEmpty()) {
                         error('MODES must select at least one runtime mode.')
                     }
-                    if ((params.PUBLISH_ENGINE_ARTIFACTS || !hosts.isEmpty() || params.BUILD_POLICY == 'reuse') && params.ARTIFACT_BASE_URL.trim().isEmpty()) {
-                        error('ARTIFACT_BASE_URL is required when publishing, reusing, or creating SDK archives.')
+                    if ((params.PUBLISH_ENGINE_ARTIFACTS || !hosts.isEmpty()) && params.ARTIFACT_BASE_URL.trim().isEmpty()) {
+                        error('ARTIFACT_BASE_URL is required when publishing or creating SDK archives.')
                     }
                     if (!params.ARTIFACT_BASE_URL.trim().isEmpty() &&
                         (!(params.ARTIFACT_BASE_URL ==~ /https?:\/\/[^\s'\"]+/) || params.ARTIFACT_BASE_URL.endsWith('/'))) {
@@ -463,6 +461,9 @@ pipeline {
                     }
                     if (!hosts.isEmpty() && modes != (['debug', 'profile', 'release'] as Set)) {
                         error('Upstream SDK packaging runs an unfiltered precache; select all modes or leave HOST_SDKS empty.')
+                    }
+                    if (!hosts.isEmpty() && !params.PUBLISH_ENGINE_ARTIFACTS) {
+                        error('Host SDK packaging requires PUBLISH_ENGINE_ARTIFACTS=true so it consumes artifacts produced by this build.')
                     }
                     def requiredTargets = [
                         windows: ['android', 'web', 'windows'] as Set,
@@ -495,30 +496,18 @@ pipeline {
                     if (!(env.ENGINE_ID ==~ /[0-9a-fA-F]{40}/)) {
                         error("bin/internal/engine.version is not a full artifact ID: ${env.ENGINE_ID}")
                     }
-                    def targetKey = targets.toList().sort().join('-')
-                    def modeKey = modes.toList().sort().join('-')
-                    def hostKey = hosts.isEmpty() ? 'none' : hosts.toList().sort().join('-')
-                    env.REUSE_MARKER_DIR = "jenkins_build_markers/${env.ENGINE_ID}"
-                    env.REUSE_MARKER_FILE = "${targetKey}__${modeKey}__${hostKey}.txt"
-                    env.REUSE_MARKER = "${env.REUSE_MARKER_DIR}/${env.REUSE_MARKER_FILE}"
-                    def markerExists = false
-                    if (!params.ARTIFACT_BASE_URL.trim().isEmpty() && params.BUILD_POLICY != 'full_rebuild') {
-                        def markerUrl = "${params.ARTIFACT_BASE_URL}/${env.REUSE_MARKER}"
-                        markerExists = bat(
-                            script: "@curl.exe --fail --silent --head --output NUL \"${markerUrl}\"",
-                            returnStatus: true,
-                        ) == 0
+                    def expectedEngineId = powershell(
+                        script: '& powershell.exe -NoProfile -ExecutionPolicy Bypass -File bin\\internal\\last_engine_commit.ps1',
+                        returnStdout: true,
+                    ).trim()
+                    if (env.ENGINE_ID != expectedEngineId) {
+                        def message = "bin/internal/engine.version is ${env.ENGINE_ID}, but the last engine-affecting commit is ${expectedEngineId}."
+                        if (params.BUILD_POLICY == 'full_rebuild' && params.PUBLISH_ENGINE_ARTIFACTS) {
+                            error("${message} Refusing to publish a clean release under a stale artifact ID.")
+                        }
+                        echo "WARNING: ${message} Incremental staging builds may continue, but production publishing must use the matching ID."
                     }
-                    if (params.BUILD_POLICY == 'reuse' && !markerExists) {
-                        error("BUILD_POLICY=reuse requested, but no completed artifact set exists at ${params.ARTIFACT_BASE_URL}/${env.REUSE_MARKER}")
-                    }
-                    env.REUSE_ENGINE_ARTIFACTS = markerExists ? 'true' : 'false'
-                    if (!hosts.isEmpty() && !params.PUBLISH_ENGINE_ARTIFACTS && !markerExists) {
-                        error('Host SDK packaging needs an existing reusable artifact set or PUBLISH_ENGINE_ARTIFACTS=true.')
-                    }
-                    def disposition = markerExists ? 'reuse' : 'build'
-                    currentBuild.description = "${env.FRAMEWORK_REVISION.take(10)} / engine ${env.ENGINE_ID.take(10)} / ${disposition}"
-                    echo "Artifact policy ${params.BUILD_POLICY}: ${disposition} (${env.REUSE_MARKER})"
+                    currentBuild.description = "${env.FRAMEWORK_REVISION.take(10)} / engine ${env.ENGINE_ID.take(10)} / ${params.BUILD_POLICY}"
                 }
             }
         }
@@ -570,8 +559,7 @@ pipeline {
                 when {
                     beforeAgent true
                     expression {
-                        env.REUSE_ENGINE_ARTIFACTS != 'true' &&
-                            csvHas(params.TARGETS, env.BUILD_TARGET)
+                        csvHas(params.TARGETS, env.BUILD_TARGET)
                     }
                 }
                 agent {
@@ -642,54 +630,13 @@ pipeline {
                         }
                     }
 
-                    stage('Stage target artifacts') {
-                        when { expression { shouldStageEnginePayload() } }
+                    stage('Publish target artifacts') {
+                        when { expression { params.PUBLISH_ENGINE_ARTIFACTS } }
                         steps {
-                            stash(
-                                name: "engine-artifacts-${env.BUILD_TARGET}",
-                                includes: 'build/artifact-payload/**',
-                                useDefaultExcludes: false,
-                            )
+                            script {
+                                publishArtifactTree('build/artifact-payload')
+                            }
                         }
-                    }
-                }
-            }
-        }
-
-        stage('Upload engine artifacts') {
-            when {
-                beforeAgent true
-                expression {
-                    env.REUSE_ENGINE_ARTIFACTS != 'true' &&
-                        (params.PUBLISH_ENGINE_ARTIFACTS || params.KEEP_ENGINE_PAYLOAD_IN_JENKINS)
-                }
-            }
-            agent { label 'flutter_win' }
-            steps {
-                checkout scm
-                script {
-                    dir('build/artifact-payload') { deleteDir() }
-                    csvValues(params.TARGETS).toList().sort().each { target ->
-                        unstash "engine-artifacts-${target}"
-                    }
-
-                    if (params.PUBLISH_ENGINE_ARTIFACTS) {
-                        publishArtifactTree('build/artifact-payload')
-
-                        // Publish the marker last. Its presence proves that the
-                        // complete payload for this exact matrix was uploaded.
-                        dir('build/reuse-marker') { deleteDir() }
-                        dir("build/reuse-marker/${env.REUSE_MARKER_DIR}") {
-                            writeFile(
-                                file: env.REUSE_MARKER_FILE,
-                                text: "engine=${env.ENGINE_ID}\nframework=${env.FRAMEWORK_REVISION}\ntargets=${params.TARGETS}\nmodes=${params.MODES}\nhost_sdks=${params.HOST_SDKS}\n",
-                            )
-                        }
-                        publishArtifactTree('build/reuse-marker')
-                    }
-
-                    if (params.KEEP_ENGINE_PAYLOAD_IN_JENKINS) {
-                        archiveArtifacts artifacts: 'build/artifact-payload/**', fingerprint: true
                     }
                 }
             }
