@@ -6,23 +6,30 @@ extract an archive, put `flutter/bin` on `PATH`, and use `flutter run` or
 
 ## Recommended release model
 
-Use a small, host-specific SDK archive plus a private HTTPS engine-artifact
-mirror.
+Use a host-specific SDK archive plus a private HTTPS engine-artifact mirror.
 
 Build and publish one SDK archive per host operating system and architecture,
 for example:
 
 * `flutter-custom-windows-x64.zip`
 * `flutter-custom-macos-arm64.zip`
-* `flutter-custom-linux-x64.tar.xz`
+
+The current pipeline produces Windows x64 and macOS arm64 SDK archives. The
+Linux agent builds Android and Web engine artifacts; having a Linux build agent
+does not require distributing a Linux host SDK.
 
 The SDK archive includes the framework fork, the host Dart SDK, Flutter tool
-bootstrap/cache files, and any intentionally pre-cached common artifacts. It
-does not need to include every engine target and mode.
+bootstrap/cache files, and pre-cached artifacts. Keeping one archive per host
+avoids a single all-host mega-archive, but does not necessarily make each ZIP
+small.
 
-Flutter downloads the matching engine artifact lazily when a developer first
-needs it. This avoids an oversized archive containing debug, profile, and
-release artifacts for every supported target.
+The current pipeline deliberately uses upstream's package creator unchanged in
+this respect. It runs an unfiltered `flutter precache`, warms the SDK cache, and
+can therefore produce multi-gigabyte host archives. A future thin-package mode
+could omit selected cache contents and let Flutter download them lazily from
+the mirror, but that is not implemented today and would need explicit
+acceptance testing. The mirror is still required for Android Maven artifacts,
+cache repair, and artifacts not present in the packaged cache.
 
 ## Engine identity
 
@@ -36,10 +43,20 @@ acceptance tests.
 
 ## Artifact mirror
 
-Flutter expects ordinary HTTPS downloads; FTP is not supported. A static HTTP
-artifact host is sufficient: an internal object store (S3/MinIO), nginx, or a
-stable Jenkins-published-artifact endpoint. No Flutter-specific service or
-database is needed.
+The artifact mirror is part of the distributed fork, not merely an optional CI
+cache. A packaged SDK is pinned to a fork-specific engine ID, and Flutter's
+public storage does not contain artifacts for that ID.
+
+Flutter expects ordinary HTTP(S) downloads using GET and HEAD; FTP and SFTP are
+not download protocols for the Flutter tool. A static HTTP artifact host is
+sufficient: an internal object store (S3/MinIO), nginx, Apache, IIS, Caddy, or
+an existing web space. No Flutter-specific service or database is needed.
+
+Upload and download access should be separated. Developer machines need
+non-interactive read access, normally on the company network or VPN. Only
+Jenkins should receive write access, using authenticated HTTP PUT, SFTP, or
+another server-side publishing mechanism. Never expose an unauthenticated PUT
+endpoint publicly.
 
 Publish artifacts in Flutter's usual layout, for example:
 
@@ -55,8 +72,19 @@ https://flutter-artifacts.example.internal/
     windows-x64-profile/windows-x64-profile-flutter.zip
     windows-x64-release/windows-x64-release-flutter.zip
     android-arm64-release/windows-x64.zip
+  flutter_infra_release/flutter/fonts/<font-version>/fonts.zip
+  flutter_infra_release/gradle-wrapper/<wrapper-version>/gradle-wrapper.tgz
+  flutter_infra_release/flutter/coverage/lcov.info
   download.flutter.io/io/flutter/...
+  wsc-sdk/<release-name>/
+    flutter_windows_<release-name>.zip
+    flutter_macos_<release-name>.zip
+    SHA256SUMS
 ```
+
+The host SDK ZIPs may be served by the same web server and from the same
+storage root as the engine mirror. Keep them in their own subtree because SDK
+release names and retention differ from engine artifact IDs.
 
 The Android Maven repository is the exception to the revision-root layout:
 Gradle reads it directly from `<base-url>/download.flutter.io`. The Maven
@@ -75,17 +103,55 @@ release configurations. Flutter downloads these ZIPs from the engine-revision
 root and extracts them into the local `artifacts/engine/common/` cache
 directory.
 
+`sky_engine.zip` and `flutter_gpu.zip` are also required at the engine-revision
+root. They are generated Dart packages needed to resolve the framework's Pub
+workspace and build the Flutter tool in a clean SDK checkout. This fork's
+bootstrap scripts download just these two packages before normal Flutter cache
+initialization takes over. They are build/bootstrap inputs, not replacements
+for the platform-specific engine archives.
+
+Some universal artifacts are pinned outside the engine-ID tree and are not
+produced by an engine build. For this checkout they are identified by
+`bin/internal/material_fonts.version` and
+`bin/internal/gradle_wrapper.version`. Seed those exact immutable upstream
+objects into the mirror before SDK packaging. Preserve their complete relative
+paths, verify their upstream hashes, and repeat this check after every upstream
+rebase because the pins can change. Do not solve a missing global object by
+adding an automatic fallback to public storage.
+
+Upstream's SDK packager also runs `flutter update-packages`, which downloads
+`flutter_infra_release/flutter/coverage/lcov.info`. Unlike the two version-file
+artifacts above, that upstream path is not content-versioned. Snapshot the
+verified upstream object into the private mirror for each release and record
+its checksum with the release inputs. Existing SDK operation does not depend on
+continually replacing it with the newest upstream object.
+
 The mirror must be reachable without an interactive login. A private network,
 VPN, or transparent service authentication is fine.
 
 ## Default mirror configuration
 
 The Flutter tool honors `FLUTTER_STORAGE_BASE_URL`. This fork's launchers first
-respect an explicitly set environment variable, then fall back to
+respect an explicitly set environment variable and otherwise load
 `bin/internal/flutter_storage_base_url` when that file exists. The package
 creator writes that file from the Jenkins `ARTIFACT_BASE_URL`, so the extracted
 SDK uses the private mirror without developer setup while still allowing an
 explicit override.
+
+There is no availability fallback from the configured private mirror to
+Flutter's public Google storage. A missing object, HTTP error, or unreachable
+mirror makes the Flutter command fail. The upstream Google URL is only the
+default when `FLUTTER_STORAGE_BASE_URL` is entirely absent, such as after
+removing the packaged configuration or bypassing the SDK launcher. Even then,
+the public mirror normally cannot satisfy this fork's engine ID.
+
+The fork's bootstrap scripts are stricter: they require either the environment
+variable or the packaged mirror file and fail immediately when neither exists.
+
+This does not by itself make CI fully air-gapped. `gclient sync`, source
+checkouts, toolchain downloads, and the Windows packager's current Mingit URL
+may still use upstream internet services. Mirror those inputs separately if an
+offline build environment becomes a requirement.
 
 ## Jenkins pipeline
 
@@ -93,8 +159,10 @@ Use a multibranch pipeline following the framework and engine revisions after
 each upstream rebase. The target matrix is a release policy decision; examples
 include Windows host plus Windows desktop, Android ARM/ARM64/x64, and Web.
 
-The repository `Jenkinsfile` implements this pipeline. Its main selectors are
-comma-separated `TARGETS` (`android,ios,windows,macos,web`), `MODES`
+The current commissioning implementation is `Jenkinsfile.testing`. Configure
+the multibranch job's script path explicitly; this keeps the team's default
+`Jenkinsfile` untouched until the pipeline is ready to be promoted. Its main
+selectors are comma-separated `TARGETS` (`android,ios,windows,macos,web`), `MODES`
 (`debug,profile,release`), and `HOST_SDKS` (`windows,macos`). Web produces one
 SDK artifact and does not vary by runtime mode. SDK assembly deliberately uses
 upstream's unfiltered `flutter precache`, so a Windows SDK requires Android,
@@ -108,6 +176,22 @@ empty `HOST_SDKS`. Windows uses `flutter_win`, macOS and iOS use
 `flutter_macos`, and Android and Web use `flutter_linux`. The Android and Web
 builders are Linux configurations and should remain on that agent rather than
 requiring local patches to make Flutter-owned build scripts run on Windows.
+Android runtime engines are built on Linux. Host SDK packaging additionally
+needs a smaller set of host-specific Android AOT snapshot tools on Windows or
+macOS; it does not rebuild the complete Android engine on those host agents.
+
+Keep that division even though Windows and macOS can both build ordinary
+Flutter Android applications. The Linux agent produces the canonical Android
+runtime engine and Maven artifacts for the target-device ABIs, and also builds
+the upstream Linux-configured Web artifacts. The Windows and macOS agents only
+add the Android AOT tools that must execute on their respective developer host
+OS. Moving the full Android or Web engine build to macOS would require adapting
+and maintaining non-standard builder configurations, would move release output
+away from Flutter's upstream-tested CI path, and would compete with the
+disk-intensive macOS/iOS builds. It is therefore not a simple agent-label
+substitution. Reconsider it only as an explicit infrastructure/product change,
+with a clean-build comparison and SDK acceptance tests for every affected
+artifact.
 
 Engine targets are a real Declarative Pipeline matrix axis. Invalid
 target/agent pairs are excluded, leaving Windows on `flutter_win`, macOS and
@@ -225,9 +309,9 @@ pressure requires it.
 
 Configure Jenkins agents with depot_tools/gclient and the native platform
 toolchains. Publishing can use the small HTTP PUT helper, Jenkins Publish Over
-FTP, or Publish Over SSH (SFTP). If the artifact server uses a provider-specific protocol such as an S3
-API, replace only the publishing step while preserving the staged directory
-layout.
+FTP, or Publish Over SSH (SFTP). If the artifact server uses a provider-specific
+protocol such as an S3 API, replace only the publishing step while preserving
+the staged directory layout.
 
 Each target agent publishes its collected tree directly to the artifact
 server. Jenkins does not route the multi-gigabyte engine payload through
@@ -236,32 +320,75 @@ has built and uploaded successfully.
 
 ### Jenkins setup checklist
 
-1. Create a multibranch Pipeline job pointed at this repository. Jenkins will
-   discover and run the checked-in `Jenkinsfile` for each selected branch.
+1. Create a multibranch Pipeline job pointed at this repository. While the
+   pipeline is being commissioned, set its script path to `Jenkinsfile.testing`.
+   Change to the production `Jenkinsfile` only as an explicit promotion step.
 2. Give the agents labels `flutter_win`, `flutter_macos`, and `flutter_linux`.
    If those labels ever change, update the matrix axis/exclusions and the
    non-matrix agent declarations in `Jenkinsfile.testing` together.
-3. Install `depot_tools` (including `gclient`), Git, Python 3, and the native
-   build toolchain on every agent. Windows additionally needs Visual Studio,
-   the Windows SDK, and Debugging Tools for Windows for every built host
-   architecture; macOS needs Xcode; Linux carries the Android and Web build
-   dependencies. Set `WINDOWS_PYTHON` if `python3` is not the Python command on
-   Windows. Install Jenkins Publish Over FTP when using
-   `UPLOAD_TRANSPORT=ftp`, or Publish Over SSH when using `sftp`.
-4. Ensure that every SDK-packaging agent can authenticate to the fork URL
+3. Install `depot_tools` (including `gclient`), Git, Python 3, Java 21 for the
+   Jenkins agent, and the native build toolchain on every agent. The current
+   Linux commissioning baseline is Ubuntu 26.04 LTS. A regular Linux VM or
+   WSL2 can build the artifacts; for production, choose whichever the
+   operations team can keep running as a persistent service with stable storage
+   and networking. It does not need Android Studio.
+4. Windows additionally needs Visual Studio 2022, the Windows SDK, Debugging
+   Tools for Windows for every built host architecture, and a `7za` executable
+   on `PATH` for upstream SDK packaging. Installing 7-Zip may provide `7z.exe`
+   rather than `7za.exe`; verify the command name actually used by the
+   packager. The inner SDK checkout enables `core.longpaths`, but the Jenkins
+   service account and filesystem must still support long paths.
+5. macOS needs Xcode and enough free space for macOS and iOS outputs. If the
+   Jenkins Git client is launched with
+   `-Dorg.jenkinsci.plugins.gitclient.CliGitAPIImpl.useSETSID=true`, ensure
+   `setsid` is on the agent process's `PATH` and restart the agent after changing
+   its Java options or environment.
+6. Set `WINDOWS_PYTHON` if `python3` is not the Python command on Windows.
+   Install Jenkins Publish Over FTP when using `UPLOAD_TRANSPORT=ftp`, or
+   Publish Over SSH when using `sftp`.
+7. Ensure that every SDK-packaging agent can authenticate to the fork URL
    declared in `dev/bots/prepare_package/common.dart` and fetch the exact commit
    selected by the multibranch job. It currently uses the repository's
-   Bitbucket SSH URL. Enable `SYNC_ENGINE_DEPS` unless the agents maintain a
-   compatible, already-synchronized engine checkout themselves.
-5. Set `ARTIFACT_BASE_URL` to the HTTP(S) download root described below. Select
+   Bitbucket SSH URL. Use a repository access/deploy key or a dedicated
+   read-only service account. Store the private key and, if it is encrypted,
+   its passphrase in Jenkins credentials; never put either in the Jenkinsfile.
+   The clone must complete non-interactively under the agent service account.
+   Note that the upstream package creator performs a second, raw SSH clone into
+   its temporary packaging directory. A Jenkins SCM checkout credential is not
+   automatically guaranteed to cover that subprocess; expose the same
+   credential to the packaging step with an SSH-agent wrapper or otherwise
+   provision non-interactive read access for the service account.
+8. Configure SSH host-key verification. Pinning Bitbucket's published host key
+   in `known_hosts` is preferable for production. Jenkins's "Accept first
+   connection" strategy is a reasonable bootstrap option on a controlled new
+   agent, but it trusts that first network connection. The raw packaging clone
+   must also see a valid `known_hosts` entry. Test SSH as the service account
+   rather than only from an administrator's terminal.
+
+   On a controlled first connection, run this as the agent OS user to populate
+   the normal OpenSSH `known_hosts` file:
+
+   ```sh
+   install -d -m 700 "$HOME/.ssh"
+   ssh -o StrictHostKeyChecking=accept-new -T git@bitbucket.org
+   chmod 600 "$HOME/.ssh/known_hosts"
+   ```
+
+   For stronger production verification, obtain Bitbucket's published host-key
+   fingerprint independently, compare it before accepting the key, and then
+   pin the verified key instead of trusting the first connection.
+9. Enable `SYNC_ENGINE_DEPS` for production and whenever a persistent checkout
+   may be missing or stale. Disable it only for deliberate, short incremental
+   test cycles against an already-synchronized workspace.
+10. Set `ARTIFACT_BASE_URL` to the HTTP(S) download root described below. Select
    `UPLOAD_TRANSPORT=http_put` and configure `UPLOAD_AUTH` plus
    `UPLOAD_CREDENTIALS_ID`, or select `ftp`/`sftp` and set the Jenkins
    `TRANSFER_CONFIG_NAME`.
-6. Give each build agent network access and upload credentials for the selected
+11. Give each build agent network access and upload credentials for the selected
    artifact transport. Set suitable workspace and artifact-server retention
    limits; engine outputs are large even though the publishing payload omits
    symbols.
-7. Run an intentionally small first build (one target and one mode, with
+12. Run an intentionally small first build (one target and one mode, with
    `HOST_SDKS` empty), verify upload and download behavior, then enable the full
    release matrix.
 
@@ -348,9 +475,9 @@ Jenkins --FTP/SFTP--> /srv/flutter-artifacts/
                               +--HTTPS--> https://downloads.example/flutter/
 ```
 
-Prefer SFTP over unencrypted FTP where the available server supports it. The Jenkins publishing plugins
-preserve the staged directory hierarchy. Keep two separate concepts in the
-configuration:
+Prefer SFTP over unencrypted FTP where the available server supports it. The
+Jenkins publishing plugins preserve the staged directory hierarchy. Keep two
+separate concepts in the configuration:
 
 ```text
 TRANSFER_CONFIG_NAME=client-artifact-upload
@@ -365,25 +492,216 @@ upload transport, preserve
 below the HTTP download root. SDK creation must wait until publishing completes,
 because its precache step immediately downloads from `ARTIFACT_BASE_URL`.
 
+### Publishing host SDK archives
+
+The engine mirror and the downloadable SDK ZIPs can share one server and one
+Jenkins upload credential. Keep their URL namespaces separate, for example:
+
+```text
+https://downloads.example/flutter/flutter_infra_release/flutter/<engine-id>/...
+https://downloads.example/flutter/download.flutter.io/...
+https://downloads.example/flutter/wsc-sdk/<release-name>/flutter_windows_<release-name>.zip
+https://downloads.example/flutter/wsc-sdk/<release-name>/flutter_macos_<release-name>.zip
+```
+
+The current `Jenkinsfile.testing` publishes the engine artifact trees but only
+stores completed SDK archives with Jenkins `archiveArtifacts`. It does not yet
+copy the SDK ZIPs into `wsc-sdk/`. Before production, add a small promotion or
+upload step for the ZIPs and their SHA-256 checksums. The upload must occur only
+after packaging and acceptance checks succeed; a failed build must not replace
+the currently advertised release.
+
+Direct download links are sufficient for an initial internal distribution.
+Flutter channel metadata such as `releases_windows.json` and
+`releases_macos.json` is only needed if the client wants upstream-style channel
+discovery or automated `flutter upgrade` behavior.
+
+Retain an engine artifact set for at least as long as any distributed SDK pins
+its engine ID. Deleting an old engine directory can break a still-installed SDK
+the next time a developer clears or repairs their local cache.
+
+## Rebasing onto a new upstream Flutter version
+
+Treat an upstream update as a new release line. Perform it on a temporary
+integration branch, keep the previous published release intact, and record the
+old fork commit, the selected upstream tag/commit, and the resulting fork
+commit. Do not overwrite artifacts belonging to the previous engine ID.
+
+The source update and the binary release are separate checkpoints. First make
+the rebased source tree and its nested dependency patches reproducible; only
+then assign the engine ID and run the clean release build.
+
+### 1. Move the fork changes onto the selected upstream revision
+
+1. Fetch upstream tags and verify the chosen Flutter tag or commit. Prefer an
+   upstream stable tag unless a specific unreleased fix is required.
+2. Create an integration branch at that revision. Replay the WSC commits with
+   the team's normal rebase or cherry-pick workflow; do not experiment on the
+   currently published release branch.
+3. Resolve framework conflicts narrowly. Preserve upstream behavior unless a
+   difference is an intentional WSC requirement. Pay particular attention to
+   the SDK launcher, bootstrap, package-creation, artifact-layout, and version
+   code modified by this fork.
+4. Review the complete resulting diff against the selected upstream revision,
+   including untracked files. A clean conflict resolution is not proof that an
+   old customization is still necessary or correct.
+
+### 2. Refresh the engine dependency patch stack
+
+The Skia and FreeType sources are DEPS-managed nested checkouts. An upstream
+Flutter update may move either dependency even when the WSC patch files have no
+Git conflict in the outer repository.
+
+1. Start from a clean engine dependency checkout and run `gclient sync` for the
+   new source revision. The WSC pre-sync hook resets only patch-owned nested
+   changes; stop and inspect rather than discarding unrelated dirty files.
+2. Record the new nested revisions with `git rev-parse HEAD` in
+   `engine/src/flutter/third_party/skia` and
+   `engine/src/flutter/third_party/freetype2`.
+3. Apply the files under
+   `engine/src/flutter/tools/wsc_font_rendering_patches` in their declared
+   order. If a patch no longer applies, port its intent onto the new dependency
+   source and regenerate that patch from the pristine dependency revision.
+   Do not use fuzz or a blanket conflict acceptance for rendering changes.
+4. Update `EXPECTED_SKIA_REVISION` and `EXPECTED_FREETYPE_REVISION` in
+   `apply_patches.py` only after the revised stack applies and the behavior has
+   been reviewed. Also update `GROUP_MARKERS` when a patch adds, removes, or
+   relocates its identifying code; those markers are how repeated application
+   is detected.
+5. Prove both paths: a clean sync followed by patch application, and a second
+   application that correctly reports the selected patches already applied.
+   Run the relevant rendering/layout tests before treating the source rebase as
+   complete.
+
+The Material Fonts archive is not part of this patch stack. It contains the
+cached Material icon font used by Flutter applications; it is not the FreeType
+library or WSC's font-rendering implementation.
+
+### 3. Audit pinned downloads and build prerequisites
+
+Compare the rebased `bin/internal/*.version` files with the previous release.
+Some contain versions, while others contain complete paths below Flutter's
+storage root. At minimum, verify:
+
+- `material_fonts.version`, which points to the immutable `fonts.zip` extracted
+  into `bin/cache/artifacts/material_fonts`;
+- `gradle_wrapper.version`, which points to the immutable archive containing
+  `gradlew`, `gradlew.bat`, and `gradle-wrapper.jar`; and
+- any newly added path-valued version file used by `flutter precache` or SDK
+  bootstrap.
+
+If a pointer changed, download the exact upstream object, verify its published
+hash or checksum, and place it at the identical relative path in the private
+mirror. A pointer that did not change requires no republishing. Keep old
+objects: an already-distributed SDK can continue to request them. Verify every
+referenced object with HTTP HEAD from each packaging agent before starting the
+SDK build; do not introduce a fallback to public storage.
+
+Also refresh and record the checksum of the unversioned
+`flutter_infra_release/flutter/coverage/lcov.info` snapshot used by
+`flutter update-packages`. Treat that snapshot as an explicit release input;
+do not let it change silently during a production build.
+
+Also compare the new Flutter release's documented toolchain requirements with
+the installed Jenkins agents: Xcode and macOS SDK, Visual Studio and Windows
+SDK, Android SDK/NDK and Java, Ubuntu packages, Python, Git, and depot_tools.
+Environment changes can alter outputs without changing the source revision, so
+record the toolchain versions used for a production release.
+
+### 4. Assign the engine identity
+
+Finish and commit all engine-affecting source, DEPS, patch, and build changes
+before updating `bin/internal/engine.version`. Calculate the expected revision
+using the repository scripts:
+
+```sh
+bin/internal/last_engine_commit.sh
+```
+
+or on Windows:
+
+```powershell
+bin\internal\last_engine_commit.ps1
+```
+
+Write that full commit ID to `bin/internal/engine.version`, commit the update,
+and rerun the command. The pipeline performs the same comparison and rejects a
+mismatch for a clean publishing build. If another engine-affecting change is
+committed afterward, repeat this step and publish under the new ID rather than
+overwriting a release under an inaccurate identity.
+
+### 5. Validate and publish the new release line
+
+1. Run a small incremental, non-publishing smoke build first if useful for
+   compiler feedback.
+2. For the release candidate, use `full_rebuild`, set
+   `SYNC_ENGINE_DEPS=true`, and build the complete target/mode matrix required
+   by the selected host SDKs. Do not promote artifacts left over from the
+   previous source or toolchain environment.
+3. Publish the engine and Maven artifacts into the staging mirror under the new
+   engine ID, then create the Windows and macOS SDK archives from the exact
+   rebased framework commit.
+4. Run the release acceptance tests below from freshly extracted archives,
+   including cache repair through the private mirror and the supported desktop,
+   Android, Web, and iOS builds.
+5. Publish the SDK ZIPs, checksums, release notes, source revision, engine ID,
+   upstream base tag, and recorded toolchain versions. Promote or advertise the
+   release only after both host archives pass.
+
+Rollback means returning developers to the previous SDK archive and retaining
+its corresponding mirror objects. It must not require rebuilding or mutating
+that older artifact tree.
+
+## Release identity and tags
+
+Keep these identities distinct:
+
+- the Git/framework revision, which identifies the exact fork source;
+- `bin/internal/engine.version`, which identifies the exact artifact tree; and
+- the human-facing SDK release name used for ZIPs and release notes.
+
+The upstream package creator derives its version text and filenames from Git
+tags. In its non-publishing mode it can walk backwards to the nearest tag,
+which is convenient for staging but may label a patched descendant with only
+the upstream base version. A production release should not rely on that
+accidentally; record the exact framework SHA and apply an intentional version
+policy before publishing it to developers.
+
+Do not assume a tag such as `3.44.4-wsc.1` is automatically compatible with
+Flutter's version machinery. The current upstream parser accepts Flutter's
+numeric stable tags and its defined pre-release format, but not arbitrary
+vendor suffixes; an unsupported tag can make `flutter --version` report an
+unknown framework version. Either keep the internal Flutter version
+upstream-compatible and use the vendor release name only for external ZIPs and
+release notes, or deliberately extend and test the parser before adopting a
+vendor-suffixed Git tag. This choice remains a release-policy decision, not a
+CI prerequisite for staging builds.
+
 For each release:
 
 1. Verify that `bin/internal/engine.version` identifies the latest
    engine-affecting commit.
-2. Build the engine artifacts for each supported host, target, and build mode.
-3. Publish each target's artifact ZIPs directly to the HTTPS mirror under that
+2. Seed or verify the pinned global artifacts referenced by path-valued files
+   in `bin/internal`, including Material Fonts and the Gradle wrapper.
+3. Build the engine artifacts for each supported host, target, and build mode.
+4. Publish each target's artifact ZIPs directly to the HTTPS mirror under that
    engine ID.
-4. Assemble a clean host SDK staging directory using the framework revision.
-5. Populate its basic cache/tooling and create the host-specific SDK archive.
-6. Publish the SDK archive only after all requested target uploads succeed.
-7. Keep PDBs and other debug symbols as separate Jenkins diagnostic artifacts,
+5. Assemble a clean host SDK staging directory using the framework revision.
+6. Populate its basic cache/tooling and create the host-specific SDK archive.
+7. Publish the SDK archive and checksum only after all requested target uploads
+   and acceptance checks succeed.
+8. Keep PDBs and other debug symbols as separate Jenkins diagnostic artifacts,
    with an appropriate retention policy. They are not normally required for
    Flutter runtime builds.
 
 SDK assembly uses upstream's `dev/bots/prepare_package.dart` flow. This fork's
-only packaging-specific changes are the Bitbucket clone/origin constants and
-writing the selected `ARTIFACT_BASE_URL` into the packaged SDK. The launcher
-reads that file and exports `FLUTTER_STORAGE_BASE_URL`, so the upstream precache
-and Gradle paths all observe the same mirror without separate patches.
+packaging changes remain narrow: use the private Bitbucket origin, preserve
+Windows long-path support during the inner checkout, write the selected
+`ARTIFACT_BASE_URL` into the packaged SDK, and bootstrap `sky_engine` and
+`flutter_gpu` before the Flutter tool first starts. The launcher reads the
+mirror file and exports `FLUTTER_STORAGE_BASE_URL`, so the upstream precache and
+Gradle paths observe the same mirror without target-specific downloader
+patches.
 
 The two Python files have narrow roles:
 
@@ -396,8 +714,13 @@ The two Python files have narrow roles:
 ## Release acceptance test
 
 Test each published archive after extracting it into a fresh directory. Do not
-pass local-engine arguments. Ideally run this with a clean cache, and test both
-the pre-cached and lazy-download paths:
+pass local-engine arguments. Test the pre-cached path, then remove one
+non-bootstrap cache component and confirm that Flutter restores it from the
+private mirror. Monitor the HTTP server or an outbound proxy during this test:
+fork engine downloads must use the configured mirror and must not silently
+switch to Flutter's public storage.
+
+On Windows, exercise the actual supported target set, for example:
 
 ```powershell
 flutter doctor
@@ -405,6 +728,19 @@ flutter create smoke
 Set-Location smoke
 flutter build windows
 flutter build apk
+flutter build web
+```
+
+On macOS, also exercise macOS and an unsigned iOS build:
+
+```sh
+flutter doctor
+flutter create smoke
+cd smoke
+flutter build macos
+flutter build ios --no-codesign
+flutter build apk
+flutter build web
 ```
 
 Confirm downloads resolve only from the internal mirror and that the reported
