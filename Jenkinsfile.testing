@@ -405,13 +405,16 @@ def checkoutSdkSource() {
     checkout([
         $class: 'GitSCM',
         branches: scm.branches,
-        extensions: [[
-            $class: 'CloneOption',
-            depth: 0,
-            noTags: false,
-            shallow: false,
-            timeout: 30,
-        ]],
+        extensions: [
+            [$class: 'WipeWorkspace'],
+            [
+                $class: 'CloneOption',
+                depth: 0,
+                noTags: false,
+                shallow: false,
+                timeout: 30,
+            ],
+        ],
         userRemoteConfigs: scm.userRemoteConfigs,
     ])
 }
