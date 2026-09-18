@@ -395,6 +395,7 @@ def createSdkArchiveUnix(String host) {
             ./bin/cache/dart-sdk/bin/dart dev/bots/prepare_package.dart \
               --revision '${env.FRAMEWORK_REVISION}' \
               --branch '${params.RELEASE_BRANCH}' \
+              --dry_run \
               --output '${outputDirectory}'
         """
     }
@@ -408,7 +409,7 @@ def createSdkArchiveWindows() {
             call bin\\flutter.bat --version || exit /b 1
             bin\\cache\\dart-sdk\\bin\\dart.exe pub get --directory dev\\bots || exit /b 1
             if not exist ${outputDirectory} mkdir ${outputDirectory}
-            bin\\cache\\dart-sdk\\bin\\dart.exe dev\\bots\\prepare_package.dart --revision ${env.FRAMEWORK_REVISION} --branch ${params.RELEASE_BRANCH} --output ${outputDirectory} || exit /b 1
+            bin\\cache\\dart-sdk\\bin\\dart.exe dev\\bots\\prepare_package.dart --revision ${env.FRAMEWORK_REVISION} --branch ${params.RELEASE_BRANCH} --dry_run --output ${outputDirectory} || exit /b 1
         """
     }
     archiveArtifacts artifacts: 'build/sdk-output/windows/*', fingerprint: true

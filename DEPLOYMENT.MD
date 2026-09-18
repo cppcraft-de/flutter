@@ -174,24 +174,37 @@ value for intentionally partial engine-only builds.
 pipeline is being commissioned: `TARGETS=windows,macos`, `MODES=debug`, and an
 empty `HOST_SDKS`. Windows uses `flutter_win`, macOS and iOS use
 `flutter_macos`, and Android and Web use `flutter_linux`. The Android and Web
-builders are Linux configurations and should remain on that agent rather than
-requiring local patches to make Flutter-owned build scripts run on Windows.
-Android runtime engines are built on Linux. Host SDK packaging additionally
-needs a smaller set of host-specific Android AOT snapshot tools on Windows or
-macOS; it does not rebuild the complete Android engine on those host agents.
+builders are upstream Linux release configurations. In the current pipeline,
+the Linux agent produces the complete Android target runtime, JAR, Maven, and
+Web artifact sets. Host SDK packaging additionally builds the smaller
+host-specific Android AOT snapshot tools on Windows or macOS; it does not
+rebuild the complete Android engine on those host agents.
 
-Keep that division even though Windows and macOS can both build ordinary
-Flutter Android applications. The Linux agent produces the canonical Android
-runtime engine and Maven artifacts for the target-device ABIs, and also builds
-the upstream Linux-configured Web artifacts. The Windows and macOS agents only
-add the Android AOT tools that must execute on their respective developer host
-OS. Moving the full Android or Web engine build to macOS would require adapting
-and maintaining non-standard builder configurations, would move release output
-away from Flutter's upstream-tested CI path, and would compete with the
-disk-intensive macOS/iOS builds. It is therefore not a simple agent-label
-substitution. Reconsider it only as an explicit infrastructure/product change,
-with a clean-build comparison and SDK acceptance tests for every affected
-artifact.
+This is a current CI/release-layout choice, not a claim that Android or Web can
+only be cross-compiled from Linux. Their target artifacts are consumed by
+developers on every host. Upstream declares the complete release archives in
+`linux_android_debug_engine.json`, `linux_android_aot_engine.json`, and
+`linux_web_engine_build.json`, while the Windows and macOS Android builders
+declare only their host-specific AOT tools. Using those manifests lets the
+collector publish the exact upstream archive layout without maintaining a
+second list.
+
+Eliminating the Linux agent is possible in principle. macOS is the more
+plausible replacement, but it would require expanding its builders to produce
+the complete Android runtime/JAR/Maven archives, adding or adapting an archive
+manifest, validating Web/emsdk output, and comparing clean-build artifacts and
+SDK behavior with the upstream Linux path. Windows has the larger compatibility
+gap because upstream specializes its Android configuration for host
+`gen_snapshot`, and complete release builds encounter Unix-oriented actions.
+This is therefore a deliberate CI customization, not a label substitution.
+It would also move substantial work and disk usage onto the macOS agent that
+already builds macOS and iOS.
+
+The Linux Android AOT manifests also publish Linux-host `gen_snapshot` and
+analyze-snapshot archives. Those host tools are unnecessary while no Linux SDK
+is supported and may be filtered as a small publishing optimization. The
+Android target runtime/Maven artifacts and Web SDK archive remain required for
+the Windows and macOS SDKs.
 
 Engine targets are a real Declarative Pipeline matrix axis. Invalid
 target/agent pairs are excluded, leaving Windows on `flutter_win`, macOS and
@@ -702,6 +715,12 @@ Windows long-path support during the inner checkout, write the selected
 mirror file and exports `FLUTTER_STORAGE_BASE_URL`, so the upstream precache and
 Gradle paths observe the same mirror without target-specific downloader
 patches.
+
+The Jenkins archive-only invocation passes upstream's `--dry_run` flag while
+leaving `--publish` disabled. This still creates the complete local SDK archive
+but prevents the package publisher from trying to read or update Flutter's
+public Google Storage release metadata. SDK ZIP publication and private release
+metadata are separate promotion steps described above.
 
 The two Python files have narrow roles:
 
