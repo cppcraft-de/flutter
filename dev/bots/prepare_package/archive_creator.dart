@@ -250,7 +250,13 @@ class ArchiveCreator {
     // We want the user to start out the in the specified branch instead of a
     // detached head. To do that, we need to make sure the branch points at the
     // desired revision.
-    await _runGit(<String>['clone', '-b', branch.name, gobMirror], workingDirectory: tempDir);
+    await _runGit(<String>[
+      'clone',
+      '-b',
+      branch.name,
+      gobMirror,
+      'flutter',
+    ], workingDirectory: tempDir);
     await _runGit(<String>['reset', '--hard', revision]);
 
     // Keep the packaged SDK's origin pointed at this fork.

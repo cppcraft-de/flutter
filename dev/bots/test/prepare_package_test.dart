@@ -150,7 +150,7 @@ void main() {
 
         processManager.addCommands(
           convertResults(<String, List<ProcessResult>?>{
-            'git clone -b beta git@bitbucket.org:schoolcraftteam/flutter_wsc.git': null,
+            'git clone -b beta git@bitbucket.org:schoolcraftteam/flutter_wsc.git flutter': null,
             'git reset --hard $testRef': null,
             'git remote set-url origin git@bitbucket.org:schoolcraftteam/flutter_wsc.git': null,
             'git gc --prune=now --aggressive': null,
@@ -203,7 +203,7 @@ void main() {
           'flutter_${platformName}_v1.2.3-beta${platform.isLinux ? '.tar.xz' : '.zip'}',
         );
         final calls = <String, List<ProcessResult>?>{
-          'git clone -b beta git@bitbucket.org:schoolcraftteam/flutter_wsc.git': null,
+          'git clone -b beta git@bitbucket.org:schoolcraftteam/flutter_wsc.git flutter': null,
           'git reset --hard $testRef': null,
           'git remote set-url origin git@bitbucket.org:schoolcraftteam/flutter_wsc.git': null,
           'git gc --prune=now --aggressive': null,
@@ -267,7 +267,7 @@ void main() {
           'flutter_${platformName}_arm64_v1.2.3-beta${platform.isLinux ? '.tar.xz' : '.zip'}',
         );
         final calls = <String, List<ProcessResult>?>{
-          'git clone -b beta git@bitbucket.org:schoolcraftteam/flutter_wsc.git': null,
+          'git clone -b beta git@bitbucket.org:schoolcraftteam/flutter_wsc.git flutter': null,
           'git reset --hard $testRef': null,
           'git remote set-url origin git@bitbucket.org:schoolcraftteam/flutter_wsc.git': null,
           'git gc --prune=now --aggressive': null,
@@ -326,9 +326,8 @@ void main() {
 
       test('throws when a command errors out', () async {
         final calls = <String, List<ProcessResult>>{
-          'git clone -b beta git@bitbucket.org:schoolcraftteam/flutter_wsc.git': <ProcessResult>[
-            ProcessResult(0, 0, 'output1', ''),
-          ],
+          'git clone -b beta git@bitbucket.org:schoolcraftteam/flutter_wsc.git flutter':
+              <ProcessResult>[ProcessResult(0, 0, 'output1', '')],
           'git reset --hard $testRef': <ProcessResult>[ProcessResult(0, -1, 'output2', '')],
         };
         processManager.addCommands(convertResults(calls));
@@ -346,7 +345,7 @@ void main() {
         );
         processManager.addCommands(
           convertResults(<String, List<ProcessResult>?>{
-            'git clone -b beta git@bitbucket.org:schoolcraftteam/flutter_wsc.git': null,
+            'git clone -b beta git@bitbucket.org:schoolcraftteam/flutter_wsc.git flutter': null,
             'git reset --hard $testRef': null,
             'git remote set-url origin git@bitbucket.org:schoolcraftteam/flutter_wsc.git': null,
             'git gc --prune=now --aggressive': null,
@@ -394,7 +393,7 @@ void main() {
           'flutter_${platformName}_v1.2.3-beta${platform.isLinux ? '.tar.xz' : '.zip'}',
         );
         final calls = <String, List<ProcessResult>?>{
-          'git clone -b beta git@bitbucket.org:schoolcraftteam/flutter_wsc.git': null,
+          'git clone -b beta git@bitbucket.org:schoolcraftteam/flutter_wsc.git flutter': null,
           'git reset --hard $testRef': null,
           'git remote set-url origin git@bitbucket.org:schoolcraftteam/flutter_wsc.git': null,
           'git gc --prune=now --aggressive': null,
@@ -466,7 +465,7 @@ void main() {
           'dart',
         );
         final calls = <String, List<ProcessResult>?>{
-          'git clone -b beta git@bitbucket.org:schoolcraftteam/flutter_wsc.git': null,
+          'git clone -b beta git@bitbucket.org:schoolcraftteam/flutter_wsc.git flutter': null,
           'git reset --hard $testRef': null,
           'git remote set-url origin git@bitbucket.org:schoolcraftteam/flutter_wsc.git': null,
           'git gc --prune=now --aggressive': null,
