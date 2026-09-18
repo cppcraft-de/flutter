@@ -54,8 +54,11 @@ void main() {
       },
     );
     final gitCloneCommand = platform.isWindows
-        ? 'git -c core.longpaths=true clone -b beta git@bitbucket.org:schoolcraftteam/flutter_wsc.git flutter'
+        ? 'git clone --no-checkout -b beta git@bitbucket.org:schoolcraftteam/flutter_wsc.git flutter'
         : 'git clone -b beta git@bitbucket.org:schoolcraftteam/flutter_wsc.git flutter';
+    final gitConfigureLongPathsCommand = platform.isWindows
+        ? <String, List<ProcessResult>?>{'git config core.longpaths true': null}
+        : <String, List<ProcessResult>?>{};
     group('ProcessRunner for $platform', () {
       test('Returns stdout', () async {
         final fakeProcessManager = FakeProcessManager.list(<FakeCommand>[
@@ -154,6 +157,7 @@ void main() {
         processManager.addCommands(
           convertResults(<String, List<ProcessResult>?>{
             gitCloneCommand: null,
+            ...gitConfigureLongPathsCommand,
             'git reset --hard $testRef': null,
             'git remote set-url origin git@bitbucket.org:schoolcraftteam/flutter_wsc.git': null,
             'git gc --prune=now --aggressive': null,
@@ -207,6 +211,7 @@ void main() {
         );
         final calls = <String, List<ProcessResult>?>{
           gitCloneCommand: null,
+          ...gitConfigureLongPathsCommand,
           'git reset --hard $testRef': null,
           'git remote set-url origin git@bitbucket.org:schoolcraftteam/flutter_wsc.git': null,
           'git gc --prune=now --aggressive': null,
@@ -271,6 +276,7 @@ void main() {
         );
         final calls = <String, List<ProcessResult>?>{
           gitCloneCommand: null,
+          ...gitConfigureLongPathsCommand,
           'git reset --hard $testRef': null,
           'git remote set-url origin git@bitbucket.org:schoolcraftteam/flutter_wsc.git': null,
           'git gc --prune=now --aggressive': null,
@@ -330,6 +336,8 @@ void main() {
       test('throws when a command errors out', () async {
         final calls = <String, List<ProcessResult>>{
           gitCloneCommand: <ProcessResult>[ProcessResult(0, 0, 'output1', '')],
+          if (platform.isWindows)
+            'git config core.longpaths true': <ProcessResult>[ProcessResult(0, 0, 'output1', '')],
           'git reset --hard $testRef': <ProcessResult>[ProcessResult(0, -1, 'output2', '')],
         };
         processManager.addCommands(convertResults(calls));
@@ -348,6 +356,7 @@ void main() {
         processManager.addCommands(
           convertResults(<String, List<ProcessResult>?>{
             gitCloneCommand: null,
+            ...gitConfigureLongPathsCommand,
             'git reset --hard $testRef': null,
             'git remote set-url origin git@bitbucket.org:schoolcraftteam/flutter_wsc.git': null,
             'git gc --prune=now --aggressive': null,
@@ -396,6 +405,7 @@ void main() {
         );
         final calls = <String, List<ProcessResult>?>{
           gitCloneCommand: null,
+          ...gitConfigureLongPathsCommand,
           'git reset --hard $testRef': null,
           'git remote set-url origin git@bitbucket.org:schoolcraftteam/flutter_wsc.git': null,
           'git gc --prune=now --aggressive': null,
@@ -468,6 +478,7 @@ void main() {
         );
         final calls = <String, List<ProcessResult>?>{
           gitCloneCommand: null,
+          ...gitConfigureLongPathsCommand,
           'git reset --hard $testRef': null,
           'git remote set-url origin git@bitbucket.org:schoolcraftteam/flutter_wsc.git': null,
           'git gc --prune=now --aggressive': null,
