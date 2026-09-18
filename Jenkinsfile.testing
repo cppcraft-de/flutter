@@ -261,7 +261,9 @@ def buildWindowsTarget() {
 }
 
 def buildMacosTarget() {
+    def targets = csvValues(params.TARGETS)
     def modes = csvValues(params.MODES)
+    def hosts = csvValues(params.HOST_SDKS)
     def builds = ['ci/host_debug', 'ci/mac_debug_arm64']
     if (modes.contains('debug')) {
         builds.addAll(['ci/host_debug_framework', 'ci/host_debug_gen_snapshot', 'ci/mac_debug_framework_arm64', 'ci/mac_debug_gen_snapshot_arm64'])
@@ -276,6 +278,20 @@ def buildMacosTarget() {
     runMacGenerators(modes, true, false)
     if (shouldCollectEnginePayload()) {
         collectArtifactsUnix('mac_host_engine', builds, true)
+    }
+
+    // Android AOT snapshots are host-specific. A macOS SDK needs these in
+    // addition to the Android engine artifacts built on flutter_linux.
+    def androidBuilds = []
+    if (targets.contains('android') && hosts.contains('macos') && modes.contains('profile')) {
+        androidBuilds.addAll(['ci/android_profile', 'ci/android_profile_arm64', 'ci/android_profile_x64'])
+    }
+    if (targets.contains('android') && hosts.contains('macos') && modes.contains('release')) {
+        androidBuilds.addAll(['ci/android_release', 'ci/android_release_arm64', 'ci/android_release_x64'])
+    }
+    androidBuilds.each { runEngineBuildUnix('mac_android_aot_engine', it) }
+    if (shouldCollectEnginePayload() && !androidBuilds.isEmpty()) {
+        collectArtifactsUnix('mac_android_aot_engine', androidBuilds)
     }
 }
 

@@ -251,6 +251,7 @@ class ArchiveCreator {
     // detached head. To do that, we need to make sure the branch points at the
     // desired revision.
     await _runGit(<String>[
+      if (platform.isWindows) ...<String>['-c', 'core.longpaths=true'],
       'clone',
       '-b',
       branch.name,
