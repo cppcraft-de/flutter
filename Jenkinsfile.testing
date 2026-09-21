@@ -748,7 +748,13 @@ pipeline {
                             withEnv(['SSH_ASKPASS_REQUIRE=force']) {
                                 checkoutSdkSource()
                             }
-                            createSdkArchiveUnix('macos')
+                            def checkoutCredentialsId = scm.userRemoteConfigs[0].credentialsId
+                            if (!checkoutCredentialsId) {
+                                error('The macOS SDK packager requires an SSH credential for its nested source clone.')
+                            }
+                            sshagent(credentials: [checkoutCredentialsId]) {
+                                createSdkArchiveUnix('macos')
+                            }
                         }
                     }
                 }
