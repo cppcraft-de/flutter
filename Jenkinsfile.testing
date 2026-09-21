@@ -431,18 +431,34 @@ def buildWebTarget() {
 
 def createSdkArchiveUnix(String host) {
     def outputDirectory = "build/sdk-output/${host}"
-    withEnv(["FLUTTER_STORAGE_BASE_URL=${params.ARTIFACT_BASE_URL}"]) {
-        sh """
+    withEnv([
+        "FLUTTER_STORAGE_BASE_URL=${params.ARTIFACT_BASE_URL}",
+        "SDK_OUTPUT_DIRECTORY=${outputDirectory}",
+        "SDK_FRAMEWORK_REVISION=${env.FRAMEWORK_REVISION}",
+        "SDK_RELEASE_BRANCH=${params.RELEASE_BRANCH}",
+    ]) {
+        sh '''
             set -eu
             ./bin/flutter --version
             ./bin/cache/dart-sdk/bin/dart pub get --directory dev/bots
-            mkdir -p '${outputDirectory}'
-            ./bin/cache/dart-sdk/bin/dart dev/bots/prepare_package.dart \
-              --revision '${env.FRAMEWORK_REVISION}' \
-              --branch '${params.RELEASE_BRANCH}' \
+            mkdir -p "$SDK_OUTPUT_DIRECTORY"
+
+            command -v setsid >/dev/null
+            askpass_file="$(mktemp "${TMPDIR:-/tmp}/jenkins-ssh-askpass.XXXXXX")"
+            trap 'rm -f "$askpass_file"' EXIT
+            printf '%s\n' '#!/bin/sh' 'printf "%s\n" "$WSC_GIT_SSH_PASSPHRASE"' > "$askpass_file"
+            chmod 700 "$askpass_file"
+            export SSH_ASKPASS="$askpass_file"
+            export SSH_ASKPASS_REQUIRE=force
+            export DISPLAY=:0
+            export GIT_SSH_COMMAND="ssh -i \"$WSC_GIT_SSH_KEY\" -o IdentitiesOnly=yes"
+
+            setsid -w ./bin/cache/dart-sdk/bin/dart dev/bots/prepare_package.dart \
+              --revision "$SDK_FRAMEWORK_REVISION" \
+              --branch "$SDK_RELEASE_BRANCH" \
               --dry_run \
-              --output '${outputDirectory}'
-        """
+              --output "$SDK_OUTPUT_DIRECTORY"
+        '''
     }
     archiveArtifacts artifacts: "${outputDirectory}/*", fingerprint: true
 }
@@ -752,7 +768,12 @@ pipeline {
                             if (!checkoutCredentialsId) {
                                 error('The macOS SDK packager requires an SSH credential for its nested source clone.')
                             }
-                            sshagent(credentials: [checkoutCredentialsId]) {
+                            withCredentials([sshUserPrivateKey(
+                                credentialsId: checkoutCredentialsId,
+                                keyFileVariable: 'WSC_GIT_SSH_KEY',
+                                passphraseVariable: 'WSC_GIT_SSH_PASSPHRASE',
+                                usernameVariable: 'WSC_GIT_SSH_USER',
+                            )]) {
                                 createSdkArchiveUnix('macos')
                             }
                         }
