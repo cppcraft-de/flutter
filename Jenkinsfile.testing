@@ -21,7 +21,28 @@ def validateCsvParameter(String name, String value, Set<String> allowed) {
 
 def bootstrapEngineDependenciesUnix(boolean includeWeb) {
     if (!params.SYNC_ENGINE_DEPS) {
-        return
+        def dependenciesPresent = sh(
+            returnStatus: true,
+            script: '''
+                set -eu
+                case "$(uname -s)" in
+                  Linux) host_os=linux ;;
+                  Darwin) host_os=macos ;;
+                  *) exit 1 ;;
+                esac
+                case "$(uname -m)" in
+                  x86_64) host_cpu=x64 ;;
+                  arm64|aarch64) host_cpu=arm64 ;;
+                  *) exit 1 ;;
+                esac
+                test -f .gclient
+                test -x "engine/src/flutter/prebuilts/${host_os}-${host_cpu}/dart-sdk/bin/dart"
+            ''',
+        ) == 0
+        if (dependenciesPresent) {
+            return
+        }
+        echo 'Engine dependencies are missing; bootstrapping this persistent workspace despite SYNC_ENGINE_DEPS=false.'
     }
     def gclientConfig = readFile('engine/scripts/standard.gclient')
     if (includeWeb) {
@@ -44,7 +65,20 @@ def bootstrapEngineDependenciesUnix(boolean includeWeb) {
 
 def bootstrapEngineDependenciesWindows() {
     if (!params.SYNC_ENGINE_DEPS) {
-        return
+        def dependenciesPresent = powershell(
+            returnStatus: true,
+            script: '''
+                if ((Test-Path -LiteralPath '.gclient') -and
+                    (Test-Path -LiteralPath 'engine/src/flutter/prebuilts/windows-x64/dart-sdk/bin/dart.exe')) {
+                  exit 0
+                }
+                exit 1
+            ''',
+        ) == 0
+        if (dependenciesPresent) {
+            return
+        }
+        echo 'Engine dependencies are missing; bootstrapping this persistent workspace despite SYNC_ENGINE_DEPS=false.'
     }
     // Apply long-path support to every Git process spawned by gclient. A local
     // setting on the framework checkout does not propagate into its child
@@ -471,7 +505,7 @@ pipeline {
         string(name: 'UPLOAD_CREDENTIALS_ID', defaultValue: '', description: 'HTTP PUT username/password or secret-text Jenkins credential ID.')
         string(name: 'TRANSFER_CONFIG_NAME', defaultValue: '', description: 'Jenkins Publish Over FTP or Publish Over SSH server configuration name.')
         string(name: 'TRANSFER_REMOTE_DIRECTORY', defaultValue: '', description: 'Remote directory below the configured FTP/SFTP server root. Empty publishes at its root.')
-        booleanParam(name: 'SYNC_ENGINE_DEPS', defaultValue: true, description: 'Run gclient sync on every build agent. Disable only for pre-provisioned persistent workspaces.')
+        booleanParam(name: 'SYNC_ENGINE_DEPS', defaultValue: true, description: 'Run gclient sync on every build agent. When disabled, reuse complete persistent workspaces and bootstrap only those with missing dependencies.')
         string(name: 'WINDOWS_PYTHON', defaultValue: 'python', description: 'Python 3 command on Windows agents.')
     }
 
