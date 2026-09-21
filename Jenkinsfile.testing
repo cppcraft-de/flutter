@@ -331,10 +331,21 @@ def buildMacosTarget() {
 
 def buildIosTarget() {
     def modes = csvValues(params.MODES)
-    def builds = ['ci/ios_debug_sim', 'ci/ios_debug_sim_arm64']
-    if (modes.contains('debug')) { builds << 'ci/ios_debug' }
-    if (modes.contains('profile')) { builds << 'ci/ios_profile' }
-    if (modes.contains('release')) { builds << 'ci/ios_release' }
+    def builds = [
+        'ci/ios_debug_sim',
+        'ci/ios_debug_sim_arm64',
+        'ci/ios_debug_sim_extension_safe',
+        'ci/ios_debug_sim_arm64_extension_safe',
+    ]
+    if (modes.contains('debug')) {
+        builds.addAll(['ci/ios_debug', 'ci/ios_debug_extension_safe'])
+    }
+    if (modes.contains('profile')) {
+        builds.addAll(['ci/ios_profile', 'ci/ios_profile_extension_safe'])
+    }
+    if (modes.contains('release')) {
+        builds.addAll(['ci/ios_release', 'ci/ios_release_extension_safe'])
+    }
     builds.each { runEngineBuildUnix('mac_ios_engine', it) }
     runMacGenerators(modes, false, true)
     if (shouldCollectEnginePayload()) {
