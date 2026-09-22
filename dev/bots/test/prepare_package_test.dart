@@ -151,7 +151,7 @@ void main() {
         final String createBase = path.join(tempDir.absolute.path, 'create_');
         final String archiveName = path.join(
           tempDir.absolute.path,
-          'flutter_${platformName}_v1.2.3-beta${platform.isLinux ? '.tar.xz' : '.zip'}',
+          'flutter_${platformName}_wsc-1.2.3-r1-beta${platform.isLinux ? '.tar.xz' : '.zip'}',
         );
 
         processManager.addCommands(
@@ -165,8 +165,8 @@ void main() {
               ProcessResult(0, 0, 'v1.2.3', ''),
             ],
             '$flutter --version --machine': <ProcessResult>[
-              ProcessResult(0, 0, '{"dartSdkVersion": "3.2.1"}', ''),
-              ProcessResult(0, 0, '{"dartSdkVersion": "3.2.1"}', ''),
+              ProcessResult(0, 0, '{"dartSdkVersion": "3.2.1", "wscVersion": "wsc-1.2.3-r1"}', ''),
+              ProcessResult(0, 0, '{"dartSdkVersion": "3.2.1", "wscVersion": "wsc-1.2.3-r1"}', ''),
             ],
             '$dart --version': <ProcessResult>[
               ProcessResult(

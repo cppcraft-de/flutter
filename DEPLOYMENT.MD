@@ -74,6 +74,7 @@ https://flutter-artifacts.example.internal/
     android-arm64-release/windows-x64.zip
   flutter_infra_release/flutter/fonts/<font-version>/fonts.zip
   flutter_infra_release/gradle-wrapper/<wrapper-version>/gradle-wrapper.tgz
+  flutter_infra_release/ios-usb-dependencies/arm64_x86_64/...
   flutter_infra_release/flutter/coverage/lcov.info
   download.flutter.io/io/flutter/...
   wsc-sdk/<release-name>/
@@ -118,6 +119,21 @@ objects into the mirror before SDK packaging. Preserve their complete relative
 paths, verify their upstream hashes, and repeat this check after every upstream
 rebase because the pins can change. Do not solve a missing global object by
 adding an automatic fallback to public storage.
+
+macOS SDK packaging also precaches Flutter's pinned iOS device-support tools:
+`libimobiledevice`, `libusbmuxd`, `libplist`, `openssl`,
+`libimobiledeviceglue`, and `ios-deploy`. Their revisions are recorded in the
+corresponding `bin/internal/*.version` files. Mirror each upstream ZIP without
+changing its relative path:
+
+```text
+flutter_infra_release/ios-usb-dependencies/arm64_x86_64/
+  <artifact>/<version>/<artifact>.zip
+```
+
+Snapshot and checksum this complete set for every upstream rebase. These are
+upstream-owned, version-pinned packaging inputs; the engine target builds do
+not generate or publish them.
 
 Upstream's SDK packager also runs `flutter update-packages`, which downloads
 `flutter_infra_release/flutter/coverage/lcov.info`. Unlike the two version-file
@@ -335,7 +351,12 @@ has built and uploaded successfully.
 
 1. Create a multibranch Pipeline job pointed at this repository. While the
    pipeline is being commissioned, set its script path to `Jenkinsfile.testing`.
-   Change to the production `Jenkinsfile` only as an explicit promotion step.
+   Do not add a repository-root `Jenkinsfile` yet: that could be discovered by
+   the client's existing Jenkins setup before commissioning is complete. When
+   the pipeline has been accepted for production, promote the tested
+   `Jenkinsfile.testing` implementation to `Jenkinsfile` in a controlled
+   change. Do not maintain separate staging and production copies of the
+   pipeline logic.
 2. Give the agents labels `flutter_win`, `flutter_macos`, and `flutter_linux`.
    If those labels ever change, update the matrix axis/exclusions and the
    non-matrix agent declarations in `Jenkinsfile.testing` together.
@@ -645,21 +666,30 @@ overwriting a release under an inaccurate identity.
 
 ### 5. Validate and publish the new release line
 
-1. Run a small incremental, non-publishing smoke build first if useful for
-   compiler feedback.
-2. For the release candidate, use `full_rebuild`, set
-   `SYNC_ENGINE_DEPS=true`, and build the complete target/mode matrix required
-   by the selected host SDKs. Do not promote artifacts left over from the
-   previous source or toolchain environment.
-3. Publish the engine and Maven artifacts into the staging mirror under the new
-   engine ID, then create the Windows and macOS SDK archives from the exact
-   rebased framework commit.
-4. Run the release acceptance tests below from freshly extracted archives,
-   including cache repair through the private mirror and the supported desktop,
-   Android, Web, and iOS builds.
-5. Publish the SDK ZIPs, checksums, release notes, source revision, engine ID,
-   upstream base tag, and recorded toolchain versions. Promote or advertise the
-   release only after both host archives pass.
+1. Use the staging job to build and test the intended source revision. It may
+   use persistent incremental workspaces while the release is being prepared,
+   but it must build the complete target/mode matrix required by the selected
+   host SDKs before its candidate archives are accepted.
+2. Publish the candidate engine and Maven artifacts into the staging mirror,
+   then create the Windows and macOS SDK archives from that exact framework
+   revision. Candidate archives carry an automatically derived WSC pre-release
+   identity, so they cannot be mistaken for a final release.
+3. Run the release acceptance tests below from freshly extracted candidate
+   archives, including cache repair through the private mirror and the
+   supported desktop, Android, Web, and iOS builds.
+4. Only after the candidate passes, attach the immutable WSC release tag to the
+   exact accepted source revision. For example, use `wsc-3.44.4-r1` for the
+   first WSC release based on upstream `3.44.4`.
+5. Once production automation has been commissioned, start the independent
+   production release job with that tag as its only release-specific input.
+   The job uses the same finalized pipeline implementation as staging, but
+   must use fixed production settings,
+   `full_rebuild`, `SYNC_ENGINE_DEPS=true`, the complete matrix, and the
+   production mirror. It rebuilds rather than consuming staging workspaces,
+   stashes, build numbers, or parameter manifests.
+6. Publish the production SDK ZIPs, checksums, release notes, source revision,
+   engine ID, upstream base tag, and recorded toolchain versions. Advertise the
+   release only after both clean host archives pass.
 
 Rollback means returning developers to the previous SDK archive and retaining
 its corresponding mirror objects. It must not require rebuilding or mutating
@@ -671,24 +701,159 @@ Keep these identities distinct:
 
 - the Git/framework revision, which identifies the exact fork source;
 - `bin/internal/engine.version`, which identifies the exact artifact tree; and
+- the upstream Flutter version on which the fork release is based; and
 - the human-facing SDK release name used for ZIPs and release notes.
 
-The upstream package creator derives its version text and filenames from Git
-tags. In its non-publishing mode it can walk backwards to the nearest tag,
-which is convenient for staging but may label a patched descendant with only
-the upstream base version. A production release should not rely on that
-accidentally; record the exact framework SHA and apply an intentional version
-policy before publishing it to developers.
+### Where upstream gets version and channel identity
 
-Do not assume a tag such as `3.44.4-wsc.1` is automatically compatible with
-Flutter's version machinery. The current upstream parser accepts Flutter's
-numeric stable tags and its defined pre-release format, but not arbitrary
-vendor suffixes; an unsupported tag can make `flutter --version` report an
-unknown framework version. Either keep the internal Flutter version
-upstream-compatible and use the vendor release name only for external ZIPs and
-release notes, or deliberately extend and test the parser before adopting a
-vendor-suffixed Git tag. This choice remains a release-policy decision, not a
-CI prerequisite for staging builds.
+Flutter normally calculates `frameworkVersion` from Git tags. It first looks
+for a recognized numeric stable tag such as `3.44.4`, or a recognized
+pre-release tag, directly on the checked-out revision. If none is attached, it
+uses the numeric tags available in that clone and a commit count to synthesize
+a development version. Consequently, the synthesized result can change when
+the clone gains newer upstream tags even though the checked-out WSC revision
+has not changed.
+
+The channel is calculated separately from the current local Git branch name.
+Known branch names such as `main`, `beta`, and `stable` become the corresponding
+channel; an arbitrary branch becomes `[user-branch]`. Once calculated, these
+values are written to the generated `bin/cache/flutter.version.json`, which
+normal subsequent tool invocations read before consulting Git again. That file
+is disposable cache state, not release source metadata.
+
+The SDK package creator has another tag lookup for the archive name. In strict
+publish mode it requires a tag attached to the exact revision. In the current
+non-strict archive-only mode it may walk backwards to the nearest tag. The
+package creator also clones the value supplied through `--branch` and then
+resets that still-attached branch to `--revision`. Therefore `--revision`
+selects the exact source content, while `--branch` determines the branch and
+channel identity stored in the SDK and appended to the upstream-style archive
+name.
+
+Upstream release packaging therefore assumes that the numeric release tag
+already points to the exact revision being published. WSC must not move the
+upstream `3.44.4` tag from its original upstream commit to the patched commit.
+The patched commit instead receives an immutable WSC tag such as
+`wsc-3.44.4-r1`. Flutter's existing numeric version parser intentionally does
+not treat that WSC tag as an upstream framework version.
+
+### Source-ref strategy: patched mirror of upstream release refs
+
+A simple long-term source model is to treat the WSC repository as a transformed
+mirror of Flutter's public release surface: each supported upstream ref has an
+equivalent WSC ref containing the same upstream state plus the current WSC
+patch train.
+
+```text
+Flutter upstream                    WSC repository
+main/master  -- apply patches -->   main
+beta         -- apply patches -->   beta
+stable       -- apply patches -->   stable
+
+tag 3.44.4   -- apply patches -->   tag wsc-3.44.4-r1
+tag 3.47.5   -- apply patches -->   tag wsc-3.47.5-r1
+```
+
+In this model, `main` is the canonical editable integration line. The WSC
+`beta` and `stable` refs are protected outputs produced by replaying the patch
+train on the corresponding moving upstream refs; nobody develops directly on
+them. When upstream moves a channel, automation prepares the new patched tip,
+runs the required tests, and moves the WSC channel ref only if the replay and
+tests succeed. A conflict or failure leaves the last known-good WSC channel in
+place and requires a narrow patch adaptation.
+
+Published WSC tags remain immutable. `wsc-3.44.4-r1` means the first WSC
+release based on upstream `3.44.4`; a WSC-only correction on the same upstream
+base becomes `wsc-3.44.4-r2`. Do not reuse the bare `3.44.4` tag for patched
+source: identically named upstream and fork tags cannot coexist cleanly in one
+checkout, and a second WSC revision would otherwise require moving an existing
+release tag.
+
+Keep Flutter's standard version semantics separate from the WSC release
+identity. A package based on upstream `3.44.4` continues to expose
+`frameworkVersion=3.44.4` and `channel=stable` to code that expects Flutter's
+version grammar, while its additive WSC identity remains unambiguous:
+
+```text
+source tag:       wsc-3.44.4-r1
+frameworkVersion: 3.44.4
+wscVersion:       wsc-3.44.4-r1
+channel:          stable
+archive:          flutter_windows_wsc-3.44.4-r1-stable.zip
+```
+
+The WSC tag is the sole source of final WSC release identity. Do not add a
+second tracked version file whose values must be kept in sync with the tag.
+This fork narrowly extends Flutter's existing Git-tag parser:
+
+- an exact `wsc-<upstream-version>-r<number>` tag supplies `wscVersion` and
+  preserves the embedded upstream version as `frameworkVersion`;
+- an untagged descendant of upstream `3.44.4` automatically receives an
+  identity such as `wsc-3.44.4-r1-pre.45-g097c6f756e`;
+- after `wsc-3.44.4-r1`, an untagged descendant automatically targets the next
+  revision, for example `wsc-3.44.4-r2-pre.5-gabcdef1234`; and
+- upstream pre-release bases are supported as well, for example
+  `wsc-3.46.0-0.3.pre-r1`.
+
+The pre-release identity uses the nearest reachable recognized upstream or WSC
+release tag, not the newest tag that happens to exist in the clone. Fetching a
+newer unrelated upstream tag therefore cannot rename an unchanged staging
+revision. The commit count and abbreviated hash make different staging source
+states visibly distinct.
+
+The generated `bin/cache/flutter.version.json` stores the resolved
+`wscVersion` next to Flutter's existing fields so packaged SDKs do not need Git
+to rediscover it. This remains disposable generated cache, not a source of
+truth. `flutter --version` adds a separate `WSC SDK` line,
+`flutter --version --machine` exposes `wscVersion`, and the package creator
+uses it in the archive filename. Existing `frameworkVersion`, channel,
+framework revision, repository URL, and engine stamp behavior remains
+unchanged.
+
+This is intentionally less machinery than a WSC metadata manifest. The tag
+already names the exact commit and carries both the upstream base version and
+WSC revision; repeating those facts in a hand-maintained file would create a
+second authority and another rebase/release step. The only fork-specific
+tooling is the tag grammar, one additive generated JSON field, one human-readable
+version line, and selection of that value for SDK archive names.
+
+Do not reseat a published WSC tag. If a production build fails for a transient
+infrastructure reason, rerun the same tag. If source must change, validate the
+new staging candidate and tag it with the next revision (`r2`, `r3`, and so
+on). This makes an SDK identity immutable without forcing every failed build
+attempt to consume a revision number.
+
+Patch development remains ordinary topic-branch and pull-request work against
+the WSC integration line. The patch set is expected to be mostly stable; when
+an upstream update breaks it, adapt the affected patch once and replay the
+updated train onto the desired upstream development, beta, stable, or release
+tag. There is no need to mirror every upstream feature branch or pull request.
+
+For staging CI, keep four decisions independent rather than overloading a
+branch name:
+
+- `SOURCE_REVISION`: the exact WSC commit to build;
+- `SDK_CHANNEL`: `main`, `beta`, or `stable`, used for Flutter channel behavior;
+- `BUILD_POLICY`: `incremental` or `full_rebuild`; and
+- `PUBLISH_ENV`: `none`, `staging`, or `production`.
+
+The future production release job deliberately has a smaller interface: one
+immutable WSC tag. It should use the same finalized pipeline implementation,
+not a second Jenkinsfile; its matrix, channel policy, mirror, synchronization,
+and clean-build settings are fixed job configuration rather than copied from a
+staging build. This avoids jobs that must coordinate parameter JSON, build
+numbers, or large stashes, while also avoiding duplicate pipeline code. The
+clean rebuild is the small amount of deliberate duplication that buys
+independence from unrecorded staging-agent state and toolchain changes; the
+accepted staging ZIP proves the source is releasable, while the production job
+proves the official output is reproducible in the production environment.
+
+A minimal adoption path is to establish the real WSC `main` history, publish
+the first immutable WSC tag after candidate acceptance, configure the tag-only
+production job, validate a full release, and then create the protected `stable`
+ref. The `beta` automation can follow later. Replacing an unrelated or
+placeholder repository `main` history and changing public refs are one-time
+invasive operations and require explicit review before they are performed.
 
 For each release:
 

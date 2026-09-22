@@ -15,6 +15,7 @@ const String gsReleaseFolder = '$gsBase$releaseFolder';
 const String baseUrl = 'https://storage.googleapis.com/flutter_infra_release';
 const int shortCacheSeconds = 60;
 const String frameworkVersionTag = 'frameworkVersionFromGit';
+const String wscVersionTag = 'wscVersion';
 const String dartVersionTag = 'dartSdkVersion';
 const String dartTargetArchTag = 'dartTargetArch';
 

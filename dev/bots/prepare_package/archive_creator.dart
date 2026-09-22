@@ -154,7 +154,7 @@ class ArchiveCreator {
     // unpacking it!) So, we use .zip for Mac, and the files are about
     // 220MB larger than they need to be. :-(
     final suffix = platform.isLinux ? 'tar.xz' : 'zip';
-    final package = '${os}_$arch${_version[frameworkVersionTag]}';
+    final package = '${os}_$arch${_version[wscVersionTag] ?? _version[frameworkVersionTag]}';
     return 'flutter_$package-${branch.name}.$suffix';
   }
 
