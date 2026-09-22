@@ -476,15 +476,14 @@ def createSdkArchiveWindows() {
     archiveArtifacts artifacts: 'build/sdk-output/windows/*', fingerprint: true
 }
 
-def checkoutSdkSource() {
-    // Flutter's release packager derives the SDK version from Git tags and
-    // history. The normal multibranch checkout is intentionally shallow, so
-    // override that behavior only for host SDK packaging.
+def checkoutFullSource(boolean cleanWorkspace) {
+    if (cleanWorkspace) {
+        deleteDir()
+    }
     checkout([
         $class: 'GitSCM',
         branches: scm.branches,
         extensions: [
-            [$class: 'WipeWorkspace'],
             [
                 $class: 'CloneOption',
                 depth: 0,
@@ -495,6 +494,34 @@ def checkoutSdkSource() {
         ],
         userRemoteConfigs: scm.userRemoteConfigs,
     ])
+}
+
+def checkoutReleaseSource() {
+    // Release identity and last_engine_commit both require history. A full
+    // fetch does not necessarily unshallow an existing repository, so replace
+    // a legacy shallow checkout once and keep reusing the full clone afterward.
+    checkoutFullSource(false)
+    def shallow = bat(
+        script: '@git rev-parse --is-shallow-repository',
+        returnStdout: true,
+    ).trim()
+    if (shallow == 'true') {
+        echo 'Replacing shallow release-metadata checkout with a full-history clone.'
+        checkoutFullSource(true)
+        shallow = bat(
+            script: '@git rev-parse --is-shallow-repository',
+            returnStdout: true,
+        ).trim()
+    }
+    if (shallow != 'false') {
+        error("Unable to obtain full Git history for release resolution: ${shallow}")
+    }
+}
+
+def checkoutSdkSource() {
+    // Package from a clean full-history checkout so Git tags and archive
+    // contents are independent of files left by earlier SDK builds.
+    checkoutFullSource(true)
 }
 
 pipeline {
@@ -540,8 +567,8 @@ pipeline {
         stage('Resolve release') {
             agent { label 'flutter_win' }
             steps {
-                checkout scm
                 script {
+                    checkoutReleaseSource()
                     def targets = validateCsvParameter('TARGETS', params.TARGETS, ['android', 'ios', 'windows', 'macos', 'web'] as Set)
                     def modes = validateCsvParameter('MODES', params.MODES, ['debug', 'profile', 'release'] as Set)
                     def hosts = validateCsvParameter('HOST_SDKS', params.HOST_SDKS, ['windows', 'macos'] as Set)

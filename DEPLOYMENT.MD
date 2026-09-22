@@ -328,7 +328,10 @@ The pipeline compares `bin/internal/engine.version` with Flutter's existing
 `last_engine_commit` calculation. A mismatch is a warning for incremental
 staging builds, but a clean publishing build fails before compilation. This
 prevents different engine source revisions from sharing a production artifact
-namespace.
+namespace. The release-resolution workspace uses a full-history checkout so
+that calculation cannot mistake the tip of a shallow clone for the last engine
+commit. The large per-target engine workspaces remain separate, persistent,
+and eligible for shallow checkout and incremental Ninja reuse.
 
 Do not enable Jenkins Git options such as "Wipe out repository before build"
 or an external workspace cleanup step for this job. They defeat local reuse.
