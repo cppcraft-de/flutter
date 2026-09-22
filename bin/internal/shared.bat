@@ -61,6 +61,7 @@ GOTO :after_subroutine
   SET bootstrap_path=%FLUTTER_ROOT%\bin\internal\bootstrap.bat
   IF EXIST "%bootstrap_path%" (
     CALL "%bootstrap_path%"
+    IF ERRORLEVEL 1 EXIT 1
   )
 
   REM Get the Git revision.

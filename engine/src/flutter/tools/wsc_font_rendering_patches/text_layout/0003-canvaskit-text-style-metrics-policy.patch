@@ -1,0 +1,16 @@
+diff --git a/modules/skparagraph/include/TextStyle.h b/modules/skparagraph/include/TextStyle.h
+index 9a65834b8e..11e04cd2e3 100644
+--- a/modules/skparagraph/include/TextStyle.h
++++ b/modules/skparagraph/include/TextStyle.h
+@@ -315,8 +315,9 @@ private:
+ 
+     SkScalar fFontSize = 14.0;
+     SkFont::Edging fEdging = SkFont::Edging::kAntiAlias;
+-    bool fSubpixel = true;
+-    SkFontHinting fHinting = SkFontHinting::kSlight;
++    // [SCHOOLCRAFT] Match WSC on every SkParagraph target, including CanvasKit.
++    bool fSubpixel = false;
++    SkFontHinting fHinting = SkFontHinting::kFull;
+     SkScalar fHeight = 1.0;
+     bool fHeightOverride = false;
+     SkScalar fBaselineShift = 0.0f;

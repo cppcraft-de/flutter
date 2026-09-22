@@ -6,7 +6,13 @@
 
 #include <memory>
 
+#include "flutter/fml/status.h"
+
 namespace flutter {
+
+fml::StatusOr<DlPath> DlText::GetPath() const {
+  return fml::Status(fml::StatusCode::kCancelled, "No path available.");
+}
 
 bool DlText::operator==(const DlText& other) const {
   return GetTextBlob() == other.GetTextBlob() &&
