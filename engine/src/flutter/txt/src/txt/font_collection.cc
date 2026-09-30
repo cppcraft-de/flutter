@@ -14,6 +14,7 @@
 #include <vector>
 #include "flutter/fml/logging.h"
 #include "flutter/fml/trace_event.h"
+#include "txt/freetype_font_manager.h"
 #include "txt/platform.h"
 #include "txt/text_style.h"
 
@@ -38,22 +39,26 @@ void FontCollection::SetupDefaultFontManager(
 }
 
 void FontCollection::SetDefaultFontManager(sk_sp<SkFontMgr> font_manager) {
-  default_font_manager_ = std::move(font_manager);
+  default_font_manager_ =
+      MakeFreeTypeCanonicalFontManager(std::move(font_manager));
   skt_collection_.reset();
 }
 
 void FontCollection::SetAssetFontManager(sk_sp<SkFontMgr> font_manager) {
-  asset_font_manager_ = std::move(font_manager);
+  asset_font_manager_ =
+      MakeFreeTypeCanonicalFontManager(std::move(font_manager));
   skt_collection_.reset();
 }
 
 void FontCollection::SetDynamicFontManager(sk_sp<SkFontMgr> font_manager) {
-  dynamic_font_manager_ = std::move(font_manager);
+  dynamic_font_manager_ =
+      MakeFreeTypeCanonicalFontManager(std::move(font_manager));
   skt_collection_.reset();
 }
 
 void FontCollection::SetTestFontManager(sk_sp<SkFontMgr> font_manager) {
-  test_font_manager_ = std::move(font_manager);
+  test_font_manager_ =
+      MakeFreeTypeCanonicalFontManager(std::move(font_manager));
   skt_collection_.reset();
 }
 

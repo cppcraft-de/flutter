@@ -1,0 +1,28 @@
+diff --git a/include/freetype-flutter-config/ftoption.h b/include/freetype-flutter-config/ftoption.h
+index fa587e477..70e741933 100644
+--- a/include/freetype-flutter-config/ftoption.h
++++ b/include/freetype-flutter-config/ftoption.h
+@@ -864,6 +864,23 @@ FT_BEGIN_HEADER
+ /* #define FT_CONFIG_OPTION_OLD_INTERNALS */
+ 
+ 
++  /*
++   * [SCHOOLCRAFT] Match the FreeType configuration used by WSC.  Keep these
++   * overrides together so the customized Flutter header remains otherwise
++   * identical to upstream FreeType 2.14.1.
++   */
++#define FT_CONFIG_OPTION_ENVIRONMENT_PROPERTIES
++#define FT_CONFIG_OPTION_SUBPIXEL_RENDERING
++#define FT_CONFIG_OPTION_ADOBE_GLYPH_LIST
++#define FT_CONFIG_OPTION_MAC_FONTS
++#define FT_CONFIG_OPTION_GUESSING_EMBEDDED_RFORK
++#define FT_CONFIG_OPTION_INCREMENTAL
++#define FT_CONFIG_OPTION_SVG
++#undef TT_CONFIG_OPTION_EMBEDDED_BITMAPS
++#define TT_CONFIG_OPTION_SUBPIXEL_HINTING  2
++#define TT_SUPPORT_SUBPIXEL_HINTING_MINIMAL
++
++
+   /*
+    * This macro is defined if either unpatented or native TrueType
+    * hinting is requested by the definitions above.
