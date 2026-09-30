@@ -1441,7 +1441,7 @@ void main() {
     expect(gitTagVersion.wscVersion, wscTag);
   });
 
-  testUsingContext('determine derives first WSC pre-release from upstream tag', () {
+  testUsingContext('determine derives WSC development identity from upstream tag', () {
     const headRevision = 'abcdef1234567890';
     processManager.addCommands(<FakeCommand>[
       const FakeCommand(command: <String>['git', 'tag', '--points-at', 'HEAD']),
@@ -1461,19 +1461,45 @@ void main() {
     );
 
     expect(gitTagVersion.frameworkVersionFor(headRevision), '1.2.4-0.0.pre-7');
-    expect(gitTagVersion.wscVersion, 'wsc-1.2.3-r1-pre.7-gabcdef1234');
+    expect(gitTagVersion.wscVersion, 'wsc-1.2.3-dev.7-gabcdef1234');
   });
 
-  testUsingContext('determine derives next WSC pre-release from WSC tag', () {
+  testUsingContext(
+    'determine describes development after WSC tag without guessing next revision',
+    () {
+      const headRevision = 'abcdef1234567890';
+      processManager.addCommands(<FakeCommand>[
+        const FakeCommand(command: <String>['git', 'tag', '--points-at', 'HEAD']),
+        ...mockGitTagHistory(
+          latestTag: '1.2.3',
+          headRef: 'HEAD',
+          ancestorRef: '1234abcd',
+          commitsBetweenRefs: 5,
+          wscDescription: 'wsc-1.2.3-r1-5-gabcdef1234',
+        ),
+      ]);
+
+      final GitTagVersion gitTagVersion = GitTagVersion.determine(
+        FakePlatform(),
+        git: git,
+        workingDirectory: '.',
+      );
+
+      expect(gitTagVersion.frameworkVersionFor(headRevision), '1.2.4-0.0.pre-5');
+      expect(gitTagVersion.wscVersion, 'wsc-1.2.3-r1-dev.5-gabcdef1234');
+    },
+  );
+
+  testUsingContext('WSC beta development identity preserves upstream framework fallback', () {
     const headRevision = 'abcdef1234567890';
     processManager.addCommands(<FakeCommand>[
       const FakeCommand(command: <String>['git', 'tag', '--points-at', 'HEAD']),
       ...mockGitTagHistory(
-        latestTag: '1.2.3',
+        latestTag: '3.46.0-0.3.pre',
         headRef: 'HEAD',
         ancestorRef: '1234abcd',
-        commitsBetweenRefs: 5,
-        wscDescription: 'wsc-1.2.3-r1-5-gabcdef1234',
+        commitsBetweenRefs: 6,
+        wscDescription: '3.45.0-0.1.pre-2-gabcdef1234',
       ),
     ]);
 
@@ -1483,8 +1509,8 @@ void main() {
       workingDirectory: '.',
     );
 
-    expect(gitTagVersion.frameworkVersionFor(headRevision), '1.2.4-0.0.pre-5');
-    expect(gitTagVersion.wscVersion, 'wsc-1.2.3-r2-pre.5-gabcdef1234');
+    expect(gitTagVersion.frameworkVersionFor(headRevision), '3.46.0-1.0.pre-6');
+    expect(gitTagVersion.wscVersion, 'wsc-3.45.0-0.1.pre-dev.2-gabcdef1234');
   });
 
   testUsingContext('determine favors stable tag over beta tag if both identify HEAD', () {

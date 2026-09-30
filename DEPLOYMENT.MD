@@ -773,7 +773,7 @@ checkout, and a second WSC revision would otherwise require moving an existing
 release tag.
 
 Keep Flutter's standard version semantics separate from the WSC release
-identity. A package based on upstream `3.44.4` continues to expose
+identity. An exactly WSC-tagged release based on upstream `3.44.4` exposes
 `frameworkVersion=3.44.4` and `channel=stable` to code that expects Flutter's
 version grammar, while its additive WSC identity remains unambiguous:
 
@@ -792,17 +792,29 @@ This fork narrowly extends Flutter's existing Git-tag parser:
 - an exact `wsc-<upstream-version>-r<number>` tag supplies `wscVersion` and
   preserves the embedded upstream version as `frameworkVersion`;
 - an untagged descendant of upstream `3.44.4` automatically receives an
-  identity such as `wsc-3.44.4-r1-pre.45-g097c6f756e`;
-- after `wsc-3.44.4-r1`, an untagged descendant automatically targets the next
-  revision, for example `wsc-3.44.4-r2-pre.5-gabcdef1234`; and
+  identity such as `wsc-3.44.4-dev.45-g097c6f756e`;
+- after `wsc-3.44.4-r1`, an untagged descendant describes development after
+  that release, for example `wsc-3.44.4-r1-dev.5-gabcdef1234`. It does not
+  predict the next release revision; and
 - upstream pre-release bases are supported as well, for example
-  `wsc-3.46.0-0.3.pre-r1`.
+  `wsc-3.45.0-0.1.pre-dev.2-g4ad25ed4c4` during development and
+  `wsc-3.45.0-0.1.pre-r1` once released.
 
-The pre-release identity uses the nearest reachable recognized upstream or WSC
+The WSC development identity uses the nearest reachable recognized upstream or WSC
 release tag, not the newest tag that happens to exist in the clone. Fetching a
-newer unrelated upstream tag therefore cannot rename an unchanged staging
-revision. The commit count and abbreviated hash make different staging source
-states visibly distinct.
+newer unrelated upstream tag therefore does not change its base tag. The commit
+count and abbreviated hash make different staging source states visibly distinct.
+
+Flutter's own untagged `frameworkVersion` calculation deliberately remains
+upstream behavior: it uses the highest available numeric tag and a commit
+count from the common ancestor. An untagged fork based on `3.45.0-0.1.pre`
+can therefore report `frameworkVersion=3.46.0-1.0.pre-6` while its WSC identity
+still describes the 3.45 base. This also occurs with untagged upstream work on
+older release lines. We accept that development-version convention rather than
+maintaining a different Flutter fallback. The WSC identity identifies our base
+and development state; an exact WSC release tag supplies the embedded upstream
+version when producing a release. No manual candidate tags or version-file edits
+are required.
 
 The generated `bin/cache/flutter.version.json` stores the resolved
 `wscVersion` next to Flutter's existing fields so packaged SDKs do not need Git
@@ -812,6 +824,26 @@ truth. `flutter --version` adds a separate `WSC SDK` line,
 uses it in the archive filename. Existing `frameworkVersion`, channel,
 framework revision, repository URL, and engine stamp behavior remains
 unchanged.
+
+`Jenkinsfile.testing` validates each completed Windows/macOS SDK ZIP before
+archiving it, checking the source revision, channel, WSC identity, and filename.
+For normal staging builds, leave `REQUIRE_RELEASE_TAG=false` (the default).
+For SDKs intended for release, enable `REQUIRE_RELEASE_TAG=true`: source
+preflight rejects missing or ambiguous WSC release tags before engine builds,
+and the ZIP check requires the embedded Flutter version and WSC identity to
+match the exact tag. Untagged staging SDKs retain upstream's synthesized
+Flutter version and must carry a WSC development identity matching their source
+hash. This switch is independent of `BUILD_POLICY`; it does not request a clean
+engine rebuild. The SDKs are still archived by Jenkins, not automatically
+promoted to the public download location. Any future release-publishing job
+must enforce this check before distributing its SDKs.
+
+Tagging a tested commit does not modify an existing SDK ZIP. Package the tagged
+revision again from a clean SDK checkout, as the pipeline already does, to
+regenerate `flutter.version.json`. Flutter's normal launcher invalidates that
+cache when the tool revision changes; adding a tag alone does not change the
+commit, so fresh packaging is important. This needs no extra cache mechanism
+and no engine recompilation solely because of the tag.
 
 This is intentionally less machinery than a WSC metadata manifest. The tag
 already names the exact commit and carries both the upstream base version and
@@ -857,6 +889,38 @@ production job, validate a full release, and then create the protected `stable`
 ref. The `beta` automation can follow later. Replacing an unrelated or
 placeholder repository `main` history and changing public refs are one-time
 invasive operations and require explicit review before they are performed.
+
+### Initial patch-stack consolidation and forward ports
+
+Start the canonical WSC stack on the already tested upstream `3.44.4` base;
+do not combine history cleanup with an upstream upgrade. Consolidate the net
+changes into a few logical commits and verify that the resulting Git tree is
+identical to the accepted source branch. Keep the historical branches and
+published tags intact. The fork's `main` need not track upstream's latest tip.
+
+For each forward port, select an exact upstream tag or commit, create a
+candidate branch there, and replay only the WSC tail:
+
+```sh
+git switch -c <candidate> <new-upstream-base>
+git cherry-pick <old-upstream-base>..<patch-stack-tip>
+```
+
+The old base is excluded from that range. Keep the stack linear, fold
+compatibility fixes into the relevant WSC commits before the next replay, and
+retain the previous accepted version. Validate 3.45, then 3.46, then a pinned
+upstream-main revision as separate steps; future maintenance need not visit
+every intervening release.
+
+History consolidation alone requires no engine build or duplicate workspace.
+Jenkins currently keys engine workspaces by `JOB_NAME` and target, so a new
+branch job would start with separate outputs unless workspace reuse is planned
+explicitly. Preserve existing workspaces; do not delete a working older build
+to make room for history-only work. For same-source incremental testing, reuse
+the existing paths and dependencies without a clean or dependency reset.
+Changed Git identity can still regenerate version data and cause relinking.
+Review the engine artifact pin after rewriting history: identical source trees
+do not make the old commit-based artifact ID a valid new release identity.
 
 For each release:
 

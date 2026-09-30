@@ -1151,21 +1151,17 @@ class GitTagVersion {
     final String commitCount = description.group(2)!;
     final String hash = description.group(3)!;
     final GitTagVersion? wscAnchor = _parseWscReleaseTag(anchorTag);
-    final int targetRevision;
-    final String upstreamTag;
+    final String baseVersion;
     if (wscAnchor != null) {
-      final Match match = _wscReleaseTagPattern.firstMatch(anchorTag)!;
-      targetRevision = int.parse(match.group(2)!) + 1;
-      upstreamTag = wscAnchor.gitTag;
+      baseVersion = anchorTag;
     } else {
       final GitTagVersion upstreamAnchor = parseVersion(anchorTag);
       if (upstreamAnchor == const GitTagVersion.unknown()) {
         return null;
       }
-      targetRevision = 1;
-      upstreamTag = upstreamAnchor.gitTag;
+      baseVersion = 'wsc-${upstreamAnchor.gitTag}';
     }
-    return 'wsc-$upstreamTag-r$targetRevision-pre.$commitCount-g$hash';
+    return '$baseVersion-dev.$commitCount-g$hash';
   }
 
   static GitTagVersion _useNewestTagAndCommitsPastFallback({

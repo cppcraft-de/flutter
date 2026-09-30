@@ -429,6 +429,16 @@ def buildWebTarget() {
     }
 }
 
+def validateSdkArchive(String host) {
+    def requireTag = params.REQUIRE_RELEASE_TAG ? '--require-release-tag' : ''
+    def arguments = "--directory build/sdk-output/${host} --revision ${env.FRAMEWORK_REVISION} --channel ${params.RELEASE_BRANCH} ${requireTag}"
+    if (isUnix()) {
+        sh "python3 dev/bots/validate_sdk_identity.py ${arguments}"
+    } else {
+        bat "${params.WINDOWS_PYTHON} dev/bots/validate_sdk_identity.py ${arguments}"
+    }
+}
+
 def createSdkArchiveUnix(String host) {
     def outputDirectory = "build/sdk-output/${host}"
     withEnv([
@@ -460,6 +470,7 @@ def createSdkArchiveUnix(String host) {
               --output "$SDK_OUTPUT_DIRECTORY"
         '''
     }
+    validateSdkArchive(host)
     archiveArtifacts artifacts: "${outputDirectory}/*", fingerprint: true
 }
 
@@ -473,6 +484,7 @@ def createSdkArchiveWindows() {
             bin\\cache\\dart-sdk\\bin\\dart.exe dev\\bots\\prepare_package.dart --revision ${env.FRAMEWORK_REVISION} --branch ${params.RELEASE_BRANCH} --dry_run --output ${outputDirectory} || exit /b 1
         """
     }
+    validateSdkArchive('windows')
     archiveArtifacts artifacts: 'build/sdk-output/windows/*', fingerprint: true
 }
 
@@ -551,6 +563,7 @@ pipeline {
         )
         choice(name: 'BUILD_POLICY', choices: ['incremental', 'full_rebuild'], description: 'incremental always invokes the selected builds and keeps local Ninja outputs; full_rebuild first deletes engine/src/out.')
         choice(name: 'RELEASE_BRANCH', choices: ['main', 'stable', 'beta', 'master'], description: 'Branch/channel stored in the SDK archive.')
+        booleanParam(name: 'REQUIRE_RELEASE_TAG', defaultValue: false, description: 'Require an exact WSC release tag and matching SDK ZIP metadata. Leave false for development/staging builds; independent of BUILD_POLICY.')
         string(name: 'ARTIFACT_BASE_URL', defaultValue: 'http://192.168.0.63:8765', description: 'HTTP(S) download root, without /flutter_infra_release and without a trailing slash.')
         booleanParam(name: 'PUBLISH_ENGINE_ARTIFACTS', defaultValue: true, description: 'Publish each target artifact tree directly from its build agent.')
         choice(name: 'UPLOAD_TRANSPORT', choices: ['http_put', 'ftp', 'sftp'], description: 'HTTP PUT helper, Publish Over FTP, or Publish Over SSH/SFTP.')
@@ -618,6 +631,10 @@ pipeline {
                     env.ENGINE_ID = readFile('bin/internal/engine.version').trim()
                     if (!(env.FRAMEWORK_REVISION ==~ /[0-9a-fA-F]{40}/)) {
                         error("Invalid framework revision: ${env.FRAMEWORK_REVISION}")
+                    }
+                    if (!hosts.isEmpty() || params.REQUIRE_RELEASE_TAG) {
+                        def requireTag = params.REQUIRE_RELEASE_TAG ? '--require-release-tag' : ''
+                        bat "${params.WINDOWS_PYTHON} dev/bots/validate_sdk_identity.py --revision ${env.FRAMEWORK_REVISION} ${requireTag}"
                     }
                     if (!(env.ENGINE_ID ==~ /[0-9a-fA-F]{40}/)) {
                         error("bin/internal/engine.version is not a full artifact ID: ${env.ENGINE_ID}")
