@@ -919,9 +919,23 @@ git cherry-pick <old-upstream-base>..<patch-stack-tip>
 
 The old base is excluded from that range. Keep the stack linear, fold
 compatibility fixes into the relevant WSC commits before the next replay, and
-retain the previous accepted version. Validate 3.45, then 3.46, then a pinned
-upstream-main revision as separate steps; future maintenance need not visit
-every intervening release.
+retain the previous accepted version. The current forward-port sequence is
+3.44.9, then 3.47.5, then a pinned upstream-main revision. These are source
+candidates until their dependency patches and builds have been validated;
+a clean cherry-pick alone does not establish build or rendering correctness.
+Future maintenance need not visit every intervening release or beta.
+
+Stable releases are the default delivery track. Porting to a beta is optional:
+use it for early compatibility testing or a specific feature, not as a required
+step between stable releases. In an upstream beta tag such as
+`3.46.0-0.3.pre`, the ordinary patch component is reserved as zero; the suffix
+contains the candidate-branch identifier and beta hotfix counter. Preserve
+this upstream format when naming WSC beta releases.
+
+Forward-port branches use their own normal Jenkins workspace paths. Do not
+carry the temporary 3.44.4 consolidation workspace override into a new base.
+The incremental policy preserves outputs in a workspace, but a new base still
+requires its matching dependencies and can require substantial compilation.
 
 History consolidation alone requires no engine build or duplicate workspace.
 Jenkins currently keys engine workspaces by `JOB_NAME` and target, so a new
