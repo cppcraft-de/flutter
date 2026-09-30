@@ -565,14 +565,14 @@ pipeline {
         choice(name: 'RELEASE_BRANCH', choices: ['main', 'stable', 'beta', 'master'], description: 'Branch/channel stored in the SDK archive.')
         booleanParam(name: 'REQUIRE_RELEASE_TAG', defaultValue: false, description: 'Require an exact WSC release tag and matching SDK ZIP metadata. Leave false for development/staging builds; independent of BUILD_POLICY.')
         string(name: 'ARTIFACT_BASE_URL', defaultValue: 'http://192.168.0.63:8765', description: 'HTTP(S) download root, without /flutter_infra_release and without a trailing slash.')
-        booleanParam(name: 'PUBLISH_ENGINE_ARTIFACTS', defaultValue: true, description: 'Publish each target artifact tree directly from its build agent.')
+        booleanParam(name: 'PUBLISH_ENGINE_ARTIFACTS', defaultValue: false, description: 'Publish each target artifact tree directly from its build agent.')
         choice(name: 'UPLOAD_TRANSPORT', choices: ['http_put', 'ftp', 'sftp'], description: 'HTTP PUT helper, Publish Over FTP, or Publish Over SSH/SFTP.')
         string(name: 'HTTP_UPLOAD_BASE_URL', defaultValue: '', description: 'HTTP PUT destination root. Empty means ARTIFACT_BASE_URL.')
         choice(name: 'UPLOAD_AUTH', choices: ['none', 'basic', 'bearer'], description: 'Authentication used by the HTTP PUT endpoint.')
         string(name: 'UPLOAD_CREDENTIALS_ID', defaultValue: '', description: 'HTTP PUT username/password or secret-text Jenkins credential ID.')
         string(name: 'TRANSFER_CONFIG_NAME', defaultValue: '', description: 'Jenkins Publish Over FTP or Publish Over SSH server configuration name.')
         string(name: 'TRANSFER_REMOTE_DIRECTORY', defaultValue: '', description: 'Remote directory below the configured FTP/SFTP server root. Empty publishes at its root.')
-        booleanParam(name: 'SYNC_ENGINE_DEPS', defaultValue: true, description: 'Run gclient sync on every build agent. When disabled, reuse complete persistent workspaces and bootstrap only those with missing dependencies.')
+        booleanParam(name: 'SYNC_ENGINE_DEPS', defaultValue: false, description: 'Run gclient sync on every build agent. When disabled, reuse complete persistent workspaces and bootstrap only those with missing dependencies.')
         string(name: 'WINDOWS_PYTHON', defaultValue: 'python', description: 'Python 3 command on Windows agents.')
     }
 
