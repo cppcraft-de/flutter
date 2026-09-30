@@ -665,6 +665,8 @@ skia_component("skia") {
   public += skia_effects_public
   public += skia_effects_imagefilter_public
   public += skia_pathops_public
+  public += skia_pdf_public
+  public += skia_pdf_jpeg_public
 
   sources = []
   sources += skia_core_sources
@@ -703,6 +705,13 @@ skia_component("skia") {
   }
   if (skia_use_no_webp_encode) {
     sources += skia_no_encode_webp_srcs
+  }
+  if (skia_use_zlib) {
+    defines += [ "SK_SUPPORT_PDF" ]
+    deps += [ "//third_party/zlib" ]
+    sources += skia_pdf_sources
+  } else {
+    sources += [ "$_skia_root/src/pdf/SkDocument_PDF_None.cpp" ]
   }
 
   if (is_win) {

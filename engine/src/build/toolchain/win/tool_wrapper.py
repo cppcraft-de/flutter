@@ -111,6 +111,17 @@ class WinTool(object):
       if not os.path.exists(dest):
         raise Exception("Copying of %s to %s failed" % (source, dest))
 
+  def ExecSetEmscriptenCacheAndRun(self, *args):
+    """Runs an Emscripten tool with a cache on the current build drive."""
+    env = os.environ.copy()
+    drive = os.path.splitdrive(os.getcwd())[0]
+    if drive:
+      cache_dir = os.path.join(drive + os.sep, 'tmp', 'flutter_emscripten_cache')
+    else:
+      cache_dir = os.path.join(os.sep, 'tmp', 'flutter_emscripten_cache')
+    env['EM_CACHE'] = cache_dir
+    return subprocess.call(args, env=env)
+
   def ExecLinkWrapper(self, arch, use_separate_mspdbsrv, *args):
     """Filter diagnostic output from link that looks like:
     '   Creating library ui.dll.lib and object ui.dll.exp'

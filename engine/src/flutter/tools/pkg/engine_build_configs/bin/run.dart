@@ -123,7 +123,7 @@ The build names are the "name" fields of the maps in the list of "builds".
         io.stdout.writeln(event);
       case RunnerProgress(done: false):
         {
-          final int width = io.stdout.terminalColumns;
+          final int width = io.stdout.hasTerminal ? io.stdout.terminalColumns : 120;
           final percent = '${event.percent.toStringAsFixed(1)}%';
           final fraction = '(${event.completed}/${event.total})';
           final prefix = '[${event.name}] $percent $fraction ';
