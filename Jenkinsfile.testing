@@ -708,10 +708,7 @@ pipeline {
                 agent {
                     node {
                         label "${BUILD_AGENT}"
-                        // TEMPORARY: reuse local 3.44.4 outputs during history-consolidation testing.
-                        // Restore ${JOB_NAME} before forward-porting or deploying to the client.
-                        // Never run concurrently with the old jenkins_build job.
-                        customWorkspace "engine-workspaces/flutter_wsc/jenkins_build/${BUILD_TARGET}"
+                        customWorkspace "engine-workspaces/${JOB_NAME}/${BUILD_TARGET}"
                     }
                 }
                 stages {
