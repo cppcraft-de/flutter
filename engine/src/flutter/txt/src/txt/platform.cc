@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "txt/platform.h"
+#include "txt/freetype_font_manager.h"
 
 #if defined(SK_FONTMGR_FREETYPE_EMPTY_AVAILABLE)
 #include "third_party/skia/include/ports/SkFontMgr_empty.h"
@@ -16,9 +17,11 @@ std::vector<std::string> GetDefaultFontFamilies() {
 
 sk_sp<SkFontMgr> GetDefaultFontManager(uint32_t font_initialization_data) {
 #if defined(SK_FONTMGR_FREETYPE_EMPTY_AVAILABLE)
-  static sk_sp<SkFontMgr> mgr = SkFontMgr_New_Custom_Empty();
+  static sk_sp<SkFontMgr> mgr =
+      MakeFreeTypeCanonicalFontManager(SkFontMgr_New_Custom_Empty());
 #else
-  static sk_sp<SkFontMgr> mgr = SkFontMgr::RefEmpty();
+  static sk_sp<SkFontMgr> mgr =
+      MakeFreeTypeCanonicalFontManager(SkFontMgr::RefEmpty());
 #endif
   return mgr;
 }

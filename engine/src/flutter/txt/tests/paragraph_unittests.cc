@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <algorithm>
+#include <cmath>
 #include <memory>
 #include "display_list/dl_color.h"
 #include "display_list/dl_paint.h"
@@ -154,6 +156,18 @@ class PainterTestBase : public CanvasTestBase<T> {
     return builder.Build();
   }
 
+  std::unique_ptr<txt::Paragraph> layoutText(const txt::TextStyle& style,
+                                             const std::u16string& text) const {
+    auto pb_skia = makeParagraphBuilder();
+    pb_skia.PushStyle(style);
+    pb_skia.AddText(text);
+    pb_skia.Pop();
+
+    auto paragraph = pb_skia.Build();
+    paragraph->Layout(10000);
+    return paragraph;
+  }
+
  private:
   std::shared_ptr<txt::FontCollection> makeFontCollection() const {
     auto f_collection = std::make_shared<txt::FontCollection>();
@@ -185,6 +199,22 @@ class PainterTestBase : public CanvasTestBase<T> {
 };
 
 using PainterTest = PainterTestBase<::testing::Test>;
+
+TEST_F(PainterTest, SchoolcraftIntegerLineMetricsUseSignedPitchAndOccupiedBox) {
+  auto style = makeStyle();
+  style.font_size = 19;
+  auto paragraph = layoutText(style, u"HHHH");
+  const auto& metrics = paragraph->GetLineMetrics();
+
+  ASSERT_EQ(metrics.size(), 1u);
+  const txt::LineMetrics& line = metrics.front();
+  EXPECT_GT(line.ascent, 0);
+  EXPECT_GE(line.descent, 0);
+  EXPECT_DOUBLE_EQ(line.ascent, std::ceil(line.ascent));
+  EXPECT_DOUBLE_EQ(line.descent, std::ceil(line.descent));
+  EXPECT_DOUBLE_EQ(line.baseline, line.ascent);
+  EXPECT_DOUBLE_EQ(line.height, paragraph->GetHeight());
+}
 
 TEST_F(PainterTest, DrawsSolidLineSkia) {
   PretendImpellerIsEnabled(false);

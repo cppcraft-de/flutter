@@ -110,6 +110,10 @@ abstract class Renderer {
   ui.Canvas createCanvas(ui.PictureRecorder recorder, [ui.Rect? cullRect]);
   ui.SceneBuilder createSceneBuilder();
 
+  Uint8List createPdfDocument(List<ui.PdfPage> pages, {required ui.Size pageSize}) {
+    throw UnsupportedError('PDF generation is not supported by $rendererTag.');
+  }
+
   BackendGradient createGradientLinear(
     Float32List endPoints,
     Uint32List colors,
