@@ -441,6 +441,7 @@ class FakeFlutterVersion implements FlutterVersion {
     this.nextFlutterVersion,
     this.engineBuildDate = '12/01/02',
     this.engineContentHash = 'cccccccccccccccccccccccccccccccccccccccc',
+    this.wscVersion,
   });
 
   final String branch;
@@ -515,6 +516,9 @@ class FakeFlutterVersion implements FlutterVersion {
 
   @override
   final GitTagVersion gitTagVersion;
+
+  @override
+  final String? wscVersion;
 
   @override
   FileSystem get fs => throw UnimplementedError('FakeFlutterVersion.fs is not implemented');

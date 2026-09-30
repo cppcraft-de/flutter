@@ -18,6 +18,12 @@ REM SET FLUTTER_TOOL_ARGS="--enable-asserts %FLUTTER_TOOL_ARGS%"
 
 FOR %%i IN ("%~dp0..") DO SET FLUTTER_ROOT=%%~fi
 
+REM A packaged fork may carry a default artifact mirror. An explicitly set
+REM environment variable always wins.
+IF NOT DEFINED FLUTTER_STORAGE_BASE_URL IF EXIST "%FLUTTER_ROOT%\bin\internal\flutter_storage_base_url" (
+  SET /P FLUTTER_STORAGE_BASE_URL=<"%FLUTTER_ROOT%\bin\internal\flutter_storage_base_url"
+)
+
 REM If available, add location of bundled mingit to PATH
 SET mingit_path=%FLUTTER_ROOT%\bin\mingit\cmd
 IF EXIST "%mingit_path%" SET PATH=%PATH%;%mingit_path%

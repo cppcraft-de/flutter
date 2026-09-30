@@ -67,6 +67,12 @@ void main() {
             : '/depot_tools',
       },
     );
+    final gitCloneCommand = platform.isWindows
+        ? 'git clone --no-checkout -b beta git@bitbucket.org:schoolcraftteam/flutter_wsc.git flutter'
+        : 'git clone -b beta git@bitbucket.org:schoolcraftteam/flutter_wsc.git flutter';
+    final gitConfigureLongPathsCommand = platform.isWindows
+        ? <String, List<ProcessResult>?>{'git config core.longpaths true': null}
+        : <String, List<ProcessResult>?>{};
     group('ProcessRunner for $platform', () {
       test('Returns stdout', () async {
         final fakeProcessManager = FakeProcessManager.list(<FakeCommand>[
@@ -164,26 +170,31 @@ void main() {
       Map<String, List<ProcessResult>?> expectedCalls({
         required String dartArch,
         String? archiveArch,
+        String? wscVersion,
         List<String> precacheArgs = const <String>[],
       }) {
         final String createBase = path.join(tempDir.absolute.path, 'create_');
         final archPrefix = archiveArch == null ? '' : '${archiveArch}_';
         final String archiveName = path.join(
           tempDir.absolute.path,
-          'flutter_${platformName}_${archPrefix}v1.2.3-beta'
+          'flutter_${platformName}_$archPrefix${wscVersion ?? 'v1.2.3'}-beta'
           '${platform.isLinux ? '.tar.xz' : '.zip'}',
         );
         return <String, List<ProcessResult>?>{
-          'git clone -b beta https://flutter.googlesource.com/mirrors/flutter': null,
+          gitCloneCommand: null,
+          ...gitConfigureLongPathsCommand,
           'git reset --hard $testRef': null,
-          'git remote set-url origin https://github.com/flutter/flutter.git': null,
+          'git remote set-url origin git@bitbucket.org:schoolcraftteam/flutter_wsc.git': null,
           'git gc --prune=now --aggressive': null,
           'git describe --tags --exact-match $testRef': <ProcessResult>[
             ProcessResult(0, 0, 'v1.2.3', ''),
           ],
           '$flutter --version --machine': <ProcessResult>[
-            ProcessResult(0, 0, '{"dartSdkVersion": "3.2.1"}', ''),
-            ProcessResult(0, 0, '{"dartSdkVersion": "3.2.1"}', ''),
+            for (var i = 0; i < 2; i++)
+              ProcessResult(0, 0, jsonEncode(<String, String>{
+                'dartSdkVersion': '3.2.1',
+                if (wscVersion != null) 'wscVersion': wscVersion,
+              }), ''),
           ],
           '$dart --version': <ProcessResult>[
             ProcessResult(
@@ -239,6 +250,14 @@ void main() {
 
       test('calls the right commands for archive output', () async {
         processManager.addCommands(convertResults(expectedCalls(dartArch: 'x64')));
+        await creator.initializeRepo();
+        await creator.createArchive();
+      });
+
+      test('uses WSC identity in the archive filename', () async {
+        processManager.addCommands(
+          convertResults(expectedCalls(dartArch: 'x64', wscVersion: 'wsc-1.2.3-r1')),
+        );
         await creator.initializeRepo();
         await creator.createArchive();
       });
@@ -342,13 +361,66 @@ void main() {
 
       test('throws when a command errors out', () async {
         final calls = <String, List<ProcessResult>>{
-          'git clone -b beta https://flutter.googlesource.com/mirrors/flutter': <ProcessResult>[
-            ProcessResult(0, 0, 'output1', ''),
-          ],
+          gitCloneCommand: <ProcessResult>[ProcessResult(0, 0, 'output1', '')],
+          if (platform.isWindows)
+            'git config core.longpaths true': <ProcessResult>[ProcessResult(0, 0, 'output1', '')],
           'git reset --hard $testRef': <ProcessResult>[ProcessResult(0, -1, 'output2', '')],
         };
         processManager.addCommands(convertResults(calls));
         expect(expectAsync0(creator.initializeRepo), throwsA(isA<PreparePackageException>()));
+      });
+
+      test('writes the packaged artifact mirror', () async {
+        const storageBaseUrl = 'https://artifacts.example.test';
+        final platformWithMirror = FakePlatform(
+          operatingSystem: platformName,
+          environment: <String, String>{
+            ...platform.environment,
+            'FLUTTER_STORAGE_BASE_URL': storageBaseUrl,
+          },
+        );
+        processManager.addCommands(
+          convertResults(<String, List<ProcessResult>?>{
+            gitCloneCommand: null,
+            ...gitConfigureLongPathsCommand,
+            'git reset --hard $testRef': null,
+            'git remote set-url origin git@bitbucket.org:schoolcraftteam/flutter_wsc.git': null,
+            'git gc --prune=now --aggressive': null,
+            'git describe --tags --exact-match $testRef': <ProcessResult>[
+              ProcessResult(0, 0, 'v1.2.3', ''),
+            ],
+            '$flutter --version --machine': <ProcessResult>[
+              ProcessResult(0, 0, '{"dartSdkVersion": "3.2.1"}', ''),
+              ProcessResult(0, 0, '{"dartSdkVersion": "3.2.1"}', ''),
+            ],
+            '$dart --version': <ProcessResult>[
+              ProcessResult(
+                0,
+                0,
+                'Dart SDK version: 2.17.0-63.0.beta (beta) on "${platformName}_x64"',
+                '',
+              ),
+            ],
+          }),
+        );
+        creator = ArchiveCreator(
+          tempDir,
+          tempDir,
+          testRef,
+          Branch.beta,
+          fs: fs,
+          processManager: processManager,
+          subprocessOutput: false,
+          platform: platformWithMirror,
+          httpReader: fakeHttpReader,
+        );
+
+        await creator.initializeRepo();
+
+        final File mirrorFile = fs.file(
+          path.join(creator.flutterRoot.path, 'bin', 'internal', 'flutter_storage_base_url'),
+        );
+        expect(mirrorFile.readAsStringSync(), '$storageBaseUrl\n');
       });
 
       test('non-strict mode calls the right commands', () async {
@@ -358,9 +430,10 @@ void main() {
           'flutter_${platformName}_v1.2.3-beta${platform.isLinux ? '.tar.xz' : '.zip'}',
         );
         final calls = <String, List<ProcessResult>?>{
-          'git clone -b beta https://flutter.googlesource.com/mirrors/flutter': null,
+          gitCloneCommand: null,
+          ...gitConfigureLongPathsCommand,
           'git reset --hard $testRef': null,
-          'git remote set-url origin https://github.com/flutter/flutter.git': null,
+          'git remote set-url origin git@bitbucket.org:schoolcraftteam/flutter_wsc.git': null,
           'git gc --prune=now --aggressive': null,
           'git describe --tags --abbrev=0 $testRef': <ProcessResult>[
             ProcessResult(0, 0, 'v1.2.3', ''),
@@ -430,9 +503,10 @@ void main() {
           'dart',
         );
         final calls = <String, List<ProcessResult>?>{
-          'git clone -b beta https://flutter.googlesource.com/mirrors/flutter': null,
+          gitCloneCommand: null,
+          ...gitConfigureLongPathsCommand,
           'git reset --hard $testRef': null,
-          'git remote set-url origin https://github.com/flutter/flutter.git': null,
+          'git remote set-url origin git@bitbucket.org:schoolcraftteam/flutter_wsc.git': null,
           'git gc --prune=now --aggressive': null,
           'git describe --tags --exact-match $testRef': <ProcessResult>[
             ProcessResult(0, 0, 'v1.2.3', ''),

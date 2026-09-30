@@ -53,6 +53,13 @@ BIN_DIR="$(cd -P -- "${PROG_NAME%/*}" ; pwd -P)"
 SHARED_NAME="$BIN_DIR/internal/shared.sh"
 OS="$(uname -s)"
 
+# A packaged fork may carry a default artifact mirror. An explicitly set
+# environment variable always wins.
+if [[ -z "${FLUTTER_STORAGE_BASE_URL:-}" && -f "$BIN_DIR/internal/flutter_storage_base_url" ]]; then
+  IFS= read -r FLUTTER_STORAGE_BASE_URL < "$BIN_DIR/internal/flutter_storage_base_url"
+  export FLUTTER_STORAGE_BASE_URL
+fi
+
 # If we're on Windows, invoke the batch script instead to get proper locking.
 if [[ $OS =~ MINGW.* || $OS =~ CYGWIN.* || $OS =~ MSYS.* ]]; then
   exec "${BIN_DIR}/flutter.bat" "$@"
