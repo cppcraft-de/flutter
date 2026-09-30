@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 import 'dart:async';
-import 'dart:io' show exit, stderr;
+import 'dart:io' show FileSystemException, exit, stderr;
 
 import 'package:args/args.dart';
 import 'package:file/file.dart';
@@ -14,6 +14,29 @@ import 'prepare_package/archive_publisher.dart';
 import 'prepare_package/common.dart';
 
 const FileSystem fs = LocalFileSystem();
+
+Future<void> _deleteTemporaryDirectory(Directory directory) async {
+  const maxAttempts = 5;
+  FileSystemException? lastError;
+  for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (!directory.existsSync()) {
+      return;
+    }
+    try {
+      directory.deleteSync(recursive: true);
+      return;
+    } on FileSystemException catch (error) {
+      lastError = error;
+      if (attempt < maxAttempts) {
+        await Future<void>.delayed(Duration(seconds: attempt));
+      }
+    }
+  }
+  stderr.writeln(
+    'Warning: Failed to remove temporary package directory ${directory.path} '
+    'after $maxAttempts attempts: $lastError',
+  );
+}
 
 /// Prepares a flutter git repo to be packaged up for distribution. It mainly
 /// serves to populate the .pub-preload-cache with any appropriate Dart
@@ -152,7 +175,7 @@ Future<void> main(List<String> rawArguments) async {
     message = e.toString();
   } finally {
     if (removeTempDir) {
-      tempDir.deleteSync(recursive: true);
+      await _deleteTemporaryDirectory(tempDir);
     }
     if (exitCode != 0) {
       errorExit(message, exitCode: exitCode);

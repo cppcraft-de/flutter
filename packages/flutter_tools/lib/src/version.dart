@@ -184,6 +184,9 @@ abstract class FlutterVersion {
 
   GitTagVersion get gitTagVersion;
 
+  /// The WSC release or pre-release identity derived from Git tags.
+  String? get wscVersion => gitTagVersion.wscVersion;
+
   /// The channel is the upstream branch.
   ///
   /// `master`, `dev`, `beta`, `stable`; or old ones, like `alpha`, `hackathon`, ...
@@ -253,6 +256,7 @@ abstract class FlutterVersion {
     final versionText = frameworkVersion == kUnknownFrameworkVersion ? '' : ' $frameworkVersion';
     final flutterText =
         'Flutter$versionText • channel $channel • ${repositoryUrl ?? 'unknown source'}';
+    final wscText = wscVersion == null ? '' : '\nWSC SDK • version $wscVersion';
     final frameworkText =
         'Framework • revision $frameworkRevisionShort ($frameworkAge) • $frameworkCommitDate';
     String engineText;
@@ -272,7 +276,7 @@ abstract class FlutterVersion {
     // Engine • revision 9c46333e14 (96 minutes ago) • 2018-10-26 11:16:22 -0400
     // Tools • Dart 2.1.0 (build 2.1.0-dev.8.0 bf26f760b1)
 
-    return '$flutterText\n$frameworkText\n$engineText\n$toolsText';
+    return '$flutterText$wscText\n$frameworkText\n$engineText\n$toolsText';
   }
 
   Map<String, Object> toJson() => <String, Object>{
@@ -288,6 +292,7 @@ abstract class FlutterVersion {
     'dartSdkVersion': dartSdkVersion,
     'devToolsVersion': devToolsVersion,
     'flutterVersion': frameworkVersion,
+    'wscVersion': ?wscVersion,
   };
 
   /// A date String describing the [frameworkRevision] commit.
@@ -546,7 +551,9 @@ class _FlutterVersionFromFile extends FlutterVersion {
         engineBuildDate: manifest['engineBuildDate'] as String?,
         dartSdkVersion: manifest['dartSdkVersion']! as String,
         devToolsVersion: manifest['devToolsVersion']! as String,
-        gitTagVersion: GitTagVersion.parse(manifest['flutterVersion']! as String),
+        gitTagVersion: GitTagVersion.parse(
+          manifest['flutterVersion']! as String,
+        )._withWscVersion(manifest['wscVersion'] as String?),
         flutterRoot: flutterRoot,
         fs: jsonFile.fileSystem,
       );
@@ -975,6 +982,7 @@ class GitTagVersion {
     this.devVersion,
     this.devPatch,
     this.commits,
+    this.wscVersion,
   });
   const GitTagVersion.unknown()
     : x = null,
@@ -985,7 +993,8 @@ class GitTagVersion {
       devVersion = null,
       devPatch = null,
       hash = '',
-      gitTag = '';
+      gitTag = '',
+      wscVersion = null;
 
   /// The X in vX.Y.Z.
   final int? x;
@@ -1013,6 +1022,10 @@ class GitTagVersion {
 
   /// The git tag that is this version's closest ancestor.
   final String gitTag;
+
+  /// WSC's release identity, when this is an exact WSC tag or an untagged
+  /// descendant of a recognized WSC/upstream release tag.
+  final String? wscVersion;
 
   static GitTagVersion determine(
     Platform platform, {
@@ -1044,6 +1057,16 @@ class GitTagVersion {
         .reversed
         .toList();
 
+    // WSC tags live beside, rather than replace, Flutter's numeric tags. An
+    // exact WSC tag represents a released fork SDK while preserving the
+    // embedded upstream Flutter version as frameworkVersion.
+    for (final tag in tags) {
+      final GitTagVersion? wscTag = _parseWscReleaseTag(tag.trim());
+      if (wscTag != null) {
+        return wscTag;
+      }
+    }
+
     // Check first for a stable tag
     final stableTagPattern = RegExp(r'^\d+\.\d+\.\d+$');
     for (final tag in tags) {
@@ -1059,12 +1082,86 @@ class GitTagVersion {
       }
     }
 
-    // If we don't exist in a tag, use git to find the latest tag.
-    return _useNewestTagAndCommitsPastFallback(
+    // Preserve Flutter's framework-version fallback, and derive the additive
+    // WSC pre-release identity from the nearest reachable release tag.
+    final String? wscVersion = _determineWscDevelopmentVersion(
       git: git,
       workingDirectory: workingDirectory,
       gitRef: gitRef,
     );
+    return _useNewestTagAndCommitsPastFallback(
+      git: git,
+      workingDirectory: workingDirectory,
+      gitRef: gitRef,
+    )._withWscVersion(wscVersion);
+  }
+
+  static final RegExp _wscReleaseTagPattern = RegExp(
+    r'^wsc-(\d+\.\d+\.\d+(?:-\d+\.\d+\.pre)?)-r([1-9]\d*)$',
+  );
+
+  static GitTagVersion? _parseWscReleaseTag(String tag) {
+    final Match? match = _wscReleaseTagPattern.firstMatch(tag);
+    if (match == null) {
+      return null;
+    }
+    final GitTagVersion upstreamVersion = parseVersion(match.group(1)!);
+    if (upstreamVersion == const GitTagVersion.unknown()) {
+      return null;
+    }
+    return GitTagVersion(
+      x: upstreamVersion.x,
+      y: upstreamVersion.y,
+      z: upstreamVersion.z,
+      hash: '',
+      gitTag: upstreamVersion.gitTag,
+      hotfix: upstreamVersion.hotfix,
+      devVersion: upstreamVersion.devVersion,
+      devPatch: upstreamVersion.devPatch,
+      commits: 0,
+      wscVersion: tag,
+    );
+  }
+
+  static String? _determineWscDevelopmentVersion({
+    required Git git,
+    required String? workingDirectory,
+    required String gitRef,
+  }) {
+    final RunResult describe = git.runSync([
+      'describe',
+      '--tags',
+      '--long',
+      '--abbrev=10',
+      '--match=wsc-*',
+      '--match=[0-9]*.*.*',
+      gitRef,
+    ], workingDirectory: workingDirectory);
+    if (describe.exitCode != 0) {
+      return null;
+    }
+    final Match? description = RegExp(
+      r'^(.+)-(\d+)-g([a-f0-9]+)$',
+    ).firstMatch(describe.stdout.trim());
+    if (description == null) {
+      return null;
+    }
+
+    final String anchorTag = description.group(1)!;
+    final String commitCount = description.group(2)!;
+    final String hash = description.group(3)!;
+    final GitTagVersion? wscAnchor = _parseWscReleaseTag(anchorTag);
+    final String baseVersion;
+    if (wscAnchor != null) {
+      baseVersion = anchorTag;
+    } else {
+      final GitTagVersion upstreamAnchor = parseVersion(anchorTag);
+      if (upstreamAnchor == const GitTagVersion.unknown()) {
+        return null;
+      }
+      baseVersion = 'wsc-${upstreamAnchor.gitTag}';
+    }
+    return '$baseVersion-dev.$commitCount-g$hash';
   }
 
   static GitTagVersion _useNewestTagAndCommitsPastFallback({
@@ -1147,12 +1244,35 @@ class GitTagVersion {
   static GitTagVersion parse(String version) {
     GitTagVersion gitTagVersion;
 
+    final GitTagVersion? wscTagVersion = _parseWscReleaseTag(version);
+    if (wscTagVersion != null) {
+      return wscTagVersion;
+    }
+
     gitTagVersion = parseVersion(version);
     if (gitTagVersion != const GitTagVersion.unknown()) {
       return gitTagVersion;
     }
     globals.printTrace('Could not interpret results of "git describe": $version');
     return const GitTagVersion.unknown();
+  }
+
+  GitTagVersion _withWscVersion(String? value) {
+    if (value == null) {
+      return this;
+    }
+    return GitTagVersion(
+      x: x,
+      y: y,
+      z: z,
+      hash: hash,
+      gitTag: gitTag,
+      hotfix: hotfix,
+      devVersion: devVersion,
+      devPatch: devPatch,
+      commits: commits,
+      wscVersion: value,
+    );
   }
 
   String frameworkVersionFor(String revision) {

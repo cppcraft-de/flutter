@@ -154,7 +154,7 @@ class ArchiveCreator {
     // unpacking it!) So, we use .zip for Mac, and the files are about
     // 220MB larger than they need to be. :-(
     final suffix = platform.isLinux ? 'tar.xz' : 'zip';
-    final package = '${os}_$arch${_version[frameworkVersionTag]}';
+    final package = '${os}_$arch${_version[wscVersionTag] ?? _version[frameworkVersionTag]}';
     return 'flutter_$package-${branch.name}.$suffix';
   }
 
@@ -250,11 +250,28 @@ class ArchiveCreator {
     // We want the user to start out the in the specified branch instead of a
     // detached head. To do that, we need to make sure the branch points at the
     // desired revision.
-    await _runGit(<String>['clone', '-b', branch.name, gobMirror], workingDirectory: tempDir);
+    await _runGit(<String>[
+      'clone',
+      if (platform.isWindows) '--no-checkout',
+      '-b',
+      branch.name,
+      gobMirror,
+      'flutter',
+    ], workingDirectory: tempDir);
+    if (platform.isWindows) {
+      await _runGit(<String>['config', 'core.longpaths', 'true']);
+    }
     await _runGit(<String>['reset', '--hard', revision]);
 
-    // Make the origin point to github instead of the chromium mirror.
+    // Keep the packaged SDK's origin pointed at this fork.
     await _runGit(<String>['remote', 'set-url', 'origin', githubRepo]);
+
+    final String? storageBaseUrl = platform.environment['FLUTTER_STORAGE_BASE_URL'];
+    if (storageBaseUrl != null && storageBaseUrl.isNotEmpty) {
+      fs
+          .file(path.join(flutterRoot.path, 'bin', 'internal', 'flutter_storage_base_url'))
+          .writeAsStringSync('$storageBaseUrl\n');
+    }
 
     // Minify `.git` footprint (saving about ~100 MB as of Oct 2022)
     await _runGit(<String>['gc', '--prune=now', '--aggressive']);
