@@ -937,6 +937,29 @@ carry the temporary 3.44.4 consolidation workspace override into a new base.
 The incremental policy preserves outputs in a workspace, but a new base still
 requires its matching dependencies and can require substantial compilation.
 
+Source forward-port checkpoint (2026-09-30; not a release/build certification):
+
+| Candidate branch | Exact upstream base | Version/packaging Dart tests |
+| --- | --- | --- |
+| `wsc-main-3.44.9` | `3.44.9` (`6b182d2c758`) | 130 passed, 2 platform skips |
+| `wsc-main-3.47.5` | `3.47.5` (`6a19cca5647`) | 149 passed, 2 platform skips |
+| `wsc-main` | main/master snapshot `1be6586f8b3d846dcff8e4e3f32233ef5774b7d5` | 169 passed, 2 platform skips |
+
+All three also passed the eight Python SDK-identity tests and application of
+all seven dependency patches against isolated checkouts of the exact Skia and
+FreeType revisions from their respective DEPS. No patch-file content changes
+were needed; the patch script's expected dependency revisions were updated on
+the newer bases. Each engine artifact pin identifies its replayed engine commit.
+The tests use prebuilt Dart SDKs and mock packaging/publishing processes; they
+do not build engines, upload artifacts, or validate the rendered output. Engine
+smoke builds, rendering checks, and real SDK packaging remain acceptance gates.
+
+The 3.47.5 port retains upstream's browser image decoding while keeping JPEG
+encoding for WSC PDF export. The main port retains upstream's newer renderer
+interfaces, non-recursive Vulkan dependency layout, logger injection, and
+architecture-aware packaging tests. The fork keeps a tracked `engine.version`
+on main for artifact publication; upstream's launcher still supports this pin.
+
 History consolidation alone requires no engine build or duplicate workspace.
 Jenkins currently keys engine workspaces by `JOB_NAME` and target, so a new
 branch job would start with separate outputs unless workspace reuse is planned
