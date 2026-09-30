@@ -105,6 +105,20 @@ extension type CanvasKit(JSObject _) implements JSObject {
   external SkSurface MakeWebGLCanvasSurface(DomHTMLCanvasElement canvas);
   external SkSurface MakeSurface(double width, double height);
 
+  @JS('MakePdf')
+  external JSUint8Array? _MakePdf(
+    JSArray<SkPicture> pictures,
+    JSFloat32Array sourceSizes,
+    double pageWidth,
+    double pageHeight,
+  );
+  Uint8List? MakePdf(
+    List<SkPicture> pictures,
+    Float32List sourceSizes,
+    double pageWidth,
+    double pageHeight,
+  ) => _MakePdf(pictures.toJS, sourceSizes.toJS, pageWidth, pageHeight)?.toDart;
+
   @JS('getDataBytes')
   external JSUint8Array _getDataBytes(SkData skData);
   Uint8List getDataBytes(SkData skData) => _getDataBytes(skData).toDart;
@@ -2148,11 +2162,16 @@ extension type TypefaceFontProvider(JSObject _) implements SkFontMgr {
   @JS('registerFont')
   external void _registerFont(JSUint8Array font, String family);
   void registerFont(Uint8List font, String family) => _registerFont(font.toJS, family);
+
+  @JS('registerTypeface')
+  external void _registerTypeface(SkTypeface typeface, String family);
+  void registerTypeface(SkTypeface typeface, String family) => _registerTypeface(typeface, family);
 }
 
 extension type SkFontCollection(JSObject _) implements JSObject {
   external void enableFontFallback();
   external void setDefaultFontManager(TypefaceFontProvider? fontManager);
+  external void clearFontLookupCaches();
   external void delete();
 }
 

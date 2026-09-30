@@ -4,6 +4,81 @@
 
 part of ui;
 
+/// The orientation of pages in a generated PDF document.
+enum PdfPageOrientation {
+  /// Page height is greater than or equal to page width.
+  portrait,
+
+  /// Page width is greater than page height.
+  landscape,
+}
+
+/// A standard PDF page size in points.
+final class PdfPageFormat {
+  /// Creates a PDF page format with the given portrait dimensions in points.
+  const PdfPageFormat(this.width, this.height);
+
+  /// ISO 216 A4, 210mm by 297mm.
+  static const PdfPageFormat a4 = PdfPageFormat(595.2755905511812, 841.8897637795277);
+
+  /// North American Letter, 8.5in by 11in.
+  static const PdfPageFormat letter = PdfPageFormat(612.0, 792.0);
+
+  /// North American Legal, 8.5in by 14in.
+  static const PdfPageFormat legal = PdfPageFormat(612.0, 1008.0);
+
+  /// Portrait width in PDF points.
+  final double width;
+
+  /// Portrait height in PDF points.
+  final double height;
+
+  /// Returns the page size for [orientation].
+  Size sizeFor(PdfPageOrientation orientation) {
+    return switch (orientation) {
+      PdfPageOrientation.portrait => Size(width, height),
+      PdfPageOrientation.landscape => Size(height, width),
+    };
+  }
+}
+
+/// A scene and its source dimensions for one PDF page.
+final class PdfPage {
+  /// Creates one PDF page from [scene] and its [size].
+  const PdfPage({required this.scene, required this.size});
+
+  /// The scene to draw into this PDF page.
+  final Scene scene;
+
+  /// The source dimensions of [scene], in logical pixels.
+  final Size size;
+}
+
+/// Utilities for generating PDF documents from Flutter scenes.
+abstract final class PdfDocument {
+  /// Generates a PDF document containing [pages].
+  static Future<Uint8List> toBytes(
+    List<PdfPage> pages, {
+    PdfPageFormat format = PdfPageFormat.a4,
+    PdfPageOrientation orientation = PdfPageOrientation.portrait,
+  }) {
+    if (pages.isEmpty) {
+      throw ArgumentError.value(pages, 'pages', 'must contain at least one page');
+    }
+
+    for (var i = 0; i < pages.length; i += 1) {
+      final PdfPage page = pages[i];
+      if (page.size.width <= 0 || page.size.height <= 0) {
+        throw ArgumentError.value(page.size, 'pages[$i].size', 'must be positive');
+      }
+    }
+
+    return Future<Uint8List>.value(
+      engine.renderer.createPdfDocument(pages, pageSize: format.sizeFor(orientation)),
+    );
+  }
+}
+
 abstract class Scene {
   Future<Image> toImage(int width, int height);
   Image toImageSync(int width, int height);

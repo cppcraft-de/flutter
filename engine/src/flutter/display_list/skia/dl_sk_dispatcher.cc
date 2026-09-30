@@ -325,8 +325,21 @@ void DlSkCanvasDispatcher::drawText(const std::shared_ptr<DlText>& text,
                                     DlScalar x,
                                     DlScalar y) {
   auto blob = text->GetTextBlob();
+  if (blob) {
+    canvas_->drawTextBlob(blob, x, y, paint());
+    return;
+  }
+
+  auto path = text->GetPath();
+  if (path.ok()) {
+    canvas_->save();
+    canvas_->translate(x, y);
+    canvas_->drawPath(path.value().GetSkPath(), paint());
+    canvas_->restore();
+    return;
+  }
+
   FML_CHECK(blob) << "Impeller DlText cannot be drawn to a Skia canvas.";
-  canvas_->drawTextBlob(blob, x, y, paint());
 }
 
 void DlSkCanvasDispatcher::DrawShadow(SkCanvas* canvas,
