@@ -1882,6 +1882,21 @@ void main() {
         processManager.addCommand(
           FakeCommand(command: <String>['git', 'tag', '--points-at', headRevision]),
         );
+        processManager.addCommand(
+          FakeCommand(
+            command: <String>[
+              'git',
+              'describe',
+              '--tags',
+              '--long',
+              '--abbrev=10',
+              '--match=wsc-*',
+              '--match=[0-9]*.*.*',
+              headRevision,
+            ],
+            exitCode: 128,
+          ),
+        );
         // determine newest tag
         processManager.addCommand(
           const FakeCommand(
@@ -2157,6 +2172,22 @@ void main() {
           const FakeCommand(
             command: <String>['git', 'tag', '--points-at', 'REVISION_A'],
             environment: <String, String>{'PATH': '/usr/bin'}, // GIT_DIR should be missing
+          ),
+        );
+        processManager.addCommand(
+          const FakeCommand(
+            command: <String>[
+              'git',
+              'describe',
+              '--tags',
+              '--long',
+              '--abbrev=10',
+              '--match=wsc-*',
+              '--match=[0-9]*.*.*',
+              'REVISION_A',
+            ],
+            environment: <String, String>{'PATH': '/usr/bin'},
+            exitCode: 128,
           ),
         );
         processManager.addCommand(
