@@ -6,6 +6,10 @@ implementation map; use [artifact contracts](docs/wsc/artifacts.md) for storage
 and packaging. Temporary workstation exceptions belong only in
 [local testing](docs/wsc/local-testing.md).
 
+For an upstream update, follow [Updating the WSC fork](docs/wsc/updating.md).
+Humans and agents use the same procedure and helpers; source-check success is
+not permission to publish or change rendering baselines.
+
 ## Working rules
 
 - Keep the single pipeline in `Jenkinsfile.testing`. Do not introduce a root

@@ -11,6 +11,8 @@ commands without `--local-engine`.
   caches, upload/download contracts, and why a mirror is required.
 - [Release identity and maintenance](docs/wsc/releases.md): versions, tags,
   upstream updates, dependency patches, and release gates.
+- [Updating the fork](docs/wsc/updating.md): one human/agent procedure, supported
+  by safe candidate-preparation and source-check helpers.
 - [Local testing](docs/wsc/local-testing.md): installation-specific overrides
   and the temporary workspace-reuse exception. Not required on client CI.
 - [Agent entry point](AGENTS.md): navigation and repository safety constraints.

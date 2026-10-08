@@ -122,22 +122,14 @@ tagging. Rollback uses the retained previous SDK and its matching artifact tree.
 
 ## Upstream updates and patch replay
 
-Treat every upstream update, including a patch release, as a new candidate.
-Preserve the previous accepted line and its artifact IDs. Maintain a linear
-WSC-only tail on a known upstream base; replay that tail, not old upstream
-history, onto the new base. Example commands with placeholders to replace:
-
-```sh
-git fetch upstream --tags
-git switch -c NEW_CANDIDATE NEW_UPSTREAM_BASE
-git cherry-pick OLD_UPSTREAM_BASE..WSC_STACK_TIP
-```
-
-Inspect the range first: it must contain only intended WSC commits. An explicit
-`git rebase --onto NEW_UPSTREAM_BASE OLD_UPSTREAM_BASE CANDIDATE` is another way
-to replay an existing candidate branch. Do not force-push published history or
-rewrite upstream numeric tags. Review the resulting diff and untracked files;
-conflict-free application is not proof of semantic correctness.
+Follow [Updating the WSC fork](updating.md), the shared human/agent procedure
+with preview-first preparation and source-verification helpers. Treat every
+upstream update, including a patch release, as a new candidate. Preserve the
+previous accepted line and its artifact IDs. Maintain a linear WSC-only tail on
+a known upstream base; replay that tail, not old upstream history, onto the new
+base. The helper uses ordinary Git cherry-pick state and stops for conflicts;
+it never publishes refs or approves a release. Conflict-free application is not
+proof of semantic correctness.
 
 The intended channel policy is that fork `main`/`beta`/`stable` point to accepted
 patched equivalents of the selected upstream lines. These are moving refs;
@@ -208,6 +200,7 @@ machine-specific test environment paths.
 
 | Responsibility | Source |
 | --- | --- |
+| Candidate preparation and source checks | [wsc_rebase.py](../../dev/bots/wsc_rebase.py), used by the [update procedure](updating.md) |
 | Orchestration, workspace policy, credentials, polling, notifications | [Jenkinsfile.testing](../../Jenkinsfile.testing) |
 | Engine artifact collection from builder manifests | [collect_engine_artifacts.py](../../dev/bots/collect_engine_artifacts.py) |
 | Upstream-owned seed inventory and HEAD checks | [seed_artifact_mirror.py](../../dev/bots/seed_artifact_mirror.py) |
