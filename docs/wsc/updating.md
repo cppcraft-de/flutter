@@ -136,9 +136,12 @@ still apply to the new Skia/FreeType revisions.
 
 If dependencies are not prepared yet, source verification can run without those
 arguments, but it reports dependency validation as **PENDING**. Do not treat that
-as a completed port. The first CI build of a changed upstream base/patch set must
-use `SYNC_ENGINE_DEPS=true`; subsequent iterations can return to `false` when the
-dependencies and patches are unchanged.
+as a completed port. CI's default `SYNC_ENGINE_DEPS=auto` synchronizes changed
+dependency/patch inputs and reuses unchanged ones. Use `true` for a forced repair
+or the documented production build; do not use explicit `false` to bypass the
+first synchronization of a changed dependency/patch set. See the runbook's
+[incremental behavior](../../DEPLOYMENT.MD#incremental-behavior) for tracking and
+the first-run migration from the old checkbox.
 
 ## 4. Commit source changes and derive the engine pin
 

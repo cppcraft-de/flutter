@@ -165,7 +165,7 @@ TARGETS=windows,macos,ios,android,web
 HOST_SDKS=windows,macos
 MODES=debug,profile,release
 BUILD_POLICY=incremental
-SYNC_ENGINE_DEPS=false
+SYNC_ENGINE_DEPS=auto
 PUBLISH_ENGINE_ARTIFACTS=true
 UPLOAD_TRANSPORT=http_put
 RELEASE_BRANCH=stable
@@ -189,12 +189,21 @@ engine-workspaces/<full Jenkins JOB_NAME>/<BUILD_TARGET>
 - `incremental` preserves `engine/src/out`; Ninja decides which work is needed.
   The pipeline still invokes every selected build and republishes its payload;
   it does not skip builds because artifacts already exist remotely.
-- With `SYNC_ENGINE_DEPS=false`, each fresh target workspace synchronizes and
-  applies patches before its first build. Subsequent runs skip synchronization
-  when `.gclient` and the expected Dart executable exist. This is a bootstrap
-  check, **not** a dependency-integrity or patch-freshness check. After changing
-  DEPS, patch files, or upstream base, or repairing a partial workspace, set
-  sync to `true` for that run, then return to `false` for quick iterations.
+- `SYNC_ENGINE_DEPS=auto` (default) synchronizes when dependency inputs change
+  or dependencies are missing. It fingerprints tracked `DEPS` files, the engine
+  tools subtree (including patches/hook helpers), engine Pub manifests/locks,
+  the sync helper, host type, and effective `.gclient` configuration. Ordinary
+  source/docs edits outside those inputs, tags, and mtimes do not trigger sync.
+  Tracking the tools subtree is deliberately conservative: a tools-only change
+  can cause an extra sync rather than miss a hook-helper change.
+- One fingerprint lives in each checkout's Git-local `wsc-deps-sync.sha256`
+  file. **Existing workspaces sync once when adopting auto.** The marker is
+  invalidated before synchronization and written only after success, so failed
+  or interrupted attempts retry. This is input tracking, **not** a full integrity
+  audit: basic checks cover `.gclient`, Dart, Skia, and FreeType; use `true` to
+  repair other manually damaged dependencies or refresh changed host tooling.
+- `true` always syncs. Explicit choice `false` skips input-change detection but
+  still bootstraps missing dependencies; use it only as a testing override.
 - Synchronization can reset/reapply nested patches and cause recompilation;
   it is not done once per runtime mode. Each target has its own dependency tree.
 - SDK packaging intentionally uses clean separate checkouts and warms/downloads
@@ -204,6 +213,13 @@ engine-workspaces/<full Jenkins JOB_NAME>/<BUILD_TARGET>
 - Stable paths matter. Renaming the job, changing its workspace key, or adding
   a target can create new output directories. There is no cross-job workspace
   lock. Do not share paths or enable automatic cleanup of these workspaces.
+
+Migration from the old checkbox is handled in the pipeline: a legacy **boolean**
+`false` becomes `auto`, boolean `true` remains forced sync, and a missing value
+defaults to `auto`. Thus the **first polling-triggered run loading the new
+Jenkinsfile** adopts auto without a manual parameter-refresh build. Subsequent
+explicit choice **string** `false` is honored. Already-running builds keep their
+loaded pipeline; this change does not restart or cancel them.
 
 Reduced smoke tests can set fewer targets/modes and **empty `HOST_SDKS`**.
 Complete SDK packaging requires all three modes and the standard targets:

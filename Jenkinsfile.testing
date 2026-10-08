@@ -26,48 +26,23 @@ def validateCsvParameter(String name, String value, Set<String> allowed) {
     return values
 }
 
+def engineDepsSyncMode(Object value) {
+    // A queued/timer run can still carry the OLD BooleanParameterValue when
+    // this Jenkinsfile first replaces the checkbox with a choice. Migrate old
+    // false to auto immediately; retain old true as an explicit forced sync.
+    if (value instanceof Boolean) {
+        return value ? 'true' : 'auto'
+    }
+    def mode = value == null ? 'auto' : value.toString().trim().toLowerCase()
+    if (!(mode in ['auto', 'true', 'false'])) {
+        error("Invalid SYNC_ENGINE_DEPS mode: ${mode}")
+    }
+    return mode
+}
+
 def bootstrapEngineDependenciesUnix(boolean includeWeb) {
-    if (!params.SYNC_ENGINE_DEPS) {
-        def dependenciesPresent = sh(
-            returnStatus: true,
-            script: '''
-                set -eu
-                case "$(uname -s)" in
-                  Linux) host_os=linux ;;
-                  Darwin) host_os=macos ;;
-                  *) exit 1 ;;
-                esac
-                case "$(uname -m)" in
-                  x86_64) host_cpu=x64 ;;
-                  arm64|aarch64) host_cpu=arm64 ;;
-                  *) exit 1 ;;
-                esac
-                test -f .gclient
-                test -x "engine/src/flutter/prebuilts/${host_os}-${host_cpu}/dart-sdk/bin/dart"
-            ''',
-        ) == 0
-        if (dependenciesPresent) {
-            return
-        }
-        echo 'Engine dependencies are missing; bootstrapping this persistent workspace despite SYNC_ENGINE_DEPS=false.'
-    }
-    def gclientConfig = readFile('engine/scripts/standard.gclient')
-    if (includeWeb) {
-        def disabledWebVars = '''    # "custom_vars": {
-    #   "download_emsdk": True,
-    # },'''
-        def enabledWebVars = '''    "custom_vars": {
-      "download_emsdk": True,
-    },'''
-        if (!gclientConfig.contains(disabledWebVars)) {
-            error('standard.gclient no longer contains the documented Web custom_vars block')
-        }
-        gclientConfig = gclientConfig.replace(disabledWebVars, enabledWebVars)
-    }
-    writeFile(file: '.gclient', text: gclientConfig)
-    // A fresh Web workspace clones many large googlesource repositories. Keep
-    // that initial fan-out low enough to avoid HTTP 429 throttling.
-    sh(includeWeb ? 'gclient sync -D -j 1' : 'gclient sync -D')
+    def mode = engineDepsSyncMode(params.SYNC_ENGINE_DEPS)
+    sh "python3 dev/bots/sync_engine_deps.py --mode ${mode}${includeWeb ? ' --web' : ''}"
 }
 
 // Explicit build parameters win over Jenkins installation settings.
@@ -152,22 +127,7 @@ def seedArtifactMirror(Set<String> hosts) {
 }
 
 def bootstrapEngineDependenciesWindows() {
-    if (!params.SYNC_ENGINE_DEPS) {
-        def dependenciesPresent = powershell(
-            returnStatus: true,
-            script: '''
-                if ((Test-Path -LiteralPath '.gclient') -and
-                    (Test-Path -LiteralPath 'engine/src/flutter/prebuilts/windows-x64/dart-sdk/bin/dart.exe')) {
-                  exit 0
-                }
-                exit 1
-            ''',
-        ) == 0
-        if (dependenciesPresent) {
-            return
-        }
-        echo 'Engine dependencies are missing; bootstrapping this persistent workspace despite SYNC_ENGINE_DEPS=false.'
-    }
+    def mode = engineDepsSyncMode(params.SYNC_ENGINE_DEPS)
     // Apply long-path support to every Git process spawned by gclient. A local
     // setting on the framework checkout does not propagate into its child
     // dependency repositories.
@@ -176,14 +136,7 @@ def bootstrapEngineDependenciesWindows() {
         'GIT_CONFIG_KEY_0=core.longpaths',
         'GIT_CONFIG_VALUE_0=true',
     ]) {
-        powershell '''
-            $ErrorActionPreference = 'Stop'
-            if (!(Test-Path -LiteralPath '.gclient')) {
-              Copy-Item -LiteralPath 'engine/scripts/standard.gclient' -Destination '.gclient'
-            }
-            gclient sync -D
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        '''
+        bat "${params.WINDOWS_PYTHON} dev/bots/sync_engine_deps.py --mode ${mode}"
     }
 }
 
@@ -674,7 +627,7 @@ pipeline {
         string(name: 'UPLOAD_CREDENTIALS_ID', defaultValue: '', description: 'Secret-text credential for AccessKey. Empty uses WSC_UPLOAD_CREDENTIALS_ID or HTTP_UPLOAD_KEY. Local servers may use a dummy secret.')
         string(name: 'TRANSFER_CONFIG_NAME', defaultValue: '', description: 'Jenkins Publish Over FTP or Publish Over SSH server configuration name.')
         string(name: 'TRANSFER_REMOTE_DIRECTORY', defaultValue: '', description: 'Remote directory below the configured FTP/SFTP server root. Empty publishes at its root.')
-        booleanParam(name: 'SYNC_ENGINE_DEPS', defaultValue: false, description: 'Run gclient sync on every build agent. When disabled, reuse complete persistent workspaces and bootstrap only those with missing dependencies.')
+        choice(name: 'SYNC_ENGINE_DEPS', choices: ['auto', 'true', 'false'], description: 'auto syncs changed dependency/patch inputs once per workspace; true always syncs; false only bootstraps missing dependencies. Existing workspaces sync once to initialize auto tracking.')
         string(name: 'WINDOWS_PYTHON', defaultValue: 'python', description: 'Python 3 command on Windows agents.')
     }
 
