@@ -4,8 +4,8 @@
 
 import 'dart:io' hide Platform;
 
-const String gobMirror = 'git@bitbucket.org:schoolcraftteam/flutter_wsc.git';
-const String githubRepo = 'git@bitbucket.org:schoolcraftteam/flutter_wsc.git';
+const String gobMirror = 'https://bitbucket.org/schoolcraftteam/flutter_wsc.git';
+const String githubRepo = 'https://bitbucket.org/schoolcraftteam/flutter_wsc.git';
 const String mingitForWindowsUrl =
     'https://storage.googleapis.com/flutter_infra_release/mingit/'
     '603511c649b00bbef0a6122a827ac419b656bc19/mingit.zip';

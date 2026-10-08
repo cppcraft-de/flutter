@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -55,12 +56,23 @@ def validate_archive(archive: Path, revision: str, channel: str, release_tag: st
         raise ValueError(f"{archive.name}: filename does not match the packaged WSC identity/channel.")
 
 
+def write_checksum(archive: Path) -> None:
+    digest = hashlib.sha256()
+    with archive.open('rb') as source:
+        while chunk := source.read(1024 * 1024):
+            digest.update(chunk)
+    archive.with_name(archive.name + '.sha256').write_text(
+        f'{digest.hexdigest()}  {archive.name}\n', encoding='utf-8',
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--revision", required=True, help="Full source commit SHA")
     parser.add_argument("--require-release-tag", action="store_true")
     parser.add_argument("--directory", type=Path, help="SDK output directory; omit for source preflight")
     parser.add_argument("--channel", choices=["main", "master", "beta", "stable"])
+    parser.add_argument("--write-checksums", action="store_true", help="Write SHA256 sidecars after validation")
     args = parser.parse_args()
     if not re.fullmatch(r"[0-9a-f]{40}", args.revision):
         parser.error("--revision must be a full lowercase commit SHA")
@@ -79,6 +91,8 @@ def main() -> None:
                 raise ValueError(f"No SDK ZIP found in {args.directory}")
             for archive in archives:
                 validate_archive(archive, args.revision, args.channel, release_tag)
+                if args.write_checksums:
+                    write_checksum(archive)
                 print(f"Validated SDK identity: {archive.name}")
     except (ValueError, KeyError, OSError, subprocess.CalledProcessError, zipfile.BadZipFile) as error:
         parser.exit(1, f"SDK identity validation failed: {error}\n")

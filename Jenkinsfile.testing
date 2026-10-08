@@ -10,6 +10,13 @@ def csvHas(String value, String item) {
     return csvValues(value).contains(item)
 }
 
+def scmPollingScheduleFor(String disabled) {
+    // Folder properties are strings: Groovy would treat even "false" as true.
+    return ['1', 'true', 'yes', 'on'].contains(disabled?.trim()?.toLowerCase())
+        ? ''
+        : 'H/5 * * * *'
+}
+
 def validateCsvParameter(String name, String value, Set<String> allowed) {
     def values = csvValues(value)
     def unknown = values - allowed
@@ -61,6 +68,87 @@ def bootstrapEngineDependenciesUnix(boolean includeWeb) {
     // A fresh Web workspace clones many large googlesource repositories. Keep
     // that initial fan-out low enough to avoid HTTP 429 throttling.
     sh(includeWeb ? 'gclient sync -D -j 1' : 'gclient sync -D')
+}
+
+// Explicit build parameters win over Jenkins installation settings.
+def artifactBaseUrl() {
+    return params.ARTIFACT_BASE_URL?.trim() ?: env.WSC_ARTIFACT_BASE_URL?.trim() ?: 'https://fluttertest.b-cdn.net'
+}
+
+def uploadBaseUrl() {
+    return params.HTTP_UPLOAD_BASE_URL?.trim() ?: env.WSC_HTTP_UPLOAD_BASE_URL?.trim() ?: 'https://storage.bunnycdn.com/fluttertest'
+}
+
+def uploadCredentialsId() {
+    return params.UPLOAD_CREDENTIALS_ID?.trim() ?: env.WSC_UPLOAD_CREDENTIALS_ID?.trim() ?: 'HTTP_UPLOAD_KEY'
+}
+
+def engineWorkspaceKey() {
+    def key = env.WSC_ENGINE_WORKSPACE_KEY?.trim()
+    def job = env.WSC_ENGINE_WORKSPACE_JOB?.trim()
+    if ((key && !job) || (job && !key)) {
+        error('Set both WSC_ENGINE_WORKSPACE_JOB (exact JOB_NAME) and WSC_ENGINE_WORKSPACE_KEY, or neither.')
+    }
+    // Folder properties are inherited by every branch. Only the named job may
+    // reuse an old workspace; all other jobs retain their own persistent paths.
+    return key && job == env.JOB_NAME ? key : env.JOB_NAME
+}
+
+def sdkOutputDirectory(String host) {
+    return "build/sdk-payload/sdk/${env.FRAMEWORK_REVISION}/${env.BUILD_NUMBER}/${host}"
+}
+
+def mailBuildLog(String scope, String result) {
+    def recipient = env.BUILD_LOG_MAIL_RECIPIENT?.trim()
+    if (!recipient) {
+        return
+    }
+    // Console attachments work without a workspace, including global post with
+    // agent none. Early notifications contain the whole run's log so far.
+    try {
+        emailext(
+            to: recipient,
+            subject: "Jenkins - WSC Flutter - ${env.JOB_NAME} #${env.BUILD_NUMBER} - ${scope} - ${result}",
+            body: """WSC Flutter build notification
+
+Scope: ${scope}
+Result: ${result}
+Node: ${env.NODE_NAME ?: 'not allocated'}
+Framework: ${env.FRAMEWORK_REVISION ?: 'unresolved'}
+Engine: ${env.ENGINE_ID ?: 'unresolved'}
+Targets: ${params.TARGETS ?: 'unresolved'}
+Modes: ${params.MODES ?: 'unresolved'}
+Host SDKs: ${params.HOST_SDKS ?: 'none'}
+Build: ${env.BUILD_URL ?: 'unavailable'}
+
+The compressed attachment contains the overall console log at notification time.
+An early failure notification does not mean the other parallel targets have stopped.
+""",
+            attachLog: true,
+            compressLog: true,
+        )
+    } catch (InterruptedException interrupted) {
+        // Do not turn cancellation into a successful notification step.
+        throw interrupted
+    } catch (Exception failure) {
+        // Notification trouble must not obscure the build's original result.
+        echo "WARNING: Could not send build log email for ${scope}; check Email Extension/SMTP configuration and its console messages."
+    }
+}
+
+def seedArtifactMirror(Set<String> hosts) {
+    // This is only the small seed staging tree, never an engine workspace.
+    dir('build/seed-payload') { deleteDir() }
+    def arguments = "--hosts ${hosts.sort().join(',')} --base-url \"${artifactBaseUrl()}\""
+    bat "${params.WINDOWS_PYTHON} dev/bots/seed_artifact_mirror.py ${arguments}"
+    def hasSeeds = powershell(
+        returnStdout: true,
+        script: "if (Get-ChildItem -LiteralPath 'build/seed-payload' -File -Recurse | Select-Object -First 1) { 'yes' }",
+    ).trim() == 'yes'
+    if (hasSeeds) {
+        publishArtifactTree('build/seed-payload')
+    }
+    bat "${params.WINDOWS_PYTHON} dev/bots/seed_artifact_mirror.py ${arguments} --verify-only"
 }
 
 def bootstrapEngineDependenciesWindows() {
@@ -147,24 +235,13 @@ def collectArtifactsWindows(String builder, List<String> buildNames, boolean inc
 
 def publishArtifactTree(String root) {
     if (params.UPLOAD_TRANSPORT == 'http_put') {
-        def uploadBaseUrl = params.HTTP_UPLOAD_BASE_URL.trim().isEmpty() ? params.ARTIFACT_BASE_URL : params.HTTP_UPLOAD_BASE_URL
-        def upload = {
+        def destination = uploadBaseUrl()
+        withCredentials([string(credentialsId: uploadCredentialsId(), variable: 'HTTP_UPLOAD_KEY')]) {
             if (isUnix()) {
-                sh "python3 dev/bots/upload_artifact_tree.py --root '${root}' --base-url '${uploadBaseUrl}'"
+                sh "python3 dev/bots/upload_artifact_tree.py --root '${root}' --base-url '${destination}'"
             } else {
-                bat "${params.WINDOWS_PYTHON} dev\\bots\\upload_artifact_tree.py --root \"${root}\" --base-url \"${uploadBaseUrl}\""
+                bat "${params.WINDOWS_PYTHON} dev\\bots\\upload_artifact_tree.py --root \"${root}\" --base-url \"${destination}\""
             }
-        }
-        if (params.UPLOAD_AUTH == 'basic') {
-            withCredentials([usernamePassword(credentialsId: params.UPLOAD_CREDENTIALS_ID, usernameVariable: 'ARTIFACT_UPLOAD_USER', passwordVariable: 'ARTIFACT_UPLOAD_PASSWORD')]) {
-                upload()
-            }
-        } else if (params.UPLOAD_AUTH == 'bearer') {
-            withCredentials([string(credentialsId: params.UPLOAD_CREDENTIALS_ID, variable: 'ARTIFACT_UPLOAD_BEARER_TOKEN')]) {
-                upload()
-            }
-        } else {
-            upload()
         }
     } else if (params.UPLOAD_TRANSPORT == 'ftp') {
         ftpPublisher(
@@ -431,7 +508,7 @@ def buildWebTarget() {
 
 def validateSdkArchive(String host) {
     def requireTag = params.REQUIRE_RELEASE_TAG ? '--require-release-tag' : ''
-    def arguments = "--directory build/sdk-output/${host} --revision ${env.FRAMEWORK_REVISION} --channel ${params.RELEASE_BRANCH} ${requireTag}"
+    def arguments = "--directory ${sdkOutputDirectory(host)} --revision ${env.FRAMEWORK_REVISION} --channel ${params.RELEASE_BRANCH} --write-checksums ${requireTag}"
     if (isUnix()) {
         sh "python3 dev/bots/validate_sdk_identity.py ${arguments}"
     } else {
@@ -439,10 +516,36 @@ def validateSdkArchive(String host) {
     }
 }
 
+def withSdkGitCredentials(Closure body) {
+    def credentialsId = scm.userRemoteConfigs[0].credentialsId
+    if (!credentialsId) {
+        error('SDK packaging requires the SCM username/password credential for its HTTPS source clone.')
+    }
+    // Reuse the job credential and Git installation. Jenkins supplies and removes
+    // the temporary GIT_ASKPASS helper on both Windows and Unix.
+    withCredentials([gitUsernamePassword(
+        credentialsId: credentialsId,
+        gitToolName: scm.gitTool,
+    )]) {
+        // Do not use or populate an agent user's persistent credential store.
+        // These overrides are inherited by the packager's child Git processes,
+        // not written into the SDK's .git/config.
+        withEnv([
+            'GIT_TERMINAL_PROMPT=0',
+            'GCM_INTERACTIVE=Never',
+            'GIT_CONFIG_COUNT=1',
+            'GIT_CONFIG_KEY_0=credential.helper',
+            'GIT_CONFIG_VALUE_0=',
+        ]) {
+            body()
+        }
+    }
+}
+
 def createSdkArchiveUnix(String host) {
-    def outputDirectory = "build/sdk-output/${host}"
+    def outputDirectory = sdkOutputDirectory(host)
     withEnv([
-        "FLUTTER_STORAGE_BASE_URL=${params.ARTIFACT_BASE_URL}",
+        "FLUTTER_STORAGE_BASE_URL=${artifactBaseUrl()}",
         "SDK_OUTPUT_DIRECTORY=${outputDirectory}",
         "SDK_FRAMEWORK_REVISION=${env.FRAMEWORK_REVISION}",
         "SDK_RELEASE_BRANCH=${params.RELEASE_BRANCH}",
@@ -453,17 +556,7 @@ def createSdkArchiveUnix(String host) {
             ./bin/cache/dart-sdk/bin/dart pub get --directory dev/bots
             mkdir -p "$SDK_OUTPUT_DIRECTORY"
 
-            command -v setsid >/dev/null
-            askpass_file="$(mktemp "${TMPDIR:-/tmp}/jenkins-ssh-askpass.XXXXXX")"
-            trap 'rm -f "$askpass_file"' EXIT
-            printf '%s\n' '#!/bin/sh' 'printf "%s\n" "$WSC_GIT_SSH_PASSPHRASE"' > "$askpass_file"
-            chmod 700 "$askpass_file"
-            export SSH_ASKPASS="$askpass_file"
-            export SSH_ASKPASS_REQUIRE=force
-            export DISPLAY=:0
-            export GIT_SSH_COMMAND="ssh -i \"$WSC_GIT_SSH_KEY\" -o IdentitiesOnly=yes"
-
-            setsid -w ./bin/cache/dart-sdk/bin/dart dev/bots/prepare_package.dart \
+            ./bin/cache/dart-sdk/bin/dart dev/bots/prepare_package.dart \
               --revision "$SDK_FRAMEWORK_REVISION" \
               --branch "$SDK_RELEASE_BRANCH" \
               --dry_run \
@@ -472,11 +565,12 @@ def createSdkArchiveUnix(String host) {
     }
     validateSdkArchive(host)
     archiveArtifacts artifacts: "${outputDirectory}/*", fingerprint: true
+    publishArtifactTree('build/sdk-payload')
 }
 
 def createSdkArchiveWindows() {
-    def outputDirectory = 'build\\sdk-output\\windows'
-    withEnv(["FLUTTER_STORAGE_BASE_URL=${params.ARTIFACT_BASE_URL}"]) {
+    def outputDirectory = sdkOutputDirectory('windows').replace('/', '\\')
+    withEnv(["FLUTTER_STORAGE_BASE_URL=${artifactBaseUrl()}"]) {
         bat """
             call bin\\flutter.bat --version || exit /b 1
             bin\\cache\\dart-sdk\\bin\\dart.exe pub get --directory dev\\bots || exit /b 1
@@ -485,7 +579,8 @@ def createSdkArchiveWindows() {
         """
     }
     validateSdkArchive('windows')
-    archiveArtifacts artifacts: 'build/sdk-output/windows/*', fingerprint: true
+    archiveArtifacts artifacts: "${sdkOutputDirectory('windows')}/*", fingerprint: true
+    publishArtifactTree('build/sdk-payload')
 }
 
 def checkoutFullSource(boolean cleanWorkspace) {
@@ -543,33 +638,40 @@ pipeline {
         timestamps()
         skipDefaultCheckout(true)
         disableConcurrentBuilds()
+        overrideIndexTriggers(false)
+        withFolderProperties()
+    }
+
+    triggers {
+        // Enable "Expose these properties at build start" on the Jenkins folder.
+        // Empty schedule disables periodic polling. Applied on the next run.
+        pollSCM(scmPollingScheduleFor(env.DISABLE_SCM_POLLING))
     }
 
     parameters {
         string(
             name: 'TARGETS',
-            defaultValue: 'windows,macos',
+            defaultValue: 'windows,android,web',
             description: 'Comma-separated engine targets: android, ios, windows, macos, web.',
         )
         string(
             name: 'MODES',
-            defaultValue: 'debug',
+            defaultValue: 'debug,profile,release',
             description: 'Comma-separated runtime modes: debug, profile, release. Web is built once and ignores this axis.',
         )
         string(
             name: 'HOST_SDKS',
-            defaultValue: '',
+            defaultValue: 'windows',
             description: 'Comma-separated host SDK archives to create: windows, macos. Leave empty to skip SDK archives.',
         )
         choice(name: 'BUILD_POLICY', choices: ['incremental', 'full_rebuild'], description: 'incremental always invokes the selected builds and keeps local Ninja outputs; full_rebuild first deletes engine/src/out.')
-        choice(name: 'RELEASE_BRANCH', choices: ['main', 'stable', 'beta', 'master'], description: 'Branch/channel stored in the SDK archive.')
+        choice(name: 'RELEASE_BRANCH', choices: ['stable', 'main', 'beta', 'master'], description: 'Branch/channel stored in the SDK archive.')
         booleanParam(name: 'REQUIRE_RELEASE_TAG', defaultValue: false, description: 'Require an exact WSC release tag and matching SDK ZIP metadata. Leave false for development/staging builds; independent of BUILD_POLICY.')
-        string(name: 'ARTIFACT_BASE_URL', defaultValue: 'http://192.168.0.63:8765', description: 'HTTP(S) download root, without /flutter_infra_release and without a trailing slash.')
-        booleanParam(name: 'PUBLISH_ENGINE_ARTIFACTS', defaultValue: false, description: 'Publish each target artifact tree directly from its build agent.')
+        string(name: 'ARTIFACT_BASE_URL', defaultValue: '', description: 'Download root override, no trailing slash. Empty uses WSC_ARTIFACT_BASE_URL or https://fluttertest.b-cdn.net.')
+        booleanParam(name: 'PUBLISH_ENGINE_ARTIFACTS', defaultValue: true, description: 'Publish each target artifact tree directly from its build agent.')
         choice(name: 'UPLOAD_TRANSPORT', choices: ['http_put', 'ftp', 'sftp'], description: 'HTTP PUT helper, Publish Over FTP, or Publish Over SSH/SFTP.')
-        string(name: 'HTTP_UPLOAD_BASE_URL', defaultValue: '', description: 'HTTP PUT destination root. Empty means ARTIFACT_BASE_URL.')
-        choice(name: 'UPLOAD_AUTH', choices: ['none', 'basic', 'bearer'], description: 'Authentication used by the HTTP PUT endpoint.')
-        string(name: 'UPLOAD_CREDENTIALS_ID', defaultValue: '', description: 'HTTP PUT username/password or secret-text Jenkins credential ID.')
+        string(name: 'HTTP_UPLOAD_BASE_URL', defaultValue: '', description: 'Upload root override, no trailing slash. Empty uses WSC_HTTP_UPLOAD_BASE_URL or https://storage.bunnycdn.com/fluttertest.')
+        string(name: 'UPLOAD_CREDENTIALS_ID', defaultValue: '', description: 'Secret-text credential for AccessKey. Empty uses WSC_UPLOAD_CREDENTIALS_ID or HTTP_UPLOAD_KEY. Local servers may use a dummy secret.')
         string(name: 'TRANSFER_CONFIG_NAME', defaultValue: '', description: 'Jenkins Publish Over FTP or Publish Over SSH server configuration name.')
         string(name: 'TRANSFER_REMOTE_DIRECTORY', defaultValue: '', description: 'Remote directory below the configured FTP/SFTP server root. Empty publishes at its root.')
         booleanParam(name: 'SYNC_ENGINE_DEPS', defaultValue: false, description: 'Run gclient sync on every build agent. When disabled, reuse complete persistent workspaces and bootstrap only those with missing dependencies.')
@@ -591,13 +693,17 @@ pipeline {
                     if (modes.isEmpty()) {
                         error('MODES must select at least one runtime mode.')
                     }
-                    if ((params.PUBLISH_ENGINE_ARTIFACTS || !hosts.isEmpty()) && params.ARTIFACT_BASE_URL.trim().isEmpty()) {
-                        error('ARTIFACT_BASE_URL is required when publishing or creating SDK archives.')
+                    [artifactBaseUrl(), uploadBaseUrl()].each { url ->
+                        if (!(url ==~ /https?:\/\/[A-Za-z0-9.:-]+(\/[A-Za-z0-9._~-]+)*/)) {
+                            error('Artifact URLs must be HTTP(S) roots without credentials, query strings, whitespace, or a trailing slash.')
+                        }
                     }
-                    if (!params.ARTIFACT_BASE_URL.trim().isEmpty() &&
-                        (!(params.ARTIFACT_BASE_URL ==~ /https?:\/\/[^\s'\"]+/) || params.ARTIFACT_BASE_URL.endsWith('/'))) {
-                        error('ARTIFACT_BASE_URL must be an HTTP(S) base URL without whitespace, quotes, or a trailing slash.')
+                    def workspaceKey = engineWorkspaceKey()
+                    if (!(workspaceKey ==~ /[A-Za-z0-9_.\/-]+/) || workspaceKey.split('/').any { it in ['', '.', '..'] } || workspaceKey.startsWith('/')) {
+                        error('The engine workspace key must be a relative job-style path without traversal or special characters.')
                     }
+                    echo "Download root: ${artifactBaseUrl()}; upload root: ${uploadBaseUrl()}"
+                    echo "Engine workspace key: ${workspaceKey}; policy: ${params.BUILD_POLICY}"
                     if (!hosts.isEmpty() && modes != (['debug', 'profile', 'release'] as Set)) {
                         error('Upstream SDK packaging runs an unfiltered precache; select all modes or leave HOST_SDKS empty.')
                     }
@@ -614,17 +720,9 @@ pipeline {
                             error("${host} SDK packaging precaches its standard target set; add ${missing.sort().join(', ')} to TARGETS or omit ${host} from HOST_SDKS.")
                         }
                     }
-                    if (params.PUBLISH_ENGINE_ARTIFACTS && params.UPLOAD_TRANSPORT == 'http_put' &&
-                        params.UPLOAD_AUTH != 'none' && params.UPLOAD_CREDENTIALS_ID.trim().isEmpty()) {
-                        error('UPLOAD_CREDENTIALS_ID is required for authenticated uploads.')
-                    }
                     if (params.PUBLISH_ENGINE_ARTIFACTS && params.UPLOAD_TRANSPORT != 'http_put' &&
                         params.TRANSFER_CONFIG_NAME.trim().isEmpty()) {
                         error('TRANSFER_CONFIG_NAME is required for FTP/SFTP publishing.')
-                    }
-                    if (!params.HTTP_UPLOAD_BASE_URL.trim().isEmpty() &&
-                        (!(params.HTTP_UPLOAD_BASE_URL ==~ /https?:\/\/[^\s'\"]+/) || params.HTTP_UPLOAD_BASE_URL.endsWith('/'))) {
-                        error('HTTP_UPLOAD_BASE_URL must be an HTTP(S) URL without whitespace, quotes, or a trailing slash.')
                     }
 
                     env.FRAMEWORK_REVISION = bat(script: '@git rev-parse HEAD', returnStdout: true).trim()
@@ -651,6 +749,16 @@ pipeline {
                         echo "WARNING: ${message} Incremental staging builds may continue, but production publishing must use the matching ID."
                     }
                     currentBuild.description = "${env.FRAMEWORK_REVISION.take(10)} / engine ${env.ENGINE_ID.take(10)} / ${params.BUILD_POLICY}"
+                    if (params.PUBLISH_ENGINE_ARTIFACTS && params.UPLOAD_TRANSPORT == 'http_put') {
+                        withCredentials([string(credentialsId: uploadCredentialsId(), variable: 'HTTP_UPLOAD_KEY')]) {
+                            if (!env.HTTP_UPLOAD_KEY?.trim()) {
+                                error('HTTP_UPLOAD_KEY must contain a key, or a dummy value for a local server.')
+                            }
+                        }
+                    }
+                    if (!hosts.isEmpty()) {
+                        seedArtifactMirror(hosts)
+                    }
                 }
             }
         }
@@ -708,10 +816,9 @@ pipeline {
                 agent {
                     node {
                         label "${BUILD_AGENT}"
-                        // TEMPORARY: reuse local 3.44.4 outputs during history-consolidation testing.
-                        // Restore ${JOB_NAME} before forward-porting or deploying to the client.
-                        // Never run concurrently with the old jenkins_build job.
-                        customWorkspace "engine-workspaces/flutter_wsc/jenkins_build/${BUILD_TARGET}"
+                        // Set the override in Jenkins, not in the shared source tree.
+                        // Never let two jobs share the same engine workspace concurrently.
+                        customWorkspace "engine-workspaces/${engineWorkspaceKey()}/${BUILD_TARGET}"
                     }
                 }
                 stages {
@@ -726,12 +833,7 @@ pipeline {
                                     bat 'git config core.longpaths true'
                                     checkout scm
                                 } else {
-                                    // Inbound Unix agents launched from Terminal inherit a TTY.
-                                    // Force OpenSSH to use Jenkins' generated askpass helper so
-                                    // encrypted SSH credentials remain fully non-interactive.
-                                    withEnv(['SSH_ASKPASS_REQUIRE=force']) {
-                                        checkout scm
-                                    }
+                                    checkout scm
                                 }
                                 echo "Persistent target workspace: ${pwd()}"
                                 if (params.BUILD_POLICY == 'full_rebuild') {
@@ -782,6 +884,13 @@ pipeline {
                         }
                     }
                 }
+                post {
+                    failure {
+                        script {
+                            mailBuildLog("Engine ${env.BUILD_TARGET} on ${env.BUILD_AGENT}", 'FAILURE')
+                        }
+                    }
+                }
             }
         }
 
@@ -796,7 +905,14 @@ pipeline {
                     steps {
                         script {
                             checkoutSdkSource()
-                            createSdkArchiveWindows()
+                            withSdkGitCredentials {
+                                createSdkArchiveWindows()
+                            }
+                        }
+                    }
+                    post {
+                        failure {
+                            script { mailBuildLog('Windows SDK packaging', 'FAILURE') }
                         }
                     }
                 }
@@ -805,21 +921,15 @@ pipeline {
                     agent { label 'flutter_macos' }
                     steps {
                         script {
-                            withEnv(['SSH_ASKPASS_REQUIRE=force']) {
-                                checkoutSdkSource()
-                            }
-                            def checkoutCredentialsId = scm.userRemoteConfigs[0].credentialsId
-                            if (!checkoutCredentialsId) {
-                                error('The macOS SDK packager requires an SSH credential for its nested source clone.')
-                            }
-                            withCredentials([sshUserPrivateKey(
-                                credentialsId: checkoutCredentialsId,
-                                keyFileVariable: 'WSC_GIT_SSH_KEY',
-                                passphraseVariable: 'WSC_GIT_SSH_PASSPHRASE',
-                                usernameVariable: 'WSC_GIT_SSH_USER',
-                            )]) {
+                            checkoutSdkSource()
+                            withSdkGitCredentials {
                                 createSdkArchiveUnix('macos')
                             }
+                        }
+                    }
+                    post {
+                        failure {
+                            script { mailBuildLog('macOS SDK packaging', 'FAILURE') }
                         }
                     }
                 }
@@ -830,6 +940,9 @@ pipeline {
     post {
         always {
             echo "Framework: ${env.FRAMEWORK_REVISION ?: 'unresolved'}; engine: ${env.ENGINE_ID ?: 'unresolved'}"
+        }
+        cleanup {
+            script { mailBuildLog('Final result', currentBuild.currentResult) }
         }
     }
 }

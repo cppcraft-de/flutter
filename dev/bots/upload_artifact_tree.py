@@ -6,6 +6,7 @@ not appear in process arguments:
 
   ARTIFACT_UPLOAD_USER / ARTIFACT_UPLOAD_PASSWORD
   ARTIFACT_UPLOAD_BEARER_TOKEN
+  HTTP_UPLOAD_KEY (sent as AccessKey)
 """
 
 from __future__ import annotations
@@ -18,6 +19,42 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+
+
+class _NoUploadRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, message, headers, new_url):
+        # Never forward upload credentials to a redirect destination.
+        return None
+
+
+def upload_file(path: Path, url: str, attempts: int = 3) -> None:
+    if attempts < 1:
+        raise ValueError("attempts must be positive")
+    headers = {"Content-Length": str(path.stat().st_size)}
+    access_key = os.environ.get("HTTP_UPLOAD_KEY")
+    if access_key is not None and not access_key.strip():
+        raise ValueError("HTTP_UPLOAD_KEY must not be empty (use a dummy value for local testing)")
+    if access_key:
+        headers["AccessKey"] = access_key
+    else:
+        authorization = _authorization_header()
+        if authorization:
+            headers["Authorization"] = authorization
+    opener = urllib.request.build_opener(_NoUploadRedirects())
+    for attempt in range(1, attempts + 1):
+        try:
+            with path.open("rb") as source:
+                request = urllib.request.Request(url, data=source, headers=headers, method="PUT")
+                with opener.open(request, timeout=300) as response:
+                    if not 200 <= response.status < 300:
+                        raise RuntimeError(f"Upload returned HTTP {response.status}: {url}")
+            return
+        except (OSError, urllib.error.URLError) as error:
+            if isinstance(error, urllib.error.HTTPError):
+                error.close()
+            if attempt == attempts:
+                raise RuntimeError(f"Failed to upload {path} to {url}") from error
+            time.sleep(2**attempt)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -52,7 +89,8 @@ def main() -> None:
     if not files:
         raise RuntimeError(f"Artifact root is empty: {root}")
 
-    authorization = _authorization_header()
+    if args.attempts < 1:
+        raise ValueError("--attempts must be positive")
     base_url = args.base_url.rstrip("/")
     for index, path in enumerate(files, start=1):
         relative = path.relative_to(root).as_posix()
@@ -62,26 +100,7 @@ def main() -> None:
         if args.dry_run:
             continue
 
-        headers = {"Content-Length": str(path.stat().st_size)}
-        if authorization:
-            headers["Authorization"] = authorization
-        for attempt in range(1, args.attempts + 1):
-            try:
-                with path.open("rb") as source:
-                    request = urllib.request.Request(
-                        url,
-                        data=source,
-                        headers=headers,
-                        method="PUT",
-                    )
-                    with urllib.request.urlopen(request) as response:
-                        if response.status < 200 or response.status >= 300:
-                            raise RuntimeError(f"Upload returned HTTP {response.status}: {url}")
-                break
-            except (OSError, urllib.error.URLError) as error:
-                if attempt == args.attempts:
-                    raise RuntimeError(f"Failed to upload {path} to {url}") from error
-                time.sleep(2**attempt)
+        upload_file(path, url, args.attempts)
 
 
 if __name__ == "__main__":

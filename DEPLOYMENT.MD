@@ -114,11 +114,15 @@ for the platform-specific engine archives.
 Some universal artifacts are pinned outside the engine-ID tree and are not
 produced by an engine build. For this checkout they are identified by
 `bin/internal/material_fonts.version` and
-`bin/internal/gradle_wrapper.version`. Seed those exact immutable upstream
-objects into the mirror before SDK packaging. Preserve their complete relative
-paths, verify their upstream hashes, and repeat this check after every upstream
-rebase because the pins can change. Do not solve a missing global object by
-adding an automatic fallback to public storage.
+`bin/internal/gradle_wrapper.version`. The pipeline runs
+`dev/bots/seed_artifact_mirror.py` before engine builds when SDK packaging is
+selected. It checks the download endpoint with anonymous HEAD requests, stages
+only 404-missing inputs from upstream Google storage, checks the supplied MD5
+integrity hash, and logs their SHA256 values. The regular uploader publishes
+them without changing their relative paths. A second HEAD pass allows bounded
+CDN propagation time before continuing. Authentication/network/server errors
+fail the build; they are not treated as missing files. This is CI seeding, not
+a developer-side fallback to public storage and not remote engine-build reuse.
 
 macOS SDK packaging also precaches Flutter's pinned iOS device-support tools:
 `libimobiledevice`, `libusbmuxd`, `libplist`, `openssl`,
@@ -186,9 +190,12 @@ Web, and Windows artifacts, while a macOS SDK requires Android, iOS, Web, and
 macOS artifacts. Both require all three native modes. Use an empty `HOST_SDKS`
 value for intentionally partial engine-only builds.
 
-`Jenkinsfile.testing` intentionally starts with a smaller default while the
-pipeline is being commissioned: `TARGETS=windows,macos`, `MODES=debug`, and an
-empty `HOST_SDKS`. Windows uses `flutter_win`, macOS and iOS use
+`Jenkinsfile.testing` defaults to commissioning a complete Windows SDK:
+`TARGETS=windows,android,web`, `MODES=debug,profile,release`, `HOST_SDKS=windows`,
+`BUILD_POLICY=incremental`, `PUBLISH_ENGINE_ARTIFACTS=true`, and channel
+`stable`. For both host SDKs select all five targets and `HOST_SDKS=windows,macos`.
+The first build on a new agent must compile; later builds reuse Ninja outputs.
+Windows uses `flutter_win`, macOS and iOS use
 `flutter_macos`, and Android and Web use `flutter_linux`. The Android and Web
 builders are upstream Linux release configurations. In the current pipeline,
 the Linux agent produces the complete Android target runtime, JAR, Maven, and
@@ -302,11 +309,22 @@ available to the same branch and target on later runs. The pipeline deletes
 only `build/artifact-payload` during normal `incremental` builds;
 `full_rebuild` is the explicit operation that removes `engine/src/out`.
 
-Temporary local exception: `wsc-main-3.44.4` hardcodes the existing
-`engine-workspaces/flutter_wsc/jenkins_build/<BUILD_TARGET>` paths in
-`Jenkinsfile.testing` to preserve Ninja's absolute paths during consolidation
-testing. There is no workspace override parameter. Restore `${JOB_NAME}` before
-forward-porting or deploying to the client. Keep the old `jenkins_build` job
+For local consolidation testing, set these two folder properties **before the
+next local run**, with **Expose these properties at build start** enabled:
+
+```text
+WSC_ENGINE_WORKSPACE_JOB=flutter_wsc/wsc-main-3.44.4
+WSC_ENGINE_WORKSPACE_KEY=flutter_wsc/jenkins_build
+```
+
+The selector must equal the full Jenkins `JOB_NAME`, including any parent
+folders. Only that exact job uses the override; other branches inherit the
+properties but keep their normal job-specific paths. Both properties must be
+set together, or the pipeline fails early instead of guessing. This preserves
+existing absolute paths and Ninja outputs without hardcoding a local path in
+the shared Jenkinsfile. Leave both unset on the client: `JOB_NAME` already gives
+persistent per-job workspaces. Do not change the pair between iterations or
+reuse the outputs for unrelated release lines. Keep the old `jenkins_build` job
 stopped, suppress automatic SCM/indexing builds, and check queued builds before
 running the new branch. `disableConcurrentBuilds()` only serializes one job;
 there is no cross-job lock. Use `BUILD_POLICY=incremental` and, after confirming
@@ -386,51 +404,44 @@ has built and uploaded successfully.
    rather than `7za.exe`; verify the command name actually used by the
    packager. The inner SDK checkout enables `core.longpaths`, but the Jenkins
    service account and filesystem must still support long paths.
-5. macOS needs Xcode and enough free space for macOS and iOS outputs. If the
-   Jenkins Git client is launched with
-   `-Dorg.jenkinsci.plugins.gitclient.CliGitAPIImpl.useSETSID=true`, ensure
-   `setsid` is on the agent process's `PATH` and restart the agent after changing
-   its Java options or environment.
-6. Set `WINDOWS_PYTHON` if `python3` is not the Python command on Windows.
-   Install Jenkins Publish Over FTP when using `UPLOAD_TRANSPORT=ftp`, or
-   Publish Over SSH when using `sftp`.
-7. Ensure that every SDK-packaging agent can authenticate to the fork URL
-   declared in `dev/bots/prepare_package/common.dart` and fetch the exact commit
-   selected by the multibranch job. It currently uses the repository's
-   Bitbucket SSH URL. Use a repository access/deploy key or a dedicated
-   read-only service account. Store the private key and, if it is encrypted,
-   its passphrase in Jenkins credentials; never put either in the Jenkinsfile.
-   The clone must complete non-interactively under the agent service account.
-   Note that the upstream package creator performs a second, raw SSH clone into
-   its temporary packaging directory. A Jenkins SCM checkout credential is not
-   automatically guaranteed to cover that subprocess; expose the same
-   credential to the packaging step with an SSH-agent wrapper or otherwise
-   provision non-interactive read access for the service account.
-8. Configure SSH host-key verification. Pinning Bitbucket's published host key
-   in `known_hosts` is preferable for production. Jenkins's "Accept first
-   connection" strategy is a reasonable bootstrap option on a controlled new
-   agent, but it trusts that first network connection. The raw packaging clone
-   must also see a valid `known_hosts` entry. Test SSH as the service account
-   rather than only from an administrator's terminal.
-
-   On a controlled first connection, run this as the agent OS user to populate
-   the normal OpenSSH `known_hosts` file:
-
-   ```sh
-   install -d -m 700 "$HOME/.ssh"
-   ssh -o StrictHostKeyChecking=accept-new -T git@bitbucket.org
-   chmod 600 "$HOME/.ssh/known_hosts"
-   ```
-
-   For stronger production verification, obtain Bitbucket's published host-key
-   fingerprint independently, compare it before accepting the key, and then
-   pin the verified key instead of trusting the first connection.
+5. macOS needs Xcode and enough free space for macOS and iOS outputs. The
+   current HTTPS Git setup does not require `setsid`, SSH keys, or `known_hosts`.
+   The earlier encrypted-SSH-key workaround is not part of this setup.
+6. `WINDOWS_PYTHON` defaults to `python`. Verify it runs under the agent account;
+   set the parameter to a working command if necessary. Verify Git, Python,
+   depot_tools/gclient, and `7za` in the actual agent process environment, not
+   only an interactive terminal. Required Jenkins plugins include Declarative
+   Pipeline, Git (with `gitUsernamePassword` binding), Credentials Binding,
+   Folder Properties (supporting build-start exposure), and Email Extension.
+   Install Publish Over FTP or Publish Over SSH only when selecting those
+   alternative upload transports.
+7. Configure the job's SCM URL as
+   `https://bitbucket.org/schoolcraftteam/flutter_wsc.git` (a slash, not a colon,
+   after the host). Select a **Username with password** Jenkins credential:
+   username `x-bitbucket-api-token-auth`, password a Bitbucket API token with
+   repository-read access. The credential ID is not hardcoded: both SDK stages
+   reuse `scm.userRemoteConfigs[0].credentialsId` for the packager's nested Git
+   clone via Jenkins' `gitUsernamePassword` binding. Jenkins supplies a temporary
+   askpass helper and masks the password; the pipeline disables interactive
+   prompts and persistent credential helpers for that scope. Never put the token
+   in a Git URL, source file, folder property, or build parameter.
+8. The packager's fork URL is declared in
+   `dev/bots/prepare_package/common.dart`; it also becomes the packaged SDK's
+   credential-free HTTPS `origin`. Every SDK agent must be able to clone it
+   with the job credential and fetch the selected build commit. The branch
+   named by `RELEASE_BRANCH` (default `stable`) must exist in that fork because
+   the packager initially clones that branch, then resets to the exact build
+   revision. Selecting `stable` does not change which commit Jenkins builds.
+   A different fork requires updating these URL constants and their tests.
 9. Enable `SYNC_ENGINE_DEPS` for production and whenever a persistent checkout
    may be missing or stale. Disable it only for deliberate, short incremental
    test cycles against an already-synchronized workspace.
-10. Set `ARTIFACT_BASE_URL` to the HTTP(S) download root described below. Select
-   `UPLOAD_TRANSPORT=http_put` and configure `UPLOAD_AUTH` plus
-   `UPLOAD_CREDENTIALS_ID`, or select `ftp`/`sftp` and set the Jenkins
+10. Set the artifact endpoints using the Jenkins environment settings below.
+   For `UPLOAD_TRANSPORT=http_put`, create a secret-text Jenkins credential
+   with ID `HTTP_UPLOAD_KEY` (or override `UPLOAD_CREDENTIALS_ID`). Its value
+   is sent only as the upload `AccessKey` header. The local test server can
+   ignore this header; use a dummy secret there. Alternatively select
+   `ftp`/`sftp` and set the Jenkins
    `TRANSFER_CONFIG_NAME`.
 11. Give each build agent network access and upload credentials for the selected
    artifact transport. Set suitable workspace and artifact-server retention
@@ -438,28 +449,108 @@ has built and uploaded successfully.
    symbols.
 12. Run an intentionally small first build (one target and one mode, with
    `HOST_SDKS` empty), verify upload and download behavior, then enable the full
-   release matrix.
+   release matrix. Alternatively, the default Windows SDK test selects
+   `TARGETS=windows,android,web`, `MODES=debug,profile,release`,
+   `HOST_SDKS=windows`, publishing enabled, and `BUILD_POLICY=incremental`.
+   Debug-only plus SDK packaging is deliberately rejected: upstream's
+   unfiltered precache requires the complete standard set. Empty workspaces
+   bootstrap dependencies even with `SYNC_ENGINE_DEPS=false`; that check is
+   not a completeness audit, so explicitly sync stale or partially populated
+   workspaces. The first build on a new agent still needs a full compilation.
+
+### Folder properties, polling, and build-log email
+
+Set installation-specific values under the parent folder's **Folder Properties**
+and enable **Expose these properties at build start**. In particular, the
+polling trigger is evaluated before the pipeline's normal folder-properties
+wrapper. Do not put secrets in folder properties.
+
+| Property | Local Jenkins | Client Jenkins |
+| --- | --- | --- |
+| `DISABLE_SCM_POLLING` | `1` | Unset or `0` |
+| `BUILD_LOG_MAIL_RECIPIENT` | Unset | Recipient email address |
+| `WSC_ARTIFACT_BASE_URL` | Local HTTP server URL | Unset for Bunny download default |
+| `WSC_HTTP_UPLOAD_BASE_URL` | Local PUT-capable server URL | Unset for Bunny storage default |
+| `WSC_UPLOAD_CREDENTIALS_ID` | Unset if the dummy credential is `HTTP_UPLOAD_KEY` | Unset if the real credential is `HTTP_UPLOAD_KEY` |
+| `WSC_ENGINE_WORKSPACE_JOB` | Exact job allowed to reuse the old workspace | Unset |
+| `WSC_ENGINE_WORKSPACE_KEY` | Old workspace key; requires the job selector | Unset |
+
+`DISABLE_SCM_POLLING` accepts `1`, `true`, `yes`, or `on` to disable polling,
+ignoring case and surrounding whitespace. Unset, empty, or other values enable
+`pollSCM('H/5 * * * *')`: check for changes approximately every five minutes,
+not an unconditional periodic build. The Jenkinsfile sets
+`overrideIndexTriggers(false)` and keeps `disableConcurrentBuilds()` without
+aborting a running build. Keep automatic SCM/indexing builds suppressed in the
+multibranch job configuration as well, including for newly discovered branches
+that have not run this Jenkinsfile yet. The parent **Periodically if not
+otherwise run** scan may stay unchecked; it is separate from branch polling.
+New branches then need a manual scan or other discovery event.
+
+Run each desired branch manually once after adopting this Jenkinsfile to
+register its polling schedule. Later folder-property changes also take effect
+when the pipeline next runs, not immediately on saving the folder. Disabling
+polling does not cancel already queued builds. Ordinary polling requests with
+the same parameters normally coalesce into one pending build per branch; the
+next pipeline resolves the branch tip at startup. Different parameter sets or
+different branch jobs are separate requests. A pipeline already started but
+waiting for an agent is already a running build, not a pending request.
+
+When `BUILD_LOG_MAIL_RECIPIENT` is nonempty, Email Extension sends a compressed
+console log immediately on a target/SDK stage failure, then a final build
+summary and log from global cleanup. Early messages contain the overall log so
+far, not only that target's output; other targets may still be running. No value
+means no email. Configure SMTP on the client; email delivery errors are logged
+without turning a successful compilation into a failed build.
+
+Push all supporting scripts with `Jenkinsfile.testing`, especially
+`seed_artifact_mirror.py`, `upload_artifact_tree.py`, `validate_sdk_identity.py`,
+and the HTTPS packaging URL change. Pushing the Jenkinsfile alone is not a
+complete deployment. Keep the script path `Jenkinsfile.testing`; no production
+`Jenkinsfile` is added by this change.
 
 The principal release parameters are:
 
 | Parameter | Purpose |
 | --- | --- |
-| `TARGETS` | Comma-separated engine targets. Testing default: Windows and macOS. |
-| `MODES` | Comma-separated native modes. Testing default: debug only. Web does not use this axis. |
-| `HOST_SDKS` | Windows and/or macOS host SDK archives. Leave empty for engine-only builds. SDK assembly requires all standard targets for that host and all three modes. |
+| `TARGETS` | Comma-separated engine targets. Default: `windows,android,web`. |
+| `MODES` | Default: `debug,profile,release`. Web does not use this axis. |
+| `HOST_SDKS` | Default: `windows`. Leave empty for engine-only builds. SDK assembly requires all standard targets for that host and all three modes. |
 | `BUILD_POLICY` | `incremental` preserves local Ninja outputs; `full_rebuild` deletes `engine/src/out` first. Neither skips work based on remote artifacts. |
 | `RELEASE_BRANCH` | Channel/branch metadata written into the SDK archive. It is separate from the immutable framework revision. |
 | `ARTIFACT_BASE_URL` | HTTP(S) root used by the packager and packaged SDKs for artifact downloads. |
 | `PUBLISH_ENGINE_ARTIFACTS` | Uploads each selected target directly from its build agent. Required when `HOST_SDKS` is non-empty. |
 | `UPLOAD_TRANSPORT` | `http_put`, `ftp`, or `sftp`. |
-| `HTTP_UPLOAD_BASE_URL` | Optional HTTP PUT root when upload and download URLs differ. Empty uses `ARTIFACT_BASE_URL`. |
+| `HTTP_UPLOAD_BASE_URL` | Explicit upload-root override; otherwise uses the Jenkins environment setting or client default below. |
+| `UPLOAD_CREDENTIALS_ID` | Secret-text credential ID. Empty uses `WSC_UPLOAD_CREDENTIALS_ID`, then `HTTP_UPLOAD_KEY`. Never put the key itself here. |
 | `TRANSFER_CONFIG_NAME` | Jenkins Publish Over FTP or Publish Over SSH server configuration name. Credentials live in that Jenkins configuration. |
 | `TRANSFER_REMOTE_DIRECTORY` | Optional directory below the configured FTP/SFTP server root. |
 
 ### Upload endpoint contract
 
+One Jenkinsfile is shared by local and client installations. Explicit non-empty
+URL parameters override Jenkins folder/environment variables; otherwise
+these defaults apply (no trailing slashes):
+
+| Jenkins environment variable | Default |
+| --- | --- |
+| `WSC_ARTIFACT_BASE_URL` | `https://fluttertest.b-cdn.net` |
+| `WSC_HTTP_UPLOAD_BASE_URL` | `https://storage.bunnycdn.com/fluttertest` |
+| `WSC_UPLOAD_CREDENTIALS_ID` | `HTTP_UPLOAD_KEY` |
+| `WSC_ENGINE_WORKSPACE_JOB` | Unset; exact `JOB_NAME` selector for the optional override |
+| `WSC_ENGINE_WORKSPACE_KEY` | The current `JOB_NAME`; override applies only to the selected job |
+
+For local testing set **both** URL variables to `http://192.168.0.63:8765`,
+set the workspace selector/key pair as documented above, and create a secret-text
+credential `HTTP_UPLOAD_KEY` with a non-empty dummy value. No real Bunny key is
+needed locally. Existing saved Jenkins parameter values can override these
+environment settings: leave the URL/credential parameters empty to inherit.
+Existing jobs may also retain old target/mode/SDK selections; review their
+parameters before running. Only the public download URL is embedded in SDKs.
+Set `DISABLE_SCM_POLLING=1` locally before the next run to avoid enabling the
+client's default five-minute polling schedule on the local installation.
+
 For `UPLOAD_TRANSPORT=http_put`, `dev/bots/upload_artifact_tree.py` treats
-`HTTP_UPLOAD_BASE_URL` (or `ARTIFACT_BASE_URL` when it is empty) as a
+the resolved upload URL (independent of the download URL) as a
 static-file root. The server must:
 
 - accept HTTP PUT requests to arbitrary nested paths and return a 2xx status;
@@ -471,6 +562,17 @@ static-file root. The server must:
 - serve the resulting objects with GET and HEAD to developer machines running
   the packaged SDK; and
 - use a TLS certificate trusted by both Jenkins agents and developer machines.
+
+Uploads send `AccessKey: <HTTP_UPLOAD_KEY>` from a scoped Jenkins credential
+binding. The uploader rejects redirects rather than forwarding credentials.
+HEAD/GET seed checks and downloads are anonymous. Configure the CDN to avoid
+long-lived negative caching of missing objects and stale caching of overwritten
+WIP engine artifacts; a propagation timeout fails the seed check rather than
+silently allowing packaging to continue. Only version-pinned upstream inputs
+are automatically selected, plus the documented unversioned coverage snapshot.
+The latter is seeded once if missing; deliberate refresh/promotion remains a
+release-policy decision. Seeding never replaces existing objects and never
+skips a requested engine build.
 
 Upload credentials are used only by Jenkins. The Flutter artifact downloader
 does not automatically reuse those credentials, so downloads should be
@@ -548,16 +650,18 @@ Jenkins upload credential. Keep their URL namespaces separate, for example:
 ```text
 https://downloads.example/flutter/flutter_infra_release/flutter/<engine-id>/...
 https://downloads.example/flutter/download.flutter.io/...
-https://downloads.example/flutter/wsc-sdk/<release-name>/flutter_windows_<release-name>.zip
-https://downloads.example/flutter/wsc-sdk/<release-name>/flutter_macos_<release-name>.zip
+https://downloads.example/flutter/sdk/<framework-commit>/<build-number>/windows/<archive>.zip
+https://downloads.example/flutter/sdk/<framework-commit>/<build-number>/macos/<archive>.zip
 ```
 
-The current `Jenkinsfile.testing` publishes the engine artifact trees but only
-stores completed SDK archives with Jenkins `archiveArtifacts`. It does not yet
-copy the SDK ZIPs into `wsc-sdk/`. Before production, add a small promotion or
-upload step for the ZIPs and their SHA-256 checksums. The upload must occur only
-after packaging and acceptance checks succeed; a failed build must not replace
-the currently advertised release.
+After engine uploads and SDK identity validation succeed, `Jenkinsfile.testing`
+publishes each SDK ZIP and its `.zip.sha256` sidecar in this hierarchy using the
+same uploader. Jenkins also retains both with `archiveArtifacts`. There is no
+mutable `latest` alias or automatic production promotion. If one host succeeds
+and another fails, the first host's WIP SDK may already be present; only treat
+the complete Jenkins run as accepted when all requested stages pass. Jobs that
+publish the same commit/build-number/host must use distinct storage roots if
+they need to retain different results.
 
 Direct download links are sufficient for an initial internal distribution.
 Flutter channel metadata such as `releases_windows.json` and

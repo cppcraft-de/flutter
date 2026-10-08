@@ -54,8 +54,8 @@ void main() {
       },
     );
     final gitCloneCommand = platform.isWindows
-        ? 'git clone --no-checkout -b beta git@bitbucket.org:schoolcraftteam/flutter_wsc.git flutter'
-        : 'git clone -b beta git@bitbucket.org:schoolcraftteam/flutter_wsc.git flutter';
+        ? 'git clone --no-checkout -b beta https://bitbucket.org/schoolcraftteam/flutter_wsc.git flutter'
+        : 'git clone -b beta https://bitbucket.org/schoolcraftteam/flutter_wsc.git flutter';
     final gitConfigureLongPathsCommand = platform.isWindows
         ? <String, List<ProcessResult>?>{'git config core.longpaths true': null}
         : <String, List<ProcessResult>?>{};
@@ -159,7 +159,7 @@ void main() {
             gitCloneCommand: null,
             ...gitConfigureLongPathsCommand,
             'git reset --hard $testRef': null,
-            'git remote set-url origin git@bitbucket.org:schoolcraftteam/flutter_wsc.git': null,
+            'git remote set-url origin https://bitbucket.org/schoolcraftteam/flutter_wsc.git': null,
             'git gc --prune=now --aggressive': null,
             'git describe --tags --exact-match $testRef': <ProcessResult>[
               ProcessResult(0, 0, 'v1.2.3', ''),
@@ -213,7 +213,7 @@ void main() {
           gitCloneCommand: null,
           ...gitConfigureLongPathsCommand,
           'git reset --hard $testRef': null,
-          'git remote set-url origin git@bitbucket.org:schoolcraftteam/flutter_wsc.git': null,
+          'git remote set-url origin https://bitbucket.org/schoolcraftteam/flutter_wsc.git': null,
           'git gc --prune=now --aggressive': null,
           'git describe --tags --exact-match $testRef': <ProcessResult>[
             ProcessResult(0, 0, 'v1.2.3', ''),
@@ -278,7 +278,7 @@ void main() {
           gitCloneCommand: null,
           ...gitConfigureLongPathsCommand,
           'git reset --hard $testRef': null,
-          'git remote set-url origin git@bitbucket.org:schoolcraftteam/flutter_wsc.git': null,
+          'git remote set-url origin https://bitbucket.org/schoolcraftteam/flutter_wsc.git': null,
           'git gc --prune=now --aggressive': null,
           'git describe --tags --exact-match $testRef': <ProcessResult>[
             ProcessResult(0, 0, 'v1.2.3', ''),
@@ -358,7 +358,7 @@ void main() {
             gitCloneCommand: null,
             ...gitConfigureLongPathsCommand,
             'git reset --hard $testRef': null,
-            'git remote set-url origin git@bitbucket.org:schoolcraftteam/flutter_wsc.git': null,
+            'git remote set-url origin https://bitbucket.org/schoolcraftteam/flutter_wsc.git': null,
             'git gc --prune=now --aggressive': null,
             'git describe --tags --exact-match $testRef': <ProcessResult>[
               ProcessResult(0, 0, 'v1.2.3', ''),
@@ -407,7 +407,7 @@ void main() {
           gitCloneCommand: null,
           ...gitConfigureLongPathsCommand,
           'git reset --hard $testRef': null,
-          'git remote set-url origin git@bitbucket.org:schoolcraftteam/flutter_wsc.git': null,
+          'git remote set-url origin https://bitbucket.org/schoolcraftteam/flutter_wsc.git': null,
           'git gc --prune=now --aggressive': null,
           'git describe --tags --abbrev=0 $testRef': <ProcessResult>[
             ProcessResult(0, 0, 'v1.2.3', ''),
@@ -480,7 +480,7 @@ void main() {
           gitCloneCommand: null,
           ...gitConfigureLongPathsCommand,
           'git reset --hard $testRef': null,
-          'git remote set-url origin git@bitbucket.org:schoolcraftteam/flutter_wsc.git': null,
+          'git remote set-url origin https://bitbucket.org/schoolcraftteam/flutter_wsc.git': null,
           'git gc --prune=now --aggressive': null,
           'git describe --tags --exact-match $testRef': <ProcessResult>[
             ProcessResult(0, 0, 'v1.2.3', ''),
