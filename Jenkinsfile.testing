@@ -651,7 +651,7 @@ pipeline {
     parameters {
         string(
             name: 'TARGETS',
-            defaultValue: 'windows,android,web',
+            defaultValue: 'windows,macos,ios,android,web',
             description: 'Comma-separated engine targets: android, ios, windows, macos, web.',
         )
         string(
@@ -661,7 +661,7 @@ pipeline {
         )
         string(
             name: 'HOST_SDKS',
-            defaultValue: 'windows',
+            defaultValue: 'windows,macos',
             description: 'Comma-separated host SDK archives to create: windows, macos. Leave empty to skip SDK archives.',
         )
         choice(name: 'BUILD_POLICY', choices: ['incremental', 'full_rebuild'], description: 'incremental always invokes the selected builds and keeps local Ninja outputs; full_rebuild first deletes engine/src/out.')
