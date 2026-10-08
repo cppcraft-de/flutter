@@ -14,6 +14,7 @@
 #include "display_list/effects/dl_color_source.h"
 #include "display_list/utils/dl_receiver_utils.h"
 #include "flutter/display_list/skia/dl_sk_dispatcher.h"
+#include "flutter/fml/icu_util.h"
 #include "gtest/gtest.h"
 #include "include/core/SkBitmap.h"
 #include "include/core/SkCanvas.h"
@@ -280,6 +281,7 @@ TEST_F(PainterTest, SchoolcraftIntegerLineMetricsUseSignedPitchAndOccupiedBox) {
 // For the old engine, height includes the old client-side correction.
 // This also permits comparison against the pre-removal engine's libraries.
 TEST_F(PainterTest, FontDiagnosticsRenderingParity) {
+  fml::icu::InitializeICU("icudtl.dat");
   uint64_t fingerprint = 14695981039346656037ull;
   uint64_t diagnostic_fingerprint = 14695981039346656037ull;
   int corrected_paragraphs = 0;
@@ -289,19 +291,53 @@ TEST_F(PainterTest, FontDiagnosticsRenderingParity) {
       fingerprint = (fingerprint ^ bytes[i]) * 1099511628211ull;
     }
   };
-  for (const auto& family : {"ahem", "FlutterTest", "Cough"}) {
+  for (const auto& typeface : GetTestFontData()) {
+    ASSERT_NE(typeface, nullptr);
+    SkString family;
+    typeface->getFamilyName(&family);
     for (double font_size : {14.0, 19.25, 27.5}) {
       for (double height : {0.0, 0.8, 1.3}) {
+        // The client's empty-paragraph workaround formerly used the raw
+        // height of "a". With occupied height as the default, it must instead
+        // use baseline spacing to preserve the following paragraph's position.
+        auto blank_style = makeStyle();
+        blank_style.font_families = {family.c_str()};
+        blank_style.font_size = font_size;
+        blank_style.height = height;
+        blank_style.has_height_override = height != 0.0;
+        auto letter = layoutText(blank_style, u"a");
+        auto pair = layoutText(blank_style, u"a\na");
+        const auto& single_line = letter->GetLineMetrics();
+        const auto& paired_lines = pair->GetLineMetrics();
+        ASSERT_EQ(single_line.size(), 1u);
+        ASSERT_EQ(paired_lines.size(), 2u);
+        const double baseline_pitch =
+            paired_lines[1].baseline - paired_lines[0].baseline;
+        EXPECT_DOUBLE_EQ(baseline_pitch, single_line.front().height);
+#ifdef WSC_PARITY_BASELINE
+        const double blank_height = letter->GetHeight();
+#else
+        const double blank_height = baseline_pitch;
+#endif
+        std::ostringstream blank_geometry;
+        blank_geometry << std::setprecision(17) << blank_height;
+        const auto blank_value = blank_geometry.str();
+        hash(blank_value.data(), blank_value.size());
         for (const auto& text : {u"", u"AV ffi text\nsecond line",
                                  u"spaces wrap across multiple lines"}) {
           auto style = makeStyle();
-          style.font_families = {family};
+          style.font_families = {family.c_str()};
           style.font_size = font_size;
           style.height = height;
           style.has_height_override = height != 0.0;
           auto paragraph = layoutText(style, text);
           paragraph->Layout(120);
           const auto& lines = paragraph->GetLineMetrics();
+          if (std::u16string(text).find(u'\n') != std::u16string::npos) {
+            ASSERT_GE(lines.size(), 2u);
+          } else if (!std::u16string(text).empty()) {
+            ASSERT_FALSE(lines.empty());
+          }
           const double correction =
               lines.empty()
                   ? 0.0
