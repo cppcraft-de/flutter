@@ -1,0 +1,28 @@
+# WSC fork: agent entry point
+
+Read [DEPLOYMENT.MD](DEPLOYMENT.MD) for current CI behavior and configuration.
+Use [release maintenance](docs/wsc/releases.md) for versioning/rebases and the
+implementation map; use [artifact contracts](docs/wsc/artifacts.md) for storage
+and packaging. Temporary workstation exceptions belong only in
+[local testing](docs/wsc/local-testing.md).
+
+## Working rules
+
+- Keep the single pipeline in `Jenkinsfile.testing`. Do not introduce a root
+  `Jenkinsfile`, change Jenkins settings/credentials, launch builds, or move
+  public refs unless the user authorizes that action.
+- Preserve unrelated edits, nested dependency changes, and persistent engine
+  workspaces. Do not clean/move build outputs as part of a docs or source task.
+- Secrets belong in Jenkins credentials, never repository URLs, documentation,
+  logs, or packaged SDK files. Folder properties are not secret storage.
+- Preserve upstream tags and existing release artifacts. Keep WSC identity in
+  the existing tag/version machinery rather than adding another source of truth.
+- For docs changes, verify defaults against the pipeline and scripts. Update
+  the owning reference and link to it; do not replicate setup tables in README.
+- Report source tests, actual compilation, packaging, upload, and runtime
+  acceptance separately. Do not present a proposed workflow as implemented or
+  a local result as proof of client CI readiness.
+
+The remainder of the root README and `docs/` includes upstream Flutter
+documentation. Prefer a narrow WSC-specific entry/link over rewriting upstream
+guides. Do not commit generated package configs, caches, or local helper files.

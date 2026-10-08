@@ -21,6 +21,14 @@ mobile, web, and desktop from a single codebase. Flutter works with existing
 code, is used by developers and organizations around the world, and is free and
 open source.
 
+## WSC fork
+
+This repository contains the WSC Flutter patches and SDK build pipeline.
+For client CI setup, artifact hosting, SDK distribution, and links to release
+maintenance, start with [WSC deployment](DEPLOYMENT.MD).
+Automation agents should also read [AGENTS.md](AGENTS.md).
+The documentation and badges below are the upstream Flutter project overview.
+
 ## Documentation
 
 * [Install Flutter](https://docs.flutter.dev/get-started)
