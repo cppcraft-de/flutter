@@ -44,9 +44,19 @@ class PublishingTest(unittest.TestCase):
                 self.send_response(200)
                 self.send_header("Content-Length", str(len(data)))
                 md5 = hashlib.md5(data, usedforsecurity=False).digest()
-                if self.path == "/bad-checksum":
+                if self.path in ("/bad-checksum", "/bad-split-checksum"):
                     md5 = b"wrong"
-                self.send_header("x-goog-hash", "crc32c=unused,md5=" + base64.b64encode(md5).decode())
+                md5_header = "md5=" + base64.b64encode(md5).decode()
+                if self.path in ("/split-checksum", "/bad-split-checksum"):
+                    self.send_header("x-goog-hash", "crc32c=unused")
+                    self.send_header("x-goog-hash", md5_header)
+                elif self.path == "/split-md5-first":
+                    self.send_header("x-goog-hash", md5_header)
+                    self.send_header("x-goog-hash", "crc32c=unused")
+                elif self.path == "/missing-md5":
+                    self.send_header("x-goog-hash", "crc32c=unused")
+                elif self.path != "/missing-hashes":
+                    self.send_header("x-goog-hash", "crc32c=unused," + md5_header)
                 self.end_headers()
                 self.wfile.write(data)
 
@@ -133,6 +143,30 @@ class PublishingTest(unittest.TestCase):
         self.assertFalse((self.root / "bad.zip.partial").exists())
         for _, _, headers, _ in self.requests:
             self.assertNotIn("Accesskey", headers)
+
+    def test_download_accepts_split_checksum_headers_in_either_order(self):
+        with patch.object(seed, "UPSTREAM", self.url), redirect_stdout(io.StringIO()):
+            for relative in ("split-checksum", "split-md5-first"):
+                with self.subTest(relative=relative):
+                    destination = self.root / relative
+                    seed.download(relative, destination)
+                    self.assertEqual(destination.read_bytes(), b"fixture contents")
+                    self.assertFalse(destination.with_name(relative + ".partial").exists())
+
+    def test_download_rejects_bad_checksum_in_second_header(self):
+        destination = self.root / "bad.zip"
+        with patch.object(seed, "UPSTREAM", self.url), self.assertRaisesRegex(RuntimeError, "checksum mismatch"):
+            seed.download("bad-split-checksum", destination)
+        self.assertFalse(destination.exists())
+        self.assertFalse((self.root / "bad.zip.partial").exists())
+
+    def test_download_still_requires_md5(self):
+        with patch.object(seed, "UPSTREAM", self.url):
+            for relative in ("missing-md5", "missing-hashes"):
+                with self.subTest(relative=relative), self.assertRaisesRegex(RuntimeError, "no MD5"):
+                    seed.download(relative, self.root / relative)
+                self.assertFalse((self.root / relative).exists())
+                self.assertFalse((self.root / (relative + ".partial")).exists())
 
     def test_only_missing_seeds_are_staged_then_verified(self):
         self.objects["/already-present"] = b"keep"

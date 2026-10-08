@@ -70,9 +70,12 @@ def download(relative: str, destination: Path) -> None:
         with urllib.request.urlopen(f"{UPSTREAM}/{relative}", timeout=120) as response:
             if response.status != 200:
                 raise RuntimeError(f"Unexpected upstream status: {response.status}")
+            # Google can send one comma-separated field or repeated fields.
+            # HTTPMessage.get() reads only one and may miss the MD5 entirely.
             hashes = dict(
                 item.strip().split("=", 1)
-                for item in response.headers.get("x-goog-hash", "").split(",")
+                for header in response.headers.get_all("x-goog-hash", [])
+                for item in header.split(",")
                 if "=" in item
             )
             expected_md5 = hashes.get("md5")
