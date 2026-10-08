@@ -9,6 +9,14 @@ part of ui;
 // To change the sentinel value, search for "kTextHeightNone" in the source code.
 const double kTextHeightNone = 0.0;
 
+void configureFontRenderingDiagnostics({required bool enabled}) {
+  if (!engine.configureFontDiagnostics(enabled)) {
+    throw StateError('Font diagnostics must be configured before the first paragraph');
+  }
+}
+
+bool get fontRenderingDiagnosticsEnabled => engine.fontDiagnosticsEnabled;
+
 enum FontStyle { normal, italic }
 
 enum PlaceholderAlignment { baseline, aboveBaseline, belowBaseline, top, bottom, middle }
@@ -635,6 +643,7 @@ abstract class LineMetrics {
 }
 
 abstract class Paragraph {
+  double get paragraphBottomCorrection;
   double get width;
   double get height;
   double get longestLine;
@@ -657,6 +666,8 @@ abstract class Paragraph {
   TextRange getLineBoundary(TextPosition position);
   List<TextBox> getBoxesForPlaceholders();
   List<LineMetrics> computeLineMetrics();
+  Float64List computeDetailedLineMetricsForDiagnostics();
+  List<Object?> computeGlyphMetricsForDiagnostics();
   LineMetrics? getLineMetricsAt(int lineNumber);
   int get numberOfLines;
   int? getLineNumberAt(int codeUnitOffset);

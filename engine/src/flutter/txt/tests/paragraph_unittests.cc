@@ -4,13 +4,19 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iomanip>
+#include <iostream>
 #include <memory>
+#include <sstream>
 #include "display_list/dl_color.h"
 #include "display_list/dl_paint.h"
 #include "display_list/dl_tile_mode.h"
 #include "display_list/effects/dl_color_source.h"
 #include "display_list/utils/dl_receiver_utils.h"
+#include "flutter/display_list/skia/dl_sk_dispatcher.h"
 #include "gtest/gtest.h"
+#include "include/core/SkBitmap.h"
+#include "include/core/SkCanvas.h"
 #include "include/core/SkScalar.h"
 #include "runtime/test_font_data.h"
 #include "skia/paragraph_builder_skia.h"
@@ -200,20 +206,166 @@ class PainterTestBase : public CanvasTestBase<T> {
 
 using PainterTest = PainterTestBase<::testing::Test>;
 
+TEST_F(PainterTest, DetailedLineMetricsComeFromFinalLayout) {
+  auto paragraph = layoutText(makeStyle(), u"HHHH");
+  const auto& metrics = paragraph->GetLineMetrics();
+  const auto glyphs = paragraph->GetGlyphDiagnostics();
+
+  ASSERT_EQ(metrics.size(), 1u);
+  const txt::LineMetrics& line = metrics.front();
+  EXPECT_GT(line.raw_ascent, 0);
+  EXPECT_GE(line.raw_descent, 0);
+  EXPECT_GT(line.effective_ascent, 0);
+  EXPECT_GE(line.effective_descent, 0);
+  EXPECT_LT(line.height_input_ascent, 0);
+  EXPECT_GE(line.height_input_descent, 0);
+  const double expected_leading = std::max(0.0, line.raw_leading);
+  EXPECT_DOUBLE_EQ(line.line_height_branch, 2);
+  EXPECT_DOUBLE_EQ(
+      line.next_line_baseline_pitch,
+      std::ceil(line.raw_ascent + line.raw_descent + line.raw_leading));
+  EXPECT_DOUBLE_EQ(
+      line.line_box_height,
+      std::ceil(line.raw_ascent + line.raw_descent + expected_leading));
+  EXPECT_DOUBLE_EQ(line.height, line.next_line_baseline_pitch);
+  if (!skia::textlayout::FontDiagnosticsEnabled()) {
+    EXPECT_TRUE(glyphs.empty());
+    return;
+  }
+  ASSERT_EQ(glyphs.size(), 4u);
+  EXPECT_EQ(glyphs.front().fLineNumber, 0);
+  EXPECT_LT(glyphs.front().fFontMetrics.fAscent, 0);
+  EXPECT_GE(glyphs.front().fFontMetrics.fDescent, 0);
+  EXPECT_GT(glyphs.front().fGlyph, 0);
+  EXPECT_GT(glyphs.front().fAdvance.fX, 0);
+  EXPECT_EQ(glyphs.front().fInkBounds,
+            glyphs.front().fBounds.makeOffset(glyphs.front().fFinalOrigin));
+}
+
 TEST_F(PainterTest, SchoolcraftIntegerLineMetricsUseSignedPitchAndOccupiedBox) {
   auto style = makeStyle();
   style.font_size = 19;
   auto paragraph = layoutText(style, u"HHHH");
   const auto& metrics = paragraph->GetLineMetrics();
+  const auto glyphs = paragraph->GetGlyphDiagnostics();
 
   ASSERT_EQ(metrics.size(), 1u);
+  if (!skia::textlayout::FontDiagnosticsEnabled()) {
+    EXPECT_TRUE(glyphs.empty());
+    return;
+  }
+  ASSERT_EQ(glyphs.size(), 4u);
   const txt::LineMetrics& line = metrics.front();
-  EXPECT_GT(line.ascent, 0);
-  EXPECT_GE(line.descent, 0);
-  EXPECT_DOUBLE_EQ(line.ascent, std::ceil(line.ascent));
-  EXPECT_DOUBLE_EQ(line.descent, std::ceil(line.descent));
-  EXPECT_DOUBLE_EQ(line.baseline, line.ascent);
-  EXPECT_DOUBLE_EQ(line.height, paragraph->GetHeight());
+  const double expected_ascent = std::ceil(line.raw_ascent);
+  const double expected_descent = std::ceil(line.raw_descent);
+  const double expected_leading = std::max(0.0, line.raw_leading);
+  const double expected_baseline_pitch =
+      std::ceil(line.raw_ascent + line.raw_descent + line.raw_leading);
+  const double expected_occupied_height =
+      std::ceil(line.raw_ascent + line.raw_descent + expected_leading);
+
+  EXPECT_DOUBLE_EQ(line.effective_ascent, expected_ascent);
+  EXPECT_DOUBLE_EQ(line.effective_descent, expected_descent);
+  EXPECT_DOUBLE_EQ(line.effective_leading, expected_leading);
+  EXPECT_DOUBLE_EQ(line.line_height_branch, 2);
+  EXPECT_DOUBLE_EQ(line.baseline, expected_ascent);
+  EXPECT_DOUBLE_EQ(line.next_line_baseline_pitch, expected_baseline_pitch);
+  EXPECT_DOUBLE_EQ(line.line_box_height, expected_occupied_height);
+  EXPECT_DOUBLE_EQ(line.height, expected_baseline_pitch);
+  EXPECT_DOUBLE_EQ(glyphs.front().fFinalOrigin.fY, line.baseline);
+}
+
+// Run in separate processes with WSC_FONT_DIAGNOSTICS=0 and =1. The output
+// includes ordinary layout geometry and raster pixels, never diagnostic data.
+// This also permits comparison against the pre-removal engine's libraries.
+TEST_F(PainterTest, FontDiagnosticsRenderingParity) {
+  uint64_t fingerprint = 14695981039346656037ull;
+  uint64_t diagnostic_fingerprint = 14695981039346656037ull;
+  auto hash = [&fingerprint](const void* data, size_t size) {
+    const auto* bytes = static_cast<const uint8_t*>(data);
+    for (size_t i = 0; i < size; ++i) {
+      fingerprint = (fingerprint ^ bytes[i]) * 1099511628211ull;
+    }
+  };
+  for (const auto& family : {"ahem", "FlutterTest", "Cough"}) {
+    for (double font_size : {14.0, 19.25, 27.5}) {
+      for (double height : {0.0, 0.8, 1.3}) {
+        for (const auto& text : {u"", u"AV ffi text\nsecond line",
+                                 u"spaces wrap across multiple lines"}) {
+          auto style = makeStyle();
+          style.font_families = {family};
+          style.font_size = font_size;
+          style.height = height;
+          style.has_height_override = height != 0.0;
+          auto paragraph = layoutText(style, text);
+          paragraph->Layout(120);
+          const auto& lines = paragraph->GetLineMetrics();
+          std::ostringstream geometry;
+          geometry << std::setprecision(17) << paragraph->GetHeight() << ','
+                   << paragraph->GetLongestLine() << ','
+                   << paragraph->GetAlphabeticBaseline();
+          for (const auto& line : lines) {
+            geometry << ';' << line.start_index << ',' << line.end_index << ','
+                     << line.left << ',' << line.width << ',' << line.height
+                     << ',' << line.baseline;
+          }
+          const double correction =
+              lines.empty()
+                  ? 0.0
+                  : std::max(0.0, lines.back().line_box_height -
+                                      lines.back().next_line_baseline_pitch);
+          geometry << ':' << correction;
+#ifndef WSC_PARITY_BASELINE
+          EXPECT_DOUBLE_EQ(paragraph->GetParagraphBottomCorrection(),
+                           correction);
+          EXPECT_TRUE(skia::textlayout::ConfigureFontDiagnostics(
+              skia::textlayout::FontDiagnosticsEnabled()));
+          EXPECT_FALSE(skia::textlayout::ConfigureFontDiagnostics(
+              !skia::textlayout::FontDiagnosticsEnabled()));
+          const auto glyphs = paragraph->GetGlyphDiagnostics();
+          if (!skia::textlayout::FontDiagnosticsEnabled()) {
+            EXPECT_TRUE(glyphs.empty());
+          }
+#endif
+          const auto value = geometry.str();
+          hash(value.data(), value.size());
+          SkBitmap bitmap;
+          ASSERT_TRUE(bitmap.tryAllocN32Pixels(200, 400));
+          bitmap.eraseColor(SK_ColorWHITE);
+          SkCanvas canvas(bitmap);
+          DisplayListBuilder builder;
+          paragraph->Paint(&builder, 0, 0);
+          DlSkCanvasDispatcher dispatcher(&canvas);
+          builder.Build()->Dispatch(dispatcher);
+          hash(bitmap.getPixels(), bitmap.computeByteSize());
+          std::ostringstream diagnostics;
+          const auto painted_glyphs = paragraph->GetGlyphDiagnostics();
+          diagnostics << std::setprecision(17) << painted_glyphs.size();
+          for (const auto& glyph : painted_glyphs) {
+            diagnostics << ';' << glyph.fGlyph << ',' << glyph.fUtf8Cluster
+                        << ',' << glyph.fRawShapePosition.fX << ','
+                        << glyph.fRawShapePosition.fY << ','
+                        << glyph.fRawAdvance.fX << ',' << glyph.fRawAdvance.fY
+                        << ',' << glyph.fFinalOrigin.fX << ','
+                        << glyph.fFinalOrigin.fY << ',' << glyph.fScript << ','
+                        << glyph.fLanguage.c_str() << ','
+                        << glyph.fShapingFeatureCount << ','
+                        << glyph.fShapingFeatureMask;
+          }
+          for (unsigned char value : diagnostics.str()) {
+            diagnostic_fingerprint =
+                (diagnostic_fingerprint ^ value) * 1099511628211ull;
+          }
+          // A repeated layout exercises shaping-cache reuse in each mode.
+          paragraph->Layout(120);
+          EXPECT_DOUBLE_EQ(paragraph->GetHeight(), std::stod(value));
+        }
+      }
+    }
+  }
+  std::cout << "FONT_RENDERING_PARITY " << fingerprint << std::endl;
+  std::cout << "FONT_DIAGNOSTICS_PARITY " << diagnostic_fingerprint
+            << std::endl;
 }
 
 TEST_F(PainterTest, DrawsSolidLineSkia) {

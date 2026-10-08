@@ -9,6 +9,23 @@ part of dart.ui;
 // To change the sentinel value, search for "kTextHeightNone" in the source code.
 const double kTextHeightNone = 0.0;
 
+/// Enables font diagnostic collection before the first paragraph is created.
+/// Defaults to false (or the native startup environment WSC_FONT_DIAGNOSTICS).
+/// Repeating the same setting is allowed; changing it after startup throws.
+/// This setting does not affect shaping, layout, or painting.
+void configureFontRenderingDiagnostics({required bool enabled}) {
+  if (!_configureFontRenderingDiagnostics(enabled)) {
+    throw StateError('Font diagnostics must be configured before the first paragraph');
+  }
+}
+
+@Native<Bool Function(Bool)>(symbol: 'Paragraph::configureFontRenderingDiagnostics', isLeaf: true)
+external bool _configureFontRenderingDiagnostics(bool enabled);
+
+/// Whether font diagnostic collection is enabled for this engine process.
+@Native<Bool Function()>(symbol: 'Paragraph::fontRenderingDiagnosticsEnabled', isLeaf: true)
+external bool get fontRenderingDiagnosticsEnabled;
+
 /// Whether to use the italic type variation of glyphs in the font.
 ///
 /// Some modern fonts allow this to be selected in a more fine-grained manner.
@@ -3018,6 +3035,9 @@ abstract class Paragraph {
   /// Valid only after [layout] has been called.
   double get height;
 
+  /// Additional occupied height of the final line, independent of diagnostics.
+  double get paragraphBottomCorrection => 0.0;
+
   /// The distance from the left edge of the leftmost glyph to the right edge of
   /// the rightmost glyph in the paragraph.
   ///
@@ -3146,6 +3166,18 @@ abstract class Paragraph {
   /// to repeatedly call this. Instead, cache the results.
   List<LineMetrics> computeLineMetrics();
 
+  /// Returns engine-specific detailed line metrics for diagnostics.
+  ///
+  /// Each line is encoded as raw ascent/descent/leading, effective
+  /// ascent/descent/leading, height input ascent/descent/leading/raw-leading,
+  /// line-height branch, next-line baseline pitch, and line-box height.
+  /// Branch values are 0 for normal and 2 for Qt/FreeType size-metric baseline
+  /// pitch. Backends that do not expose these values return an empty list.
+  Float64List computeDetailedLineMetricsForDiagnostics() => Float64List(0);
+
+  /// Returns engine-specific glyph metrics from the final laid-out paragraph.
+  List<Object?> computeGlyphMetricsForDiagnostics() => const <Object?>[];
+
   /// Returns the [LineMetrics] for the line at `lineNumber`, or null if the
   /// given `lineNumber` is greater than or equal to [numberOfLines].
   LineMetrics? getLineMetricsAt(int lineNumber);
@@ -3199,6 +3231,13 @@ base class _NativeParagraph extends NativeFieldWrapperClass1 implements Paragrap
   @override
   @Native<Double Function(Pointer<Void>)>(symbol: 'Paragraph::height', isLeaf: true)
   external double get height;
+
+  @override
+  @Native<Double Function(Pointer<Void>)>(
+    symbol: 'Paragraph::paragraphBottomCorrection',
+    isLeaf: true,
+  )
+  external double get paragraphBottomCorrection;
 
   @override
   @Native<Double Function(Pointer<Void>)>(symbol: 'Paragraph::longestLine', isLeaf: true)
@@ -3375,6 +3414,16 @@ base class _NativeParagraph extends NativeFieldWrapperClass1 implements Paragrap
 
   @Native<Handle Function(Pointer<Void>)>(symbol: 'Paragraph::computeLineMetrics')
   external Float64List _computeLineMetrics();
+
+  @override
+  @Native<Handle Function(Pointer<Void>)>(
+    symbol: 'Paragraph::computeDetailedLineMetricsForDiagnostics',
+  )
+  external Float64List computeDetailedLineMetricsForDiagnostics();
+
+  @override
+  @Native<Handle Function(Pointer<Void>)>(symbol: 'Paragraph::computeGlyphMetricsForDiagnostics')
+  external List<Object?> computeGlyphMetricsForDiagnostics();
 
   @override
   LineMetrics? getLineMetricsAt(int lineNumber) => _getLineMetricsAt(lineNumber, LineMetrics._);

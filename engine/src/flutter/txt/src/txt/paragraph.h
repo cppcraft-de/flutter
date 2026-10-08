@@ -179,6 +179,9 @@ class Paragraph {
 
   virtual std::vector<LineMetrics>& GetLineMetrics() = 0;
 
+  virtual std::vector<skia::textlayout::Paragraph::GlyphDiagnostic>
+  GetGlyphDiagnostics() = 0;
+
   virtual bool GetLineMetricsAt(
       int lineNumber,
       skia::textlayout::LineMetrics* lineMetrics) const = 0;
@@ -194,6 +197,8 @@ class Paragraph {
   // number of the line this hard line break breaks, intead of the new line it
   // creates.
   virtual int GetLineNumberAt(size_t utf16Offset) const = 0;
+
+  virtual double GetParagraphBottomCorrection() const { return 0; }
 };
 
 }  // namespace txt

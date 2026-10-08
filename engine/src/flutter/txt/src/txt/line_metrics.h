@@ -50,6 +50,21 @@ class LineMetrics {
   // Zero indexed line number.
   size_t line_number = 0;
 
+  // Diagnostic metrics from SkParagraph's final laid-out line.
+  double raw_ascent = 0.0;
+  double raw_descent = 0.0;
+  double raw_leading = 0.0;
+  double effective_ascent = 0.0;
+  double effective_descent = 0.0;
+  double effective_leading = 0.0;
+  double height_input_ascent = 0.0;
+  double height_input_descent = 0.0;
+  double height_input_leading = 0.0;
+  double height_input_raw_leading = 0.0;
+  double line_height_branch = 0.0;
+  double next_line_baseline_pitch = 0.0;
+  double line_box_height = 0.0;
+
   // Mapping between text index ranges and the FontMetrics associated with
   // them. The first run will be keyed under start_index. The metrics here
   // are before layout and are the base values we calculate from.

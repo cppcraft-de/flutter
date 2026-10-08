@@ -15,10 +15,13 @@ EXPECTED_FREETYPE_REVISION = 'be4bcb57914154fc1b9e2900bf8e4b516057e2b8'
 
 PATCH_GROUP_ORDER = (
     'text_layout',
+    'diagnostics',
     'pdf',
 )
 
-GROUP_DEPENDENCIES = {}
+GROUP_DEPENDENCIES = {
+    'diagnostics': ('text_layout',),
+}
 
 GROUP_MARKERS = {
     'text_layout': {
@@ -42,6 +45,19 @@ GROUP_MARKERS = {
             '[SCHOOLCRAFT]: we reverted a FreeType fix here',
         ('freetype', 'src/sfnt/sfobjs.c'):
             'For Worksheet Crafter it is essential that the ascender',
+    },
+    'diagnostics': {
+        ('skia', 'modules/skparagraph/src/ParagraphImpl.cpp'): ('getParagraphBottomCorrection'),
+        ('skia', 'modules/skparagraph/include/Paragraph.h'):
+            'fRawShapePosition',
+        ('skia', 'modules/skparagraph/include/FontDiagnostics.h'):
+            'FreezeFontDiagnostics',
+        ('skia', 'modules/skparagraph/src/Run.h'):
+            'std::vector<SkPoint> rawPositions',
+        ('skia', 'modules/skparagraph/src/Run.cpp'):
+            'FontDiagnosticsEnabled() && fRawPositions.empty()',
+        ('skia', 'modules/canvaskit/paragraph_bindings.cpp'):
+            'ConfigureFontRenderingDiagnostics',
     },
     'pdf': {
         ('skia', 'modules/canvaskit/canvaskit_bindings.cpp'): 'MakePdf(JSArray pictures',
@@ -169,6 +185,17 @@ def patch_touched_paths(patch_file):
   return paths
 
 
+def patch_created_paths(patch_file):
+  paths = set()
+  current_path = None
+  for line in patch_file.read_text(encoding='utf-8').splitlines():
+    if line.startswith('diff --git a/'):
+      current_path = line.split()[3][2:]
+    elif line.startswith('new file mode ') and current_path is not None:
+      paths.add(current_path)
+  return paths
+
+
 def dirty_paths(repo_dir):
   result = run_git(repo_dir, ['diff', '--name-only'], capture_output=True)
   return {line.strip() for line in result.stdout.splitlines() if line.strip()}
@@ -218,8 +245,11 @@ def apply_selected_patches(repo_dirs, patch_dir, patch_files):
 
 def reset_patch_owned_repos(repo_dirs, patch_files, *, strict_unknown_dirty):
   allowed_paths_by_repo = {}
+  created_paths_by_repo = {}
   for repo_name, patch_file in patch_files:
     allowed_paths_by_repo.setdefault(repo_name, set()).update(patch_touched_paths(patch_file))
+    for path in patch_created_paths(patch_file):
+      created_paths_by_repo.setdefault(repo_name, {})[path] = patch_file
   for repo_name, legacy_paths in LEGACY_WSC_PATCH_PATHS.items():
     allowed_paths_by_repo.setdefault(repo_name, set()).update(legacy_paths)
 
@@ -229,9 +259,27 @@ def reset_patch_owned_repos(repo_dirs, patch_files, *, strict_unknown_dirty):
       continue
 
     dirty = dirty_paths(repo_dir)
-    if not dirty:
+    untracked = set(
+        run_git(repo_dir, ['ls-files', '--others', '--exclude-standard'],
+                capture_output=True).stdout.splitlines()
+    )
+    created = created_paths_by_repo.get(repo_name, {})
+    owned_untracked = sorted(untracked.intersection(created))
+    if not dirty and not owned_untracked:
       print(f'{repo_name} checkout is clean.')
       continue
+
+    # Remove only files created by our patches, and only if still unchanged.
+    # An edited header or an unrelated untracked file must be preserved.
+    for path in owned_untracked:
+      result = run_git(
+          repo_dir, ['apply', '--reverse', '--check', f'--include={path}',
+                     str(created[path])],
+          check=False
+      )
+      if result.returncode != 0:
+        print(f'Preserving modified patch-created file: {path}', file=sys.stderr)
+        return False
 
     unknown = sorted(dirty - allowed_paths)
     if unknown:
@@ -251,6 +299,10 @@ def reset_patch_owned_repos(repo_dirs, patch_files, *, strict_unknown_dirty):
 
     print(f'Resetting {repo_name} WSC patch-owned changes before sync.')
     run_git(repo_dir, ['reset', '--hard', 'HEAD'])
+    for path in owned_untracked:
+      target = repo_dir / path
+      target.resolve().relative_to(repo_dir.resolve())
+      target.unlink()
   return True
 
 
@@ -284,7 +336,10 @@ def main(argv):
       nargs='+',
       default=['all'],
       metavar='GROUP',
-      help=('Patch groups to apply: all, text_layout, pdf.'),
+      help=(
+          'Patch groups to apply: all, text_layout, diagnostics, pdf. '
+          'Diagnostics includes text_layout.'
+      ),
   )
   args = parser.parse_args(argv[1:])
 

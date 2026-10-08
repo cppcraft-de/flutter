@@ -26,6 +26,8 @@ class ParagraphSkia : public Paragraph {
 
   double GetHeight() override;
 
+  double GetParagraphBottomCorrection() const override;
+
   double GetLongestLine() override;
 
   double GetMinIntrinsicWidth() override;
@@ -37,6 +39,9 @@ class ParagraphSkia : public Paragraph {
   double GetIdeographicBaseline() override;
 
   std::vector<LineMetrics>& GetLineMetrics() override;
+
+  std::vector<skia::textlayout::Paragraph::GlyphDiagnostic>
+  GetGlyphDiagnostics() override;
 
   bool GetLineMetricsAt(
       int lineNumber,
