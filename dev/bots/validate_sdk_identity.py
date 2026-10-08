@@ -28,6 +28,24 @@ def select_release_tag(tags: list[str], require_release_tag: bool) -> str | None
     return releases[0] if releases else None
 
 
+def validate_engine_pin(
+    engine_id: str, expected_engine_id: str, release_tag: str | None,
+    full_rebuild_publication: bool,
+) -> None:
+    for name, value in (("engine ID", engine_id), ("expected engine ID", expected_engine_id)):
+        if not re.fullmatch(r"[0-9a-fA-F]{40}", value):
+            raise ValueError(f"Invalid {name}: expected a full commit SHA.")
+    if engine_id.lower() == expected_engine_id.lower():
+        return
+    message = (
+        f"bin/internal/engine.version is {engine_id}, but the last "
+        f"engine-affecting commit is {expected_engine_id}."
+    )
+    if release_tag or full_rebuild_publication:
+        raise ValueError(f"{message} Tagged builds and full-rebuild publication require a matching engine ID.")
+    print(f"WARNING: {message} Untagged testing may continue; repin before releasing.")
+
+
 def validate_archive(archive: Path, revision: str, channel: str, release_tag: str | None) -> None:
     with zipfile.ZipFile(archive) as sdk:
         metadata = json.loads(sdk.read("flutter/bin/cache/flutter.version.json"))
@@ -73,11 +91,18 @@ def main() -> None:
     parser.add_argument("--directory", type=Path, help="SDK output directory; omit for source preflight")
     parser.add_argument("--channel", choices=["main", "master", "beta", "stable"])
     parser.add_argument("--write-checksums", action="store_true", help="Write SHA256 sidecars after validation")
+    parser.add_argument("--engine-id", help="Tracked engine pin to check during CI preflight")
+    parser.add_argument("--expected-engine-id", help="Result of last_engine_commit for this source")
+    parser.add_argument("--full-rebuild-publication", action="store_true", help="Also reject an untagged engine-pin mismatch")
     args = parser.parse_args()
     if not re.fullmatch(r"[0-9a-f]{40}", args.revision):
         parser.error("--revision must be a full lowercase commit SHA")
     if args.directory is not None and args.channel is None:
         parser.error("--channel is required when validating SDK archives")
+    if (args.engine_id is None) != (args.expected_engine_id is None):
+        parser.error("--engine-id and --expected-engine-id must be supplied together")
+    if args.full_rebuild_publication and args.engine_id is None:
+        parser.error("--full-rebuild-publication requires engine IDs")
     try:
         tags = subprocess.check_output(
             ["git", "tag", "--points-at", args.revision], text=True,
@@ -85,6 +110,8 @@ def main() -> None:
         ).splitlines()
         release_tag = select_release_tag(tags, args.require_release_tag)
         print(f"Source identity: {release_tag or 'untagged WSC development build'}")
+        if args.engine_id is not None:
+            validate_engine_pin(args.engine_id, args.expected_engine_id, release_tag, args.full_rebuild_publication)
         if args.directory is not None:
             archives = sorted(args.directory.glob("*.zip"))
             if not archives:

@@ -78,9 +78,12 @@ On Windows use `bin\internal\last_engine_commit.ps1`. Put the returned full SHA
 in `bin/internal/engine.version`, commit that pin, then verify it again. Do not
 substitute the framework tip or a release tag for this calculation.
 
-The pipeline checks the pin using full history. A mismatch warns on incremental
-staging builds but fails a `full_rebuild` with publication enabled. Another
-engine-affecting commit requires repinning. Rewriting history can change this
+The pipeline checks the pin using full history. An exact recognized WSC release
+tag makes a mismatch fatal, even for incremental or engine-only builds and even
+with publication disabled. `REQUIRE_RELEASE_TAG=true` also rejects missing or
+ambiguous release tags. Untagged builds fail on a mismatch when `full_rebuild`
+and publication are enabled; other untagged testing runs retain the warning.
+Another engine-affecting commit requires repinning. Rewriting history can change this
 identity even with identical source contents. Agent/toolchain changes, however,
 are not encoded by this Git calculation; record them for accepted releases.
 
