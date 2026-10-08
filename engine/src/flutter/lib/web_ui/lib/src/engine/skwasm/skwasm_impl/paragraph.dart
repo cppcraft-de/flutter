@@ -276,9 +276,6 @@ class SkwasmParagraph extends SkwasmObjectWrapper<RawParagraph> implements ui.Pa
   }
 
   @override
-  double get paragraphBottomCorrection => 0.0;
-
-  @override
   Float64List computeDetailedLineMetricsForDiagnostics() => Float64List(0);
 
   @override

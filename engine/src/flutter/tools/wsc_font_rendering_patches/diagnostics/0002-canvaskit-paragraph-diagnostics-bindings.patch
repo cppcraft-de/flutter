@@ -1,16 +1,8 @@
 diff --git a/modules/canvaskit/externs.js b/modules/canvaskit/externs.js
-index 9930e75..375b152 100644
+index 988f377..40522d5 100644
 --- a/modules/canvaskit/externs.js
 +++ b/modules/canvaskit/externs.js
-@@ -173,6 +173,7 @@ var CanvasKit = {
-     getAlphabeticBaseline: function() {},
-     getGlyphPositionAtCoordinate: function() {},
-     getHeight: function() {},
-+    getParagraphBottomCorrection: function() {},
-     getIdeographicBaseline: function() {},
-     getLineMetrics: function() {},
-     getLineMetricsAt: function() {},
-@@ -1333,3 +1334,6 @@ var LibraryEGL = {
+@@ -1331,3 +1331,6 @@ var LibraryEGL = {
      majorVersion: {}
    }
  }
@@ -18,7 +10,7 @@ index 9930e75..375b152 100644
 +CanvasKit.ConfigureFontRenderingDiagnostics = function(enabled) {};
 +CanvasKit.FontRenderingDiagnosticsEnabled = function() {};
 diff --git a/modules/canvaskit/paragraph_bindings.cpp b/modules/canvaskit/paragraph_bindings.cpp
-index f9a6a02..139383f 100644
+index f5d80b3..aac7393 100644
 --- a/modules/canvaskit/paragraph_bindings.cpp
 +++ b/modules/canvaskit/paragraph_bindings.cpp
 @@ -354,6 +354,19 @@ JSObject JSObjectFromLineMetrics(skia::textlayout::LineMetrics& metrics) {
@@ -126,7 +118,7 @@ index f9a6a02..139383f 100644
  JSObject GetLineMetricsAt(para::Paragraph& self, size_t lineNumber) {
      skia::textlayout::LineMetrics metrics;
      return self.getLineMetricsAt(lineNumber, &metrics)
-@@ -521,13 +612,17 @@ JSArray UnresolvedCodepoints(para::Paragraph& self) {
+@@ -521,6 +612,8 @@ JSArray UnresolvedCodepoints(para::Paragraph& self) {
  }
  
  EMSCRIPTEN_BINDINGS(Paragraph) {
@@ -135,10 +127,9 @@ index f9a6a02..139383f 100644
  
      class_<para::Paragraph>("Paragraph")
          .function("didExceedMaxLines", &para::Paragraph::didExceedMaxLines)
-         .function("getAlphabeticBaseline", &para::Paragraph::getAlphabeticBaseline)
+@@ -528,6 +621,7 @@ EMSCRIPTEN_BINDINGS(Paragraph) {
          .function("getGlyphPositionAtCoordinate", &para::Paragraph::getGlyphPositionAtCoordinate)
          .function("getHeight", &para::Paragraph::getHeight)
-+        .function("getParagraphBottomCorrection", &para::Paragraph::getParagraphBottomCorrection)
          .function("getIdeographicBaseline", &para::Paragraph::getIdeographicBaseline)
 +        .function("getGlyphDiagnostics", &GetGlyphDiagnostics)
          .function("getLineMetrics", &GetLineMetrics)

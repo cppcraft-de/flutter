@@ -243,7 +243,6 @@ typedef CanvasPath Path;
   V(Paragraph, getRectsForPlaceholders)                  \
   V(Paragraph, getRectsForRange)                         \
   V(Paragraph, getWordBoundary)                          \
-  V(Paragraph, paragraphBottomCorrection)                \
   V(Paragraph, height)                                   \
   V(Paragraph, ideographicBaseline)                      \
   V(Paragraph, layout)                                   \

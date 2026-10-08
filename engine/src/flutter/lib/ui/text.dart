@@ -3030,13 +3030,11 @@ abstract class Paragraph {
   /// Valid only after [layout] has been called.
   double get width;
 
-  /// The amount of vertical space this paragraph occupies.
+  /// The amount of vertical space this paragraph occupies, including the
+  /// final occupied line box.
   ///
   /// Valid only after [layout] has been called.
   double get height;
-
-  /// Additional occupied height of the final line, independent of diagnostics.
-  double get paragraphBottomCorrection => 0.0;
 
   /// The distance from the left edge of the leftmost glyph to the right edge of
   /// the rightmost glyph in the paragraph.
@@ -3231,13 +3229,6 @@ base class _NativeParagraph extends NativeFieldWrapperClass1 implements Paragrap
   @override
   @Native<Double Function(Pointer<Void>)>(symbol: 'Paragraph::height', isLeaf: true)
   external double get height;
-
-  @override
-  @Native<Double Function(Pointer<Void>)>(
-    symbol: 'Paragraph::paragraphBottomCorrection',
-    isLeaf: true,
-  )
-  external double get paragraphBottomCorrection;
 
   @override
   @Native<Double Function(Pointer<Void>)>(symbol: 'Paragraph::longestLine', isLeaf: true)

@@ -2246,8 +2246,6 @@ extension type SkParagraph(JSObject _) implements JSObject {
   external double getHeight();
   external double getIdeographicBaseline();
 
-  external double getParagraphBottomCorrection();
-
   @JS('getLineMetrics')
   external JSArray<JSAny?> _getLineMetrics();
   List<SkLineMetrics> getLineMetrics() => _getLineMetrics().toDart.cast<SkLineMetrics>();

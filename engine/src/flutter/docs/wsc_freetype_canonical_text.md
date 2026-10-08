@@ -43,9 +43,12 @@ The tester explicitly selects the mode from `FCTWEAK_LAYOUT_TRACE`, including
 disabling collection when that variable is false.
 
 The mode changes collection only. Integer glyph-advance rounding and the final
-paragraph occupied-height correction run in both modes. The latter is exposed
-as `Paragraph.paragraphBottomCorrection`, and forwarded by `TextPainter` and
-`RenderParagraph`; it does not allocate or decode diagnostic line records.
+paragraph occupied-height correction run in both modes. SkParagraph includes
+the final occupied line box in its default height, so `Paragraph.height`,
+`TextPainter.height`, and normal `RichText`/`Text` layout all receive it.
+Line origins retain the signed baseline pitch. SuperEditor uses the normal
+text size, with no extra correction API or client-side addition. This does
+not allocate or decode diagnostic line records.
 Raw shaping positions use `std::vector` and are retained only when enabled.
 Disabled diagnostic queries return empty records. Backends without extended
 diagnostics continue to report them unavailable.
@@ -53,7 +56,8 @@ diagnostics continue to report them unavailable.
 `PainterTest.FontDiagnosticsRenderingParity` covers 81 combinations of fonts,
 sizes, explicit/natural line heights, wrapping, hard breaks, and empty text.
 Run it in separate processes with `WSC_FONT_DIAGNOSTICS=0` and `=1`; their
-`FONT_RENDERING_PARITY` fingerprints must match the pre-removal engine.
+`FONT_RENDERING_PARITY` fingerprints must match the pre-removal engine plus
+the occupied-height correction previously applied by the client.
 The enabled `FONT_DIAGNOSTICS_PARITY` fingerprint must also match that engine.
 The test checks the always-on bottom correction and rejects mode changes after
 paragraph creation. This does not replace an SDK build, application capture,

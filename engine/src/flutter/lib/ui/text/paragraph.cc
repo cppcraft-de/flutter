@@ -38,10 +38,6 @@ bool Paragraph::fontRenderingDiagnosticsEnabled() {
   return skia::textlayout::FontDiagnosticsEnabled();
 }
 
-double Paragraph::paragraphBottomCorrection() const {
-  return m_paragraph_->GetParagraphBottomCorrection();
-}
-
 double Paragraph::height() {
   return m_paragraph_->GetHeight();
 }

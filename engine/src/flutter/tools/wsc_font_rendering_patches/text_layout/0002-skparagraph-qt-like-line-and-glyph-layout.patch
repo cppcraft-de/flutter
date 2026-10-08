@@ -1,17 +1,27 @@
 diff --git a/modules/skparagraph/include/Paragraph.h b/modules/skparagraph/include/Paragraph.h
-index a7112c8..f9b78be 100644
+index a7112c8..aa21bb8 100644
 --- a/modules/skparagraph/include/Paragraph.h
 +++ b/modules/skparagraph/include/Paragraph.h
-@@ -269,6 +269,9 @@ public:
-      */
+@@ -25,7 +25,9 @@ public:
+ 
+     SkScalar getMaxWidth() { return fWidth; }
+ 
+-    SkScalar getHeight() { return fHeight; }
++    // [SCHOOLCRAFT] Paragraph bounds include the final occupied line box;
++    // line origins still advance by the signed baseline pitch.
++    SkScalar getHeight() { return fHeight + getParagraphBottomCorrection(); }
+ 
+     SkScalar getMinIntrinsicWidth() { return fMinIntrinsicWidth; }
+ 
+@@ -270,6 +272,8 @@ public:
      virtual std::vector<FontInfo> getFonts() const = 0;
  
-+    // Extra occupied height of the final line, independent of diagnostics.
-+    virtual SkScalar getParagraphBottomCorrection() const { return 0; }
-+
  protected:
++    // Internal contribution already included in getHeight().
++    virtual SkScalar getParagraphBottomCorrection() const { return 0; }
      sk_sp<FontCollection> fFontCollection;
      ParagraphStyle fParagraphStyle;
+ 
 diff --git a/modules/skparagraph/src/ParagraphImpl.cpp b/modules/skparagraph/src/ParagraphImpl.cpp
 index 9ea8267..daf2a71 100644
 --- a/modules/skparagraph/src/ParagraphImpl.cpp

@@ -141,7 +141,7 @@ void main() {
     final ui.GlyphInfo? glyph = paragraph.getGlyphInfoAtForDiagnostics(0);
 
     expect(lines, hasLength(1));
-    expect(paragraph.paragraphBottomCorrection, greaterThanOrEqualTo(0.0));
+    expect(paragraph.size.height, greaterThanOrEqualTo(lines.single.height));
     if (!ui.fontRenderingDiagnosticsEnabled) {
       expect(detailedLines, isEmpty);
       expect(glyphMetrics, isEmpty);

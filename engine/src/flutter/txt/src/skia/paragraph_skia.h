@@ -26,8 +26,6 @@ class ParagraphSkia : public Paragraph {
 
   double GetHeight() override;
 
-  double GetParagraphBottomCorrection() const override;
-
   double GetLongestLine() override;
 
   double GetMinIntrinsicWidth() override;

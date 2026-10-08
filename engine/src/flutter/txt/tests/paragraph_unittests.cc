@@ -276,11 +276,13 @@ TEST_F(PainterTest, SchoolcraftIntegerLineMetricsUseSignedPitchAndOccupiedBox) {
 }
 
 // Run in separate processes with WSC_FONT_DIAGNOSTICS=0 and =1. The output
-// includes ordinary layout geometry and raster pixels, never diagnostic data.
+// includes occupied paragraph height, line geometry, and raster pixels.
+// For the old engine, height includes the old client-side correction.
 // This also permits comparison against the pre-removal engine's libraries.
 TEST_F(PainterTest, FontDiagnosticsRenderingParity) {
   uint64_t fingerprint = 14695981039346656037ull;
   uint64_t diagnostic_fingerprint = 14695981039346656037ull;
+  int corrected_paragraphs = 0;
   auto hash = [&fingerprint](const void* data, size_t size) {
     const auto* bytes = static_cast<const uint8_t*>(data);
     for (size_t i = 0; i < size; ++i) {
@@ -300,8 +302,30 @@ TEST_F(PainterTest, FontDiagnosticsRenderingParity) {
           auto paragraph = layoutText(style, text);
           paragraph->Layout(120);
           const auto& lines = paragraph->GetLineMetrics();
+          const double correction =
+              lines.empty()
+                  ? 0.0
+                  : std::max(0.0, lines.back().line_box_height -
+                                      lines.back().next_line_baseline_pitch);
+          const double reported_height = paragraph->GetHeight();
+#ifdef WSC_PARITY_BASELINE
+          // The old client added this amount outside the engine.
+          const double occupied_height = reported_height + correction;
+#else
+          const double occupied_height = reported_height;
+          if (!lines.empty()) {
+            double signed_height = 0.0;
+            for (const auto& line : lines) {
+              signed_height += line.height;
+            }
+            EXPECT_DOUBLE_EQ(occupied_height, signed_height + correction);
+          }
+#endif
+          if (correction > 0.0) {
+            ++corrected_paragraphs;
+          }
           std::ostringstream geometry;
-          geometry << std::setprecision(17) << paragraph->GetHeight() << ','
+          geometry << std::setprecision(17) << occupied_height << ','
                    << paragraph->GetLongestLine() << ','
                    << paragraph->GetAlphabeticBaseline();
           for (const auto& line : lines) {
@@ -309,15 +333,8 @@ TEST_F(PainterTest, FontDiagnosticsRenderingParity) {
                      << line.left << ',' << line.width << ',' << line.height
                      << ',' << line.baseline;
           }
-          const double correction =
-              lines.empty()
-                  ? 0.0
-                  : std::max(0.0, lines.back().line_box_height -
-                                      lines.back().next_line_baseline_pitch);
           geometry << ':' << correction;
 #ifndef WSC_PARITY_BASELINE
-          EXPECT_DOUBLE_EQ(paragraph->GetParagraphBottomCorrection(),
-                           correction);
           EXPECT_TRUE(skia::textlayout::ConfigureFontDiagnostics(
               skia::textlayout::FontDiagnosticsEnabled()));
           EXPECT_FALSE(skia::textlayout::ConfigureFontDiagnostics(
@@ -358,11 +375,13 @@ TEST_F(PainterTest, FontDiagnosticsRenderingParity) {
           }
           // A repeated layout exercises shaping-cache reuse in each mode.
           paragraph->Layout(120);
-          EXPECT_DOUBLE_EQ(paragraph->GetHeight(), std::stod(value));
+          EXPECT_DOUBLE_EQ(paragraph->GetHeight(), reported_height);
         }
       }
     }
   }
+  EXPECT_GT(corrected_paragraphs, 0);
+  std::cout << "CORRECTED_PARAGRAPHS " << corrected_paragraphs << std::endl;
   std::cout << "FONT_RENDERING_PARITY " << fingerprint << std::endl;
   std::cout << "FONT_DIAGNOSTICS_PARITY " << diagnostic_fingerprint
             << std::endl;

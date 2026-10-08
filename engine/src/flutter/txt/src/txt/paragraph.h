@@ -197,8 +197,6 @@ class Paragraph {
   // number of the line this hard line break breaks, intead of the new line it
   // creates.
   virtual int GetLineNumberAt(size_t utf16Offset) const = 0;
-
-  virtual double GetParagraphBottomCorrection() const { return 0; }
 };
 
 }  // namespace txt

@@ -997,9 +997,6 @@ class WebParagraph implements ui.Paragraph {
   }
 
   @override
-  double get paragraphBottomCorrection => 0.0;
-
-  @override
   Float64List computeDetailedLineMetricsForDiagnostics() => Float64List(0);
 
   @override

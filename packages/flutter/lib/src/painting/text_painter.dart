@@ -2138,13 +2138,6 @@ class TextPainter {
               .toList(growable: false);
   }
 
-  /// Extra occupied height of the final line, without diagnostic collection.
-  double get paragraphBottomCorrection {
-    assert(_debugAssertTextLayoutIsValid);
-    assert(!_debugNeedsRelayout);
-    return _layoutCache!.paragraph.paragraphBottomCorrection;
-  }
-
   /// Returns detailed metrics from the exact paragraph used for layout.
   List<DiagnosticLineMetrics> computeDetailedLineMetricsForDiagnostics() {
     if (!ui.fontRenderingDiagnosticsEnabled) {

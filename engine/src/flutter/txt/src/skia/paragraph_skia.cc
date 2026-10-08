@@ -211,10 +211,6 @@ double ParagraphSkia::GetMaxWidth() {
   return SkScalarToDouble(paragraph_->getMaxWidth());
 }
 
-double ParagraphSkia::GetParagraphBottomCorrection() const {
-  return paragraph_->getParagraphBottomCorrection();
-}
-
 double ParagraphSkia::GetHeight() {
   return SkScalarToDouble(paragraph_->getHeight());
 }

@@ -27,7 +27,6 @@ class Paragraph : public RefCountedDartWrappable<Paragraph> {
 
   double width();
   double height();
-  double paragraphBottomCorrection() const;
   static bool configureFontRenderingDiagnostics(bool enabled);
   static bool fontRenderingDiagnosticsEnabled();
   double longestLine();

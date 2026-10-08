@@ -1085,13 +1085,6 @@ class RenderParagraph extends RenderBox
     return _textPainter.computeLineMetrics();
   }
 
-  /// Extra occupied height of the final line, independent of diagnostics.
-  double get paragraphBottomCorrection {
-    assert(!debugNeedsLayout);
-    _layoutTextWithConstraints(constraints);
-    return _textPainter.paragraphBottomCorrection;
-  }
-
   /// Returns detailed line metrics from the exact paragraph used to paint this
   /// render object.
   List<DiagnosticLineMetrics> computeDetailedLineMetricsForDiagnostics() {

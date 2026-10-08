@@ -643,7 +643,6 @@ abstract class LineMetrics {
 }
 
 abstract class Paragraph {
-  double get paragraphBottomCorrection;
   double get width;
   double get height;
   double get longestLine;

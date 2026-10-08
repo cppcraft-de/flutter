@@ -1047,9 +1047,6 @@ class CkParagraph implements ui.Paragraph {
   }
 
   @override
-  double get paragraphBottomCorrection => skiaObject.getParagraphBottomCorrection();
-
-  @override
   Float64List computeDetailedLineMetricsForDiagnostics() {
     if (!fontDiagnosticsEnabled) {
       return Float64List(0);
