@@ -206,6 +206,10 @@ engine-workspaces/<full Jenkins JOB_NAME>/<BUILD_TARGET>
   still bootstraps missing dependencies; use it only as a testing override.
 - Synchronization can reset/reapply nested patches and cause recompilation;
   it is not done once per runtime mode. Each target has its own dependency tree.
+- Each dependency sync limits parallel SCM operations to two (`gclient -j 2`),
+  or one for Web, to reduce upstream HTTP 429 rate-limit failures. This is a
+  per-sync concurrency cap, not a global request-rate limit; target cells can
+  still sync concurrently. Compilation parallelism is unchanged.
 - SDK packaging intentionally uses clean separate checkouts and warms/downloads
   a new cache. Incremental engine builds do not make packaging a no-op.
 - `full_rebuild` explicitly deletes `engine/src/out` before building. It does

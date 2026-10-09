@@ -62,9 +62,8 @@ def dependencies_present(root, host):
 
 
 def run_gclient(root, web):
-    command = ["gclient", "sync", "-D"]
-    if web:
-        command += ["-j", "1"]
+    # Reduce bursts against upstream Git servers; compilation is unaffected.
+    command = ["gclient", "sync", "-D", "-j", "1" if web else "2"]
     # Windows depot_tools supplies a batch command. Arguments are constants.
     subprocess.run(command, cwd=root, check=True, shell=os.name == "nt")
 

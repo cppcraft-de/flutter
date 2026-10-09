@@ -182,12 +182,17 @@ class DependencySyncTest(unittest.TestCase):
             self.sync(web=True)
         self.runner.assert_not_called()
 
-    def test_gclient_command_retains_web_throttling(self):
+    def test_gclient_command_limits_sync_concurrency(self):
         # Call the real command wrapper with only process execution mocked.
-        with patch("sync_engine_deps.subprocess.run") as process:
-            ORIGINAL_RUN_GCLIENT(self.root, True)
-            self.assertEqual(process.call_args.args[0], ["gclient", "sync", "-D", "-j", "1"])
-            self.assertTrue(process.call_args.kwargs["check"])
+        for web, jobs in ((False, "2"), (True, "1")):
+            for os_name in ("nt", "posix"):
+                with self.subTest(web=web, os_name=os_name):
+                    with patch("sync_engine_deps.subprocess.run") as process, patch.object(deps.os, "name", os_name):
+                        ORIGINAL_RUN_GCLIENT(self.root, web)
+                        process.assert_called_once_with(
+                            ["gclient", "sync", "-D", "-j", jobs],
+                            cwd=self.root, check=True, shell=os_name == "nt",
+                        )
 
 
 if __name__ == "__main__":
