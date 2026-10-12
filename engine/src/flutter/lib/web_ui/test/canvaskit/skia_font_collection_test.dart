@@ -46,6 +46,48 @@ void testMain() {
       mockHttpFetchResponseFactory = null;
     });
 
+    test('fallback cache evicts least recently used requests', () {
+      final registry = SkiaFallbackRegistry(SkiaFontCollection());
+      List<int> lookup(int codePoint) =>
+          registry.getMissingCodePoints(<int>[codePoint], <String>[]);
+      final List<int> first = lookup(0);
+      final List<int> second = lookup(1);
+      for (var i = 2; i < 256; i++) {
+        expect(lookup(i), <int>[i]);
+      }
+      expect(identical(lookup(0), first), isTrue);
+      lookup(256);
+      expect(identical(lookup(0), first), isTrue);
+      expect(identical(lookup(1), second), isFalse);
+    });
+
+    test('fallback cache bounds retained text and skips oversized requests', () {
+      final registry = SkiaFallbackRegistry(SkiaFontCollection());
+      final String family = List<String>.filled(1024, 'x').join();
+      List<int> lookup(int codePoint) =>
+          registry.getMissingCodePoints(<int>[codePoint], <String>[family]);
+      final List<int> first = lookup(0);
+      for (var i = 1; i < 100; i++) {
+        expect(lookup(i), <int>[i]);
+      }
+      // The text budget is reached before the entry-count limit.
+      expect(identical(lookup(0), first), isFalse);
+      final List<int> recent = lookup(99);
+      final largeFamilies = <String>[List<String>.filled(65537, 'x').join()];
+      final List<int> large = registry.getMissingCodePoints(<int>[65], largeFamilies);
+      expect(large, <int>[65]);
+      expect(identical(registry.getMissingCodePoints(<int>[65], largeFamilies), large), isFalse);
+      expect(identical(lookup(99), recent), isTrue);
+    });
+
+    test('font registration invalidates cached missing code points', () async {
+      final fontCollection = SkiaFontCollection();
+      final registry = SkiaFallbackRegistry(fontCollection);
+      expect(registry.getMissingCodePoints(<int>[65], <String>['Ahem']), <int>[65]);
+      await fontCollection.loadAssetFonts(await fetchFontManifest(fakeAssetManager));
+      expect(registry.getMissingCodePoints(<int>[65], <String>['Ahem']), isEmpty);
+    });
+
     test('logs no warnings with the default mock asset manager', () async {
       final fontCollection = SkiaFontCollection();
       await fontCollection.loadAssetFonts(await fetchFontManifest(fakeAssetManager));

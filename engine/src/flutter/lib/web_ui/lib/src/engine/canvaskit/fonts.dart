@@ -361,7 +361,12 @@ class SkiaFallbackRegistry implements FallbackFontRegistry {
   SkiaFallbackRegistry(this._fontCollection);
 
   final SkiaFontCollection _fontCollection;
+  // Bound both entry overhead and retained text. A single large paragraph must
+  // not displace the entire cache or remain retained indefinitely.
+  static const int _maxMissingCodePointEntries = 256;
+  static const int _maxMissingCodePointUnits = 64 * 1024;
   final Map<String, List<int>> _missingCodePointCache = <String, List<int>>{};
+  int _missingCodePointCacheUnits = 0;
   int _cachedFontRegistrationGeneration = -1;
   int _profileFallbackCallCount = 0;
   int _profileFallbackCachedCount = 0;
@@ -400,11 +405,14 @@ class SkiaFallbackRegistry implements FallbackFontRegistry {
     final double totalStart = _fontLoadNow();
     if (_cachedFontRegistrationGeneration != _fontCollection._fontRegistrationGeneration) {
       _missingCodePointCache.clear();
+      _missingCodePointCacheUnits = 0;
       _cachedFontRegistrationGeneration = _fontCollection._fontRegistrationGeneration;
     }
     final String cacheKey = '${fontFamilies.join('\u0001')}|${codeUnits.join(',')}';
-    final List<int>? cachedMissingCodeUnits = _missingCodePointCache[cacheKey];
+    final List<int>? cachedMissingCodeUnits = _missingCodePointCache.remove(cacheKey);
     if (cachedMissingCodeUnits != null) {
+      // Map insertion order gives least-recently-used eviction.
+      _missingCodePointCache[cacheKey] = cachedMissingCodeUnits;
       _profileFallbackCheck(
         cached: true,
         familyCount: fontFamilies.length,
@@ -439,7 +447,17 @@ class SkiaFallbackRegistry implements FallbackFontRegistry {
         missingCodeUnits.add(codeUnits[i]);
       }
     }
-    _missingCodePointCache[cacheKey] = missingCodeUnits;
+    final int entryUnits = cacheKey.length + missingCodeUnits.length;
+    if (entryUnits <= _maxMissingCodePointUnits) {
+      while (_missingCodePointCache.length >= _maxMissingCodePointEntries ||
+          _missingCodePointCacheUnits + entryUnits > _maxMissingCodePointUnits) {
+        final String oldestKey = _missingCodePointCache.keys.first;
+        _missingCodePointCacheUnits -=
+            oldestKey.length + _missingCodePointCache.remove(oldestKey)!.length;
+      }
+      _missingCodePointCache[cacheKey] = missingCodeUnits;
+      _missingCodePointCacheUnits += entryUnits;
+    }
     _profileFallbackCheck(
       cached: false,
       familyCount: fontFamilies.length,
