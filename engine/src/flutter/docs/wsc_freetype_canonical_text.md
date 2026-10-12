@@ -42,8 +42,9 @@ the startup mode with `WSC_FONT_DIAGNOSTICS=1` (or `true`) in their environment.
 The tester explicitly selects the mode from `FCTWEAK_LAYOUT_TRACE`, including
 disabling collection when that variable is false.
 
-The mode changes collection only. Integer glyph-advance rounding and the final
-paragraph occupied-height correction run in both modes. SkParagraph includes
+The mode changes collection only. Script classification remains available for
+cursive letter spacing even with collection disabled. Integer glyph-advance
+rounding and the final paragraph occupied-height correction run in both modes. SkParagraph includes
 the final occupied line box in its default height, so `Paragraph.height`,
 `TextPainter.height`, and normal `RichText`/`Text` layout all receive it.
 Line origins retain the signed baseline pitch. SuperEditor uses the normal
@@ -55,10 +56,27 @@ diagnostics continue to report them unavailable.
 
 `PainterTest.FontDiagnosticsRenderingParity` covers 81 combinations of fonts,
 sizes, explicit/natural line heights, wrapping, hard breaks, and empty text.
-Run it in separate processes with `WSC_FONT_DIAGNOSTICS=0` and `=1`; their
-`FONT_RENDERING_PARITY` fingerprints must match the pre-removal engine plus
-the occupied-height correction previously applied by the client.
-The enabled `FONT_DIAGNOSTICS_PARITY` fingerprint must also match that engine.
+Run it in separate processes with `WSC_FONT_DIAGNOSTICS=0` and `=1`.
+Explicit height and strut controls now use their requested metrics; their old
+fingerprints are not compatibility baselines. Preserve the accepted natural-height
+Qt cases, and compare the current `FONT_RENDERING_PARITY` fingerprints between
+diagnostics modes. The enabled `FONT_DIAGNOSTICS_PARITY` fingerprint remains
+useful when comparing diagnostic records from equivalent implementations.
 The test checks the always-on bottom correction and rejects mode changes after
 paragraph creation. This does not replace an SDK build, application capture,
 or a disabled-mode allocation/performance benchmark.
+
+## Explicit height controls
+
+Natural text retains the signed FreeType baseline pitch and final occupied-box
+correction. An explicit text height instead feeds its adjusted ascent/descent
+into layout, including empty paragraphs. Struts enforce their minimum or forced
+height and split their leading around the baseline. First/last-line height
+behavior restores raw font extents before applying the strut minimum. These paths
+retain the fork's integer line-height rounding and run independently of diagnostic
+collection. Raw font measurements stay separate from the selected layout inputs.
+
+Qt HTML `line-height:100%` must be translated to natural metrics by the caller,
+not Flutter `TextStyle.height:1.0`. The tester's adapter version 2 does this using
+`kTextHeightNone`, including inherited-height resets. Non-default Qt block-height
+semantics still require a dedicated adapter implementation.

@@ -23,10 +23,62 @@ index a7112c8..aa21bb8 100644
      ParagraphStyle fParagraphStyle;
  
 diff --git a/modules/skparagraph/src/ParagraphImpl.cpp b/modules/skparagraph/src/ParagraphImpl.cpp
-index 9ea8267..daf2a71 100644
+index 9ea8267..47bb55c 100644
 --- a/modules/skparagraph/src/ParagraphImpl.cpp
 +++ b/modules/skparagraph/src/ParagraphImpl.cpp
-@@ -1239,6 +1239,14 @@ void ParagraphImpl::visit(const Visitor& visitor) {
+@@ -614,10 +614,10 @@ void ParagraphImpl::breakShapedTextIntoLines(SkScalar maxWidth) {
+         auto disableLastDescent = this->paragraphStyle().getTextHeightBehavior() &
+                                   TextHeightBehavior::kDisableLastDescent;
+         if (disableFirstAscent) {
+-            metrics.fAscent = metrics.fRawAscent;
++            metrics.useRawAscent();
+         }
+         if (disableLastDescent) {
+-            metrics.fDescent = metrics.fRawDescent;
++            metrics.useRawDescent();
+         }
+         if (this->strutEnabled()) {
+             this->strutMetrics().updateLineMetrics(metrics);
+@@ -1047,20 +1047,24 @@ void ParagraphImpl::computeEmptyMetrics() {
+     fEmptyMetrics = InternalLineMetrics(font, paragraphStyle().getStrutStyle().getForceStrutHeight());
+ 
+     if (!paragraphStyle().getStrutStyle().getForceStrutHeight() &&
+-        textStyle.getHeightOverride()) {
+-        const auto intrinsicHeight = fEmptyMetrics.height();
+-        const auto strutHeight = textStyle.getHeight() * textStyle.getFontSize();
+-        if (paragraphStyle().getStrutStyle().getHalfLeading()) {
+-            fEmptyMetrics.update(
+-                fEmptyMetrics.ascent(),
+-                fEmptyMetrics.descent(),
+-                fEmptyMetrics.leading() + strutHeight - intrinsicHeight);
+-        } else {
+-            const auto multiplier = strutHeight / intrinsicHeight;
+-            fEmptyMetrics.update(
+-                fEmptyMetrics.ascent() * multiplier,
+-                fEmptyMetrics.descent() * multiplier,
+-                fEmptyMetrics.leading() * multiplier);
++        textStyle.getHeightOverride() && !SkScalarNearlyZero(textStyle.getHeight())) {
++        // Match Run::calculateMetrics, including the text style's distribution.
++        // Using the rounded line pitch here would scale empty lines differently.
++        auto ascent = fEmptyMetrics.ascent() - fEmptyMetrics.leading() / 2;
++        auto descent = fEmptyMetrics.descent() + fEmptyMetrics.leading() / 2;
++        const auto intrinsicHeight = descent - ascent;
++        const auto requestedHeight = textStyle.getHeight() * textStyle.getFontSize();
++        if (!SkScalarNearlyZero(intrinsicHeight)) {
++            if (textStyle.getHalfLeading()) {
++                const auto extraLeading = (requestedHeight - intrinsicHeight) / 2;
++                ascent -= extraLeading;
++                descent += extraLeading;
++            } else {
++                const auto multiplier = requestedHeight / intrinsicHeight;
++                ascent *= multiplier;
++                descent *= multiplier;
++            }
++            fEmptyMetrics.update(ascent, descent, 0);
+         }
+     }
+ 
+@@ -1239,6 +1243,14 @@ void ParagraphImpl::visit(const Visitor& visitor) {
      }
  }
  
@@ -91,7 +143,7 @@ index a1cfc40..d2723d6 100644
      SkASSERT(pos + size <= this->size());
      const auto& blobBuffer = builder.allocRunPos(fFont, SkToInt(size));
 diff --git a/modules/skparagraph/src/Run.h b/modules/skparagraph/src/Run.h
-index 8f5d709..16c626b 100644
+index 8f5d709..f58c336 100644
 --- a/modules/skparagraph/src/Run.h
 +++ b/modules/skparagraph/src/Run.h
 @@ -161,7 +161,7 @@ public:
@@ -117,9 +169,9 @@ index 8f5d709..16c626b 100644
          fRawAscent = ra;
          fRawDescent = rd;
          fRawLeading = rl;
-+        fHeightInputAscent = ra;
-+        fHeightInputDescent = rd;
-+        fHeightInputLeading = rl;
++        fHeightInputAscent = a;
++        fHeightInputDescent = d;
++        fHeightInputLeading = l;
          fForceStrut = false;
      }
  
@@ -133,17 +185,22 @@ index 8f5d709..16c626b 100644
          fForceStrut = forceStrut;
      }
  
-@@ -424,6 +433,9 @@ public:
+@@ -424,6 +433,14 @@ public:
          fRawAscent = std::min(fRawAscent, run->ascent());
          fRawDescent = std::max(fRawDescent, run->descent());
          fRawLeading = std::max(fRawLeading, run->leading());
-+        fHeightInputAscent = std::min(fHeightInputAscent, run->ascent());
-+        fHeightInputDescent = std::max(fHeightInputDescent, run->descent());
-+        fHeightInputLeading = std::max(fHeightInputLeading, run->leading());
++        // Preserve Qt's natural signed metrics unless a height was requested.
++        const bool explicitHeight = !SkScalarNearlyZero(run->heightMultiplier());
++        fHeightInputAscent = std::min(fHeightInputAscent,
++                explicitHeight ? run->correctAscent() : run->ascent());
++        fHeightInputDescent = std::max(fHeightInputDescent,
++                explicitHeight ? run->correctDescent() : run->descent());
++        fHeightInputLeading = std::max(fHeightInputLeading,
++                explicitHeight ? run->correctLeading() : run->leading());
      }
  
      void add(InternalLineMetrics other) {
-@@ -433,6 +445,9 @@ public:
+@@ -433,6 +450,9 @@ public:
          fRawAscent = std::min(fRawAscent, other.fRawAscent);
          fRawDescent = std::max(fRawDescent, other.fRawDescent);
          fRawLeading = std::max(fRawLeading, other.fRawLeading);
@@ -153,7 +210,7 @@ index 8f5d709..16c626b 100644
      }
  
      void clean() {
-@@ -442,6 +457,9 @@ public:
+@@ -442,6 +462,9 @@ public:
          fRawAscent = SK_ScalarMax;
          fRawDescent = SK_ScalarMin;
          fRawLeading = 0;
@@ -163,17 +220,32 @@ index 8f5d709..16c626b 100644
      }
  
      bool isClean() {
-@@ -463,6 +481,9 @@ public:
+@@ -463,12 +486,24 @@ public:
              metrics.fRawAscent = fRawAscent;
              metrics.fRawDescent = fRawDescent;
              metrics.fRawLeading = fRawLeading;
-+            metrics.fHeightInputAscent = fHeightInputAscent;
-+            metrics.fHeightInputDescent = fHeightInputDescent;
-+            metrics.fHeightInputLeading = fHeightInputLeading;
++            metrics.fHeightInputAscent = fHeightInputAscent - fHeightInputLeading / 2;
++            metrics.fHeightInputDescent = fHeightInputDescent + fHeightInputLeading / 2;
++            metrics.fHeightInputLeading = 0;
          } else {
              // This is another of those flutter changes. To be removed...
              metrics.fAscent = std::min(metrics.fAscent, fAscent - fLeading / 2.0f);
-@@ -478,7 +499,21 @@ public:
+             metrics.fDescent = std::max(metrics.fDescent, fDescent + fLeading / 2.0f);
+             metrics.fRawAscent = std::min(metrics.fRawAscent, fRawAscent - fRawLeading / 2.0f);
+             metrics.fRawDescent = std::max(metrics.fRawDescent, fRawDescent + fRawLeading / 2.0f);
++            // Strut leading is split around the baseline. Fold the line's own
++            // leading into its extents once before taking the strut minimum.
++            metrics.fHeightInputAscent = std::min(
++                    metrics.fHeightInputAscent - metrics.fHeightInputLeading / 2,
++                    fHeightInputAscent - fHeightInputLeading / 2);
++            metrics.fHeightInputDescent = std::max(
++                    metrics.fHeightInputDescent + metrics.fHeightInputLeading / 2,
++                    fHeightInputDescent + fHeightInputLeading / 2);
++            metrics.fHeightInputLeading = 0;
+         }
+     }
+ 
+@@ -478,13 +513,40 @@ public:
      }
  
      SkScalar height() const {
@@ -196,7 +268,26 @@ index 8f5d709..16c626b 100644
      }
  
      void update(SkScalar a, SkScalar d, SkScalar l) {
-@@ -492,15 +527,28 @@ public:
+         fAscent = a;
+         fDescent = d;
+         fLeading = l;
++        fHeightInputAscent = a;
++        fHeightInputDescent = d;
++        fHeightInputLeading = l;
++    }
++
++    void useRawAscent() {
++        fAscent = fRawAscent;
++        fHeightInputAscent = fRawAscent;
++    }
++
++    void useRawDescent() {
++        fDescent = fRawDescent;
++        fHeightInputDescent = fRawDescent;
+     }
+ 
+     void updateRawData(SkScalar ra, SkScalar rd) {
+@@ -492,15 +554,28 @@ public:
          fRawDescent = rd;
      }
  
@@ -212,11 +303,9 @@ index 8f5d709..16c626b 100644
      SkScalar ascent() const { return fAscent; }
      SkScalar descent() const { return fDescent; }
      SkScalar leading() const { return fLeading; }
--    SkScalar rawAscent() const { return fRawAscent; }
--    SkScalar rawDescent() const { return fRawDescent; }
-+    SkScalar rawAscent() const { return fHeightInputAscent; }
-+    SkScalar rawDescent() const { return fHeightInputDescent; }
-+    SkScalar rawLeading() const { return fHeightInputLeading; }
+     SkScalar rawAscent() const { return fRawAscent; }
+     SkScalar rawDescent() const { return fRawDescent; }
++    SkScalar rawLeading() const { return fRawLeading; }
 +    SkScalar heightInputAscent() const { return fHeightInputAscent; }
 +    SkScalar heightInputDescent() const { return fHeightInputDescent; }
 +    SkScalar heightInputLeading() const { return fHeightInputLeading; }
@@ -229,7 +318,7 @@ index 8f5d709..16c626b 100644
      void setForceStrut(bool value) { fForceStrut = value; }
      bool getForceStrut() const { return fForceStrut; }
  
-@@ -517,6 +565,9 @@ private:
+@@ -517,6 +592,9 @@ private:
      SkScalar fRawAscent;
      SkScalar fRawDescent;
      SkScalar fRawLeading;
@@ -240,22 +329,29 @@ index 8f5d709..16c626b 100644
      bool fForceStrut;
  };
 diff --git a/modules/skparagraph/src/TextLine.cpp b/modules/skparagraph/src/TextLine.cpp
-index bb60d70..bd23f3a 100644
+index bb60d70..6953a6c 100644
 --- a/modules/skparagraph/src/TextLine.cpp
 +++ b/modules/skparagraph/src/TextLine.cpp
-@@ -152,8 +152,9 @@ TextLine::TextLine(ParagraphImpl* owner,
+@@ -152,8 +152,7 @@ TextLine::TextLine(ParagraphImpl* owner,
      for (auto runIndex = start.runIndex(); runIndex <= end.runIndex(); ++runIndex) {
          auto& run = fOwner->run(runIndex);
          runLevels[runLevelsIndex++] = run.fBidiLevel;
 -        fMaxRunMetrics.add(
 -            InternalLineMetrics(run.correctAscent(), run.correctDescent(), run.fFontMetrics.fLeading));
-+        fMaxRunMetrics.add(InternalLineMetrics(
-+            run.correctAscent(), run.correctDescent(), run.fFontMetrics.fLeading,
-+            run.ascent(), run.descent(), run.leading()));
++        fMaxRunMetrics.add(&run);
          if (run.isPlaceholder()) {
              placeholdersInOriginalOrder.push_back(runIndex);
          }
-@@ -1123,9 +1124,10 @@ LineMetrics TextLine::getMetrics() const {
+@@ -443,7 +442,7 @@ void TextLine::paintDecorations(ParagraphPainter* painter, SkScalar x, SkScalar
+     ParagraphPainterAutoRestore ppar(painter);
+     painter->translate(x + this->offset().fX, y + this->offset().fY + style.getBaselineShift());
+     Decorations decorations;
+-    SkScalar correctedBaseline = SkScalarFloorToScalar(-this->sizes().rawAscent() + style.getBaselineShift() + 0.5);
++    SkScalar correctedBaseline = SkScalarFloorToScalar(this->baseline() + style.getBaselineShift() + 0.5);
+     decorations.paint(painter, style, context, correctedBaseline);
+ }
+ 
+@@ -1123,9 +1122,10 @@ LineMetrics TextLine::getMetrics() const {
      result.fEndIndex = fOwner->getUTF16Index(fText.end);
      result.fEndIncludingNewline = fOwner->getUTF16Index(fTextIncludingNewlines.end);
      result.fHardBreak = endsWithHardLineBreak();
@@ -269,7 +365,7 @@ index bb60d70..bd23f3a 100644
      result.fHeight = fAdvance.fY;
      result.fWidth = fAdvance.fX;
      if (fOwner->getApplyRoundingHack()) {
-@@ -1134,7 +1136,7 @@ LineMetrics TextLine::getMetrics() const {
+@@ -1134,7 +1134,7 @@ LineMetrics TextLine::getMetrics() const {
      }
      result.fLeft = this->offset().fX;
      // This is Flutter definition of a baseline
@@ -278,6 +374,45 @@ index bb60d70..bd23f3a 100644
      result.fLineNumber = this - fOwner->lines().data();
  
      // Fill out the style parts
+diff --git a/modules/skparagraph/src/TextWrapper.cpp b/modules/skparagraph/src/TextWrapper.cpp
+index 718687c..7fd236a 100644
+--- a/modules/skparagraph/src/TextWrapper.cpp
++++ b/modules/skparagraph/src/TextWrapper.cpp
+@@ -364,10 +364,10 @@ void TextWrapper::breakTextIntoLines(ParagraphImpl* parent,
+         ClusterRange clustersWithGhosts(fEndLine.startCluster() - start, startLine - start);
+ 
+         if (disableFirstAscent && firstLine) {
+-            fEndLine.metrics().fAscent = fEndLine.metrics().fRawAscent;
++            fEndLine.metrics().useRawAscent();
+         }
+         if (disableLastDescent && (lastLine || (startLine == end && !fHardLineBreak ))) {
+-            fEndLine.metrics().fDescent = fEndLine.metrics().fRawDescent;
++            fEndLine.metrics().useRawDescent();
+         }
+ 
+         if (parent->strutEnabled()) {
+@@ -464,10 +464,10 @@ void TextWrapper::breakTextIntoLines(ParagraphImpl* parent,
+         if (parent->lines().empty()) {
+             // In case we could not place even a single cluster on the line
+             if (disableFirstAscent) {
+-                fEndLine.metrics().fAscent = fEndLine.metrics().fRawAscent;
++                fEndLine.metrics().useRawAscent();
+             }
+             if (disableLastDescent && !fHardLineBreak) {
+-                fEndLine.metrics().fDescent = fEndLine.metrics().fRawDescent;
++                fEndLine.metrics().useRawDescent();
+             }
+             fHeight = std::max(fHeight, fEndLine.metrics().height());
+         }
+@@ -475,7 +475,7 @@ void TextWrapper::breakTextIntoLines(ParagraphImpl* parent,
+ 
+     if (fHardLineBreak) {
+         if (disableLastDescent) {
+-            fEndLine.metrics().fDescent = fEndLine.metrics().fRawDescent;
++            fEndLine.metrics().useRawDescent();
+         }
+ 
+         // Last character is a line break
 diff --git a/src/ports/SkFontHost_FreeType.cpp b/src/ports/SkFontHost_FreeType.cpp
 index c229c44..aa49f2e 100644
 --- a/src/ports/SkFontHost_FreeType.cpp

@@ -79,7 +79,7 @@ index 2c9821a..b254d7d 100644
      // them. The first run will be keyed under start_index. The metrics here
      // are before layout and are the base values we calculate from.
 diff --git a/modules/skparagraph/include/Paragraph.h b/modules/skparagraph/include/Paragraph.h
-index f9b78be..696c982 100644
+index aa21bb8..7f258c0 100644
 --- a/modules/skparagraph/include/Paragraph.h
 +++ b/modules/skparagraph/include/Paragraph.h
 @@ -2,8 +2,11 @@
@@ -94,7 +94,7 @@ index f9b78be..696c982 100644
  #include "modules/skparagraph/include/Metrics.h"
  #include "modules/skparagraph/include/ParagraphStyle.h"
  #include "modules/skparagraph/include/TextStyle.h"
-@@ -112,6 +115,35 @@ public:
+@@ -114,6 +117,35 @@ public:
      using ExtendedVisitor = std::function<void(int lineNumber, const ExtendedVisitorInfo*)>;
      virtual void extendedVisit(const ExtendedVisitor&) = 0;
  
@@ -233,7 +233,7 @@ index 6e13350..ee9c8dc 100644
      startStyledBlock();
  }
 diff --git a/modules/skparagraph/src/ParagraphImpl.cpp b/modules/skparagraph/src/ParagraphImpl.cpp
-index daf2a71..5c7970d 100644
+index 47bb55c..0dba4b2 100644
 --- a/modules/skparagraph/src/ParagraphImpl.cpp
 +++ b/modules/skparagraph/src/ParagraphImpl.cpp
 @@ -47,6 +47,36 @@ SkScalar littleRound(SkScalar a) {
@@ -273,7 +273,7 @@ index daf2a71..5c7970d 100644
  }  // namespace
  
  TextRange operator*(const TextRange& a, const TextRange& b) {
-@@ -1247,6 +1277,75 @@ SkScalar ParagraphImpl::getParagraphBottomCorrection() const {
+@@ -1251,6 +1281,75 @@ SkScalar ParagraphImpl::getParagraphBottomCorrection() const {
      return std::max(0.0f, line.sizes().lineBoxHeight() - line.height());
  }
  
@@ -368,7 +368,7 @@ index 083984c..36922da 100644
      int getLineNumberAtUTF16Offset(size_t codeUnitIndex) override;
      bool getLineMetricsAt(int lineNumber, LineMetrics* lineMetrics) const override;
 diff --git a/modules/skparagraph/src/Run.cpp b/modules/skparagraph/src/Run.cpp
-index d2723d6..e0e85b0 100644
+index d2723d6..e94a4a6 100644
 --- a/modules/skparagraph/src/Run.cpp
 +++ b/modules/skparagraph/src/Run.cpp
 @@ -30,6 +30,7 @@ Run::Run(ParagraphImpl* owner,
@@ -406,7 +406,7 @@ index d2723d6..e0e85b0 100644
      // Rounding must never depend on whether original positions were retained.
      SkScalar previousRawX = fPositions.empty() ? 0.0f : fPositions[0].fX;
 diff --git a/modules/skparagraph/src/Run.h b/modules/skparagraph/src/Run.h
-index 16c626b..fbeb643 100644
+index f58c336..7a94c8f 100644
 --- a/modules/skparagraph/src/Run.h
 +++ b/modules/skparagraph/src/Run.h
 @@ -19,6 +19,8 @@
@@ -465,9 +465,9 @@ index 16c626b..fbeb643 100644
          fRawDescent = rd;
          fRawLeading = rl;
 +        fDiagnosticRawLeading = rl;
-         fHeightInputAscent = ra;
-         fHeightInputDescent = rd;
-         fHeightInputLeading = rl;
+         fHeightInputAscent = a;
+         fHeightInputDescent = d;
+         fHeightInputLeading = l;
 @@ -416,6 +427,7 @@ public:
          fRawAscent = metrics.fAscent;
          fRawDescent = metrics.fDescent;
@@ -481,10 +481,10 @@ index 16c626b..fbeb643 100644
          fRawDescent = std::max(fRawDescent, run->descent());
          fRawLeading = std::max(fRawLeading, run->leading());
 +        fDiagnosticRawLeading = std::max(fDiagnosticRawLeading, run->leading());
-         fHeightInputAscent = std::min(fHeightInputAscent, run->ascent());
-         fHeightInputDescent = std::max(fHeightInputDescent, run->descent());
-         fHeightInputLeading = std::max(fHeightInputLeading, run->leading());
-@@ -445,6 +458,7 @@ public:
+         // Preserve Qt's natural signed metrics unless a height was requested.
+         const bool explicitHeight = !SkScalarNearlyZero(run->heightMultiplier());
+         fHeightInputAscent = std::min(fHeightInputAscent,
+@@ -450,6 +463,7 @@ public:
          fRawAscent = std::min(fRawAscent, other.fRawAscent);
          fRawDescent = std::max(fRawDescent, other.fRawDescent);
          fRawLeading = std::max(fRawLeading, other.fRawLeading);
@@ -492,7 +492,7 @@ index 16c626b..fbeb643 100644
          fHeightInputAscent = std::min(fHeightInputAscent, other.fHeightInputAscent);
          fHeightInputDescent = std::max(fHeightInputDescent, other.fHeightInputDescent);
          fHeightInputLeading = std::max(fHeightInputLeading, other.fHeightInputLeading);
-@@ -457,6 +471,7 @@ public:
+@@ -462,6 +476,7 @@ public:
          fRawAscent = SK_ScalarMax;
          fRawDescent = SK_ScalarMin;
          fRawLeading = 0;
@@ -500,15 +500,24 @@ index 16c626b..fbeb643 100644
          fHeightInputAscent = SK_ScalarMax;
          fHeightInputDescent = SK_ScalarMin;
          fHeightInputLeading = SK_ScalarMin;
-@@ -481,6 +496,7 @@ public:
+@@ -486,6 +501,7 @@ public:
              metrics.fRawAscent = fRawAscent;
              metrics.fRawDescent = fRawDescent;
              metrics.fRawLeading = fRawLeading;
 +            metrics.fDiagnosticRawLeading = fDiagnosticRawLeading;
-             metrics.fHeightInputAscent = fHeightInputAscent;
-             metrics.fHeightInputDescent = fHeightInputDescent;
-             metrics.fHeightInputLeading = fHeightInputLeading;
-@@ -565,6 +581,9 @@ private:
+             metrics.fHeightInputAscent = fHeightInputAscent - fHeightInputLeading / 2;
+             metrics.fHeightInputDescent = fHeightInputDescent + fHeightInputLeading / 2;
+             metrics.fHeightInputLeading = 0;
+@@ -566,7 +582,7 @@ public:
+     SkScalar leading() const { return fLeading; }
+     SkScalar rawAscent() const { return fRawAscent; }
+     SkScalar rawDescent() const { return fRawDescent; }
+-    SkScalar rawLeading() const { return fRawLeading; }
++    SkScalar rawLeading() const { return fDiagnosticRawLeading; }
+     SkScalar heightInputAscent() const { return fHeightInputAscent; }
+     SkScalar heightInputDescent() const { return fHeightInputDescent; }
+     SkScalar heightInputLeading() const { return fHeightInputLeading; }
+@@ -592,6 +608,9 @@ private:
      SkScalar fRawAscent;
      SkScalar fRawDescent;
      SkScalar fRawLeading;
@@ -519,10 +528,10 @@ index 16c626b..fbeb643 100644
      SkScalar fHeightInputDescent;
      SkScalar fHeightInputLeading;
 diff --git a/modules/skparagraph/src/TextLine.cpp b/modules/skparagraph/src/TextLine.cpp
-index bd23f3a..54e5364 100644
+index 6953a6c..df9ab0a 100644
 --- a/modules/skparagraph/src/TextLine.cpp
 +++ b/modules/skparagraph/src/TextLine.cpp
-@@ -1138,6 +1138,19 @@ LineMetrics TextLine::getMetrics() const {
+@@ -1136,6 +1136,19 @@ LineMetrics TextLine::getMetrics() const {
      // This is Flutter definition of a baseline
      result.fBaseline = this->offset().fY + this->baseline();
      result.fLineNumber = this - fOwner->lines().data();

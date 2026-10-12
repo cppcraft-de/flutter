@@ -23,6 +23,7 @@
 #include "skia/paragraph_builder_skia.h"
 #include "testing/canvas_test.h"
 #include "testing/testing.h"
+#include "third_party/skia/modules/skparagraph/src/Run.h"
 #include "txt/platform.h"
 
 namespace flutter {
@@ -163,9 +164,11 @@ class PainterTestBase : public CanvasTestBase<T> {
     return builder.Build();
   }
 
-  std::unique_ptr<txt::Paragraph> layoutText(const txt::TextStyle& style,
-                                             const std::u16string& text) const {
-    auto pb_skia = makeParagraphBuilder();
+  std::unique_ptr<txt::Paragraph> layoutText(
+      const txt::TextStyle& style,
+      const std::u16string& text,
+      const txt::ParagraphStyle& paragraph_style = {}) const {
+    auto pb_skia = makeParagraphBuilder(paragraph_style);
     pb_skia.PushStyle(style);
     pb_skia.AddText(text);
     pb_skia.Pop();
@@ -196,8 +199,8 @@ class PainterTestBase : public CanvasTestBase<T> {
     return f_collection;
   }
 
-  txt::ParagraphBuilderSkia makeParagraphBuilder() const {
-    auto p_style = txt::ParagraphStyle();
+  txt::ParagraphBuilderSkia makeParagraphBuilder(
+      const txt::ParagraphStyle& p_style = {}) const {
     auto f_collection = makeFontCollection();
     return txt::ParagraphBuilderSkia(p_style, f_collection, impeller_);
   }
@@ -276,6 +279,119 @@ TEST_F(PainterTest, SchoolcraftIntegerLineMetricsUseSignedPitchAndOccupiedBox) {
   EXPECT_DOUBLE_EQ(glyphs.front().fFinalOrigin.fY, line.baseline);
 }
 
+TEST_F(PainterTest, ExplicitHeightControlsBaselinePitchIncludingEmptyText) {
+  for (double height : {0.5, 1.0, 2.0}) {
+    for (bool half_leading : {false, true}) {
+      auto style = makeStyle();
+      style.font_size = 20;
+      style.height = height;
+      style.has_height_override = true;
+      style.half_leading = half_leading;
+      const double expected = 20 * height;
+      auto single = layoutText(style, u"a");
+      auto empty = layoutText(style, u"");
+      auto pair = layoutText(style, u"a\na");
+      auto trailing = layoutText(style, u"a\n");
+      EXPECT_DOUBLE_EQ(single->GetHeight(), expected);
+      EXPECT_DOUBLE_EQ(empty->GetHeight(), expected);
+      EXPECT_DOUBLE_EQ(empty->GetAlphabeticBaseline(),
+                       single->GetAlphabeticBaseline());
+      EXPECT_DOUBLE_EQ(pair->GetHeight(), 2 * expected);
+      EXPECT_DOUBLE_EQ(trailing->GetHeight(), 2 * expected);
+      const auto& lines = pair->GetLineMetrics();
+      ASSERT_EQ(lines.size(), 2u);
+      EXPECT_DOUBLE_EQ(lines[1].baseline - lines[0].baseline, expected);
+
+      // Height controls must not change horizontal advances or wrapping.
+      style.has_height_override = false;
+      auto natural = layoutText(style, u"a");
+      EXPECT_DOUBLE_EQ(single->GetLongestLine(), natural->GetLongestLine());
+    }
+  }
+}
+
+TEST_F(PainterTest, TextHeightBehaviorTrimsRequestedFirstAndLastExtents) {
+  auto style = makeStyle();
+  style.font_size = 20;
+  style.height = 2;
+  style.has_height_override = true;
+  for (const auto& text : {u"a", u"a b", u"a\na", u"a\n", u""}) {
+    auto expanded = layoutText(style, text);
+    for (size_t behavior : {txt::kDisableFirstAscent, txt::kDisableLastDescent,
+                            txt::kDisableAll}) {
+      txt::ParagraphStyle paragraph_style;
+      paragraph_style.text_height_behavior = behavior;
+      auto trimmed = layoutText(style, text, paragraph_style);
+      EXPECT_LT(trimmed->GetHeight(), expanded->GetHeight());
+      EXPECT_DOUBLE_EQ(trimmed->GetLongestLine(), expanded->GetLongestLine());
+      if (behavior & txt::kDisableFirstAscent) {
+        EXPECT_LT(trimmed->GetAlphabeticBaseline(),
+                  expanded->GetAlphabeticBaseline());
+      } else {
+        EXPECT_DOUBLE_EQ(trimmed->GetAlphabeticBaseline(),
+                         expanded->GetAlphabeticBaseline());
+      }
+    }
+  }
+}
+
+TEST_F(PainterTest, StrutHeightAndLeadingControlLayout) {
+  auto style = makeStyle();
+  style.font_size = 20;
+  txt::ParagraphStyle paragraph_style;
+  paragraph_style.strut_enabled = true;
+  paragraph_style.strut_font_families = {"ahem"};
+  paragraph_style.strut_font_size = 20;
+  paragraph_style.strut_height = 2;
+  paragraph_style.strut_has_height_override = true;
+  paragraph_style.strut_leading = 0.2;
+  for (bool force : {false, true}) {
+    paragraph_style.force_strut_height = force;
+    for (const auto& text : {u"a", u"a b", u""}) {
+      auto paragraph = layoutText(style, text, paragraph_style);
+      EXPECT_DOUBLE_EQ(paragraph->GetHeight(), 44);
+    }
+    auto pair = layoutText(style, u"a\na", paragraph_style);
+    ASSERT_EQ(pair->GetLineMetrics().size(), 2u);
+    EXPECT_DOUBLE_EQ(
+        pair->GetLineMetrics()[1].baseline - pair->GetLineMetrics()[0].baseline,
+        44);
+  }
+  style.font_size = 60;
+  auto forced = layoutText(style, u"a", paragraph_style);
+  EXPECT_DOUBLE_EQ(forced->GetHeight(), 44);
+  paragraph_style.force_strut_height = false;
+  auto minimum = layoutText(style, u"a", paragraph_style);
+  EXPECT_GT(minimum->GetHeight(), 44);
+}
+
+TEST_F(PainterTest, LineMetricUpdatesPreserveRawFontMeasurements) {
+  using skia::textlayout::InternalLineMetrics;
+  InternalLineMetrics natural(-10, 3, -1);
+  EXPECT_EQ(natural.height(), 12);
+  EXPECT_EQ(natural.lineBoxHeight(), 13);
+  EXPECT_EQ(natural.baseline(), 10);
+  natural.update(-20, 6, 0);
+  EXPECT_EQ(natural.height(), 26);
+  EXPECT_EQ(natural.baseline(), 20);
+  EXPECT_EQ(natural.rawAscent(), -10);
+  EXPECT_EQ(natural.rawDescent(), 3);
+  natural.useRawAscent();
+  natural.useRawDescent();
+  EXPECT_EQ(natural.height(), 13);
+  EXPECT_EQ(natural.baseline(), 10);
+
+  InternalLineMetrics strut(-30, 10, 4, -10, 3, -1);
+  for (bool force : {false, true}) {
+    InternalLineMetrics line(-10, 3, -1);
+    line.setForceStrut(force);
+    strut.updateLineMetrics(line);
+    EXPECT_EQ(line.height(), 44);
+    EXPECT_EQ(line.lineBoxHeight(), 44);
+    EXPECT_EQ(line.baseline(), 32);
+  }
+}
+
 // Exercise both diagnostic modes in separate processes.
 TEST_F(PainterTest, CursiveLetterSpacingDoesNotChangeWrapping) {
   fml::icu::InitializeICU("icudtl.dat");
@@ -300,8 +416,8 @@ TEST_F(PainterTest, CursiveLetterSpacingDoesNotChangeWrapping) {
 
 // Run in separate processes with WSC_FONT_DIAGNOSTICS=0 and =1. The output
 // includes occupied paragraph height, line geometry, and raster pixels.
-// For the old engine, height includes the old client-side correction.
-// This also permits comparison against the pre-removal engine's libraries.
+// Explicit heights now affect layout, so their old fingerprints are not a
+// compatibility baseline. The natural Qt cases retain their accepted geometry.
 TEST_F(PainterTest, FontDiagnosticsRenderingParity) {
   fml::icu::InitializeICU("icudtl.dat");
   uint64_t fingerprint = 14695981039346656037ull;
