@@ -10,6 +10,8 @@ that operators must still enforce.
 | --- | --- |
 | Framework revision | Exact Git commit selected by the Jenkins branch job |
 | Engine ID | Tracked `bin/internal/engine.version`; namespace of the engine/Maven artifacts |
+| `engineRevision` | Build-source commit recorded in the downloaded `engine_stamp.json`; may differ from the artifact namespace |
+| `engineContentHash` | Content hash recorded by the engine build; not the artifact namespace |
 | `frameworkVersion` | Flutter-compatible numeric version; WSC exact tags supply their embedded upstream version |
 | `wscVersion` | Exact WSC release tag, or an automatically derived development identity |
 | Channel | Packaged local branch name selected by `RELEASE_BRANCH` |
@@ -86,6 +88,14 @@ and publication are enabled; other untagged testing runs retain the warning.
 Another engine-affecting commit requires repinning. Rewriting history can change this
 identity even with identical source contents. Agent/toolchain changes, however,
 are not encoded by this Git calculation; record them for accepted releases.
+
+Do not rewrite `flutter.version.json`'s `engineRevision` to match the pin. Upstream
+version reporting prefers the downloaded `engine_stamp.json` build-source commit;
+the launcher uses `engine.stamp` (normally derived from tracked `engine.version`)
+to select downloads. A framework-only commit can therefore build/package engine
+artifacts under the unchanged pin while reporting that later build-source commit.
+Matching identity stamps alone do not prove framework/platform-kernel API
+compatibility; an extracted-SDK application compile is still required.
 
 ## Release procedure
 

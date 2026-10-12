@@ -18,7 +18,8 @@ import 'dart:ui'
         ParagraphConstraints,
         ParagraphStyle,
         PlaceholderAlignment,
-        TextStyle;
+        TextStyle,
+        fontRenderingDiagnosticsEnabled;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
