@@ -276,6 +276,28 @@ TEST_F(PainterTest, SchoolcraftIntegerLineMetricsUseSignedPitchAndOccupiedBox) {
   EXPECT_DOUBLE_EQ(glyphs.front().fFinalOrigin.fY, line.baseline);
 }
 
+// Exercise both diagnostic modes in separate processes.
+TEST_F(PainterTest, CursiveLetterSpacingDoesNotChangeWrapping) {
+  fml::icu::InitializeICU("icudtl.dat");
+  auto style = makeStyle();
+  const std::u16string text = u"\u0633\u0644\u0627\u0645";
+  auto natural = layoutText(style, text);
+  const double width = natural->GetLongestLine();
+  ASSERT_GT(width, 0);
+  style.letter_spacing = 3;
+  auto spaced = layoutText(style, text);
+  EXPECT_DOUBLE_EQ(spaced->GetLongestLine(), width);
+  natural->Layout(width);
+  spaced->Layout(width);
+  EXPECT_EQ(spaced->GetLineMetrics().size(), natural->GetLineMetrics().size());
+
+  // The same spacing must still apply to non-cursive scripts.
+  auto latin_spaced = layoutText(style, u"abcd");
+  style.letter_spacing = 0;
+  auto latin_natural = layoutText(style, u"abcd");
+  EXPECT_GT(latin_spaced->GetLongestLine(), latin_natural->GetLongestLine());
+}
+
 // Run in separate processes with WSC_FONT_DIAGNOSTICS=0 and =1. The output
 // includes occupied paragraph height, line geometry, and raster pixels.
 // For the old engine, height includes the old client-side correction.

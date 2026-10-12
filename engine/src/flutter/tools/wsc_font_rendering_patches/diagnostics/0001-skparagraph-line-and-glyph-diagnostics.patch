@@ -383,11 +383,10 @@ index d2723d6..e0e85b0 100644
      , fBaselineShift(baselineShift)
  {
      fBidiLevel = info.fBidiLevel;
--    fScript = info.fScript;
++    // Script affects cursive spacing even when diagnostics are disabled.
+     fScript = info.fScript;
 -    fLanguage = info.fLanguage;
-+    fScript = 0;
 +    if (FontDiagnosticsEnabled()) {
-+        fScript = info.fScript;
 +        fLanguage = info.fLanguage;
 +    }
 +    fShapingFeatureCount = 0;
