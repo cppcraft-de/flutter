@@ -587,6 +587,11 @@ def checkoutSdkSource() {
 pipeline {
     agent none
 
+    environment {
+        // Use locally installed Visual Studio for Windows sync and builds.
+        DEPOT_TOOLS_WIN_TOOLCHAIN = '0'
+    }
+
     options {
         timestamps()
         skipDefaultCheckout(true)
