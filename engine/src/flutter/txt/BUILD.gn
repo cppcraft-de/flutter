@@ -173,6 +173,7 @@ if (enable_unittests) {
       ":txt_fixtures",
       "//flutter/fml",
       "//flutter/runtime:test_font",
+      "//flutter/skia:typeface_proxy",
       "//flutter/skia/modules/skparagraph",
       "//flutter/testing:skia",
       "//flutter/testing:testing_lib",
