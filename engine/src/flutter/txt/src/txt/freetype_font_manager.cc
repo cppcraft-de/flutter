@@ -141,9 +141,10 @@ class FreeTypeCanonicalizer : public SkNVRefCnt<FreeTypeCanonicalizer> {
         MakeFreeTypeTypefaceFromTypeface(std::move(typeface));
     {
       std::scoped_lock lock(mutex_);
-      cache_[source_id] = canonical;
+      // Another thread may have converted the same source while the lock was
+      // released. All callers must use the winning typeface's identity.
+      return cache_.try_emplace(source_id, std::move(canonical)).first->second;
     }
-    return canonical;
   }
 
  private:
