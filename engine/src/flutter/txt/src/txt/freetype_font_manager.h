@@ -14,8 +14,6 @@ namespace txt {
 sk_sp<SkFontMgr> MakeFreeTypeCanonicalFontManager(
     sk_sp<SkFontMgr> font_manager);
 
-sk_sp<SkTypeface> MakeFreeTypeCanonicalTypeface(sk_sp<SkTypeface> typeface);
-
 bool IsFreeTypeCanonicalTypefaceForTesting(const SkTypeface* typeface);
 
 }  // namespace txt

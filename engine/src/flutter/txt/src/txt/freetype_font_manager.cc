@@ -273,10 +273,6 @@ sk_sp<SkFontMgr> MakeFreeTypeCanonicalFontManager(
   return sk_make_sp<FreeTypeCanonicalFontMgr>(std::move(font_manager));
 }
 
-sk_sp<SkTypeface> MakeFreeTypeCanonicalTypeface(sk_sp<SkTypeface> typeface) {
-  return MakeFreeTypeTypefaceFromTypeface(std::move(typeface));
-}
-
 bool IsFreeTypeCanonicalTypefaceForTesting(const SkTypeface* typeface) {
   return IsFreeTypeCanonicalTypeface(typeface);
 }
