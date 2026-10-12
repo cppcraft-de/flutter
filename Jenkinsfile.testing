@@ -486,9 +486,9 @@ def withSdkGitCredentials(Closure body) {
         withEnv([
             'GIT_TERMINAL_PROMPT=0',
             'GCM_INTERACTIVE=Never',
-            'GIT_CONFIG_COUNT=1',
-            'GIT_CONFIG_KEY_0=credential.helper',
-            'GIT_CONFIG_VALUE_0=',
+            // withEnv unsets empty values. Keep the empty helper value inside
+            // Git's quoted parameter string so child Git processes inherit it.
+            "GIT_CONFIG_PARAMETERS='credential.helper='",
         ]) {
             body()
         }
