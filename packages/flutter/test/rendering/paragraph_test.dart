@@ -140,6 +140,13 @@ void main() {
     final List<DiagnosticGlyphMetrics> glyphMetrics = paragraph.computeGlyphMetricsForDiagnostics();
     final ui.GlyphInfo? glyph = paragraph.getGlyphInfoAtForDiagnostics(0);
 
+    final Size sizeBeforeBoundaryQuery = paragraph.size;
+    expect(
+      paragraph.getLineBoundary(const TextPosition(offset: 0)),
+      const TextRange(start: 0, end: 2),
+    );
+    expect(paragraph.size, sizeBeforeBoundaryQuery);
+    expect(paragraph.debugNeedsLayout, isFalse);
     expect(lines, hasLength(1));
     expect(paragraph.size.height, greaterThanOrEqualTo(lines.single.height));
     if (!ui.fontRenderingDiagnosticsEnabled) {

@@ -1085,6 +1085,16 @@ class RenderParagraph extends RenderBox
     return _textPainter.computeLineMetrics();
   }
 
+  /// Returns the exact UTF-16 line range from the paragraph used to paint
+  /// this render object.
+  ///
+  /// This read-only layout query is valid only after [layout].
+  TextRange getLineBoundary(TextPosition position) {
+    assert(!debugNeedsLayout);
+    _layoutTextWithConstraints(constraints);
+    return _textPainter.getLineBoundary(position);
+  }
+
   /// Returns detailed line metrics from the exact paragraph used to paint this
   /// render object.
   List<DiagnosticLineMetrics> computeDetailedLineMetricsForDiagnostics() {
