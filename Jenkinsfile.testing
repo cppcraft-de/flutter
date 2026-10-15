@@ -675,8 +675,10 @@ pipeline {
     agent none
 
     environment {
-        // Use locally installed Visual Studio for Windows sync and builds.
+        // Use locally installed VS2022, not the managed depot_tools toolchain
+        // or automatic detection (which can prefer an older VS installation).
         DEPOT_TOOLS_WIN_TOOLCHAIN = '0'
+        GYP_MSVS_VERSION = '2022'
     }
 
     options {
