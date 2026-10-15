@@ -6,6 +6,10 @@ commands without `--local-engine`.
 
 ## Documentation map
 
+New to Flutter engine packaging? Start with
+[Understanding engine versions and artifact downloads](docs/wsc/engine-identity.md)
+for the meaning of the IDs, the Maven failure, and the rationale for the fix.
+
 - **This file:** Jenkins setup, configuration, iteration, and acceptance.
 - [Artifacts and SDK packaging](docs/wsc/artifacts.md): storage layout, warm
   caches, upload/download contracts, and why a mirror is required.
@@ -182,12 +186,17 @@ REQUIRE_RELEASE_TAG=false
 ```
 
 Start the first run manually. It seeds missing upstream-owned mirror inputs,
-builds/publishes the target artifacts, and then creates, validates, and uploads
+builds/publishes the target artifacts, verifies Android Maven downloads, and then creates, validates, and uploads
 both host SDK ZIPs and checksum sidecars. See the
 [actual storage layout](docs/wsc/artifacts.md#storage-layout) for download paths.
 The first run on an empty agent must compile everything selected.
 
 ### Incremental behavior
+
+Preflight requires `bin/internal/engine.version` to match the selected source's
+upstream engine content hash on every build policy. See
+[engine identity](docs/wsc/releases.md#engine-identity) for pinning and the
+local CI branch context used to avoid development merge-base hashing.
 
 Engine workspaces are persistent, relative to each agent root:
 

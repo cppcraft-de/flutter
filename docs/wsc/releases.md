@@ -9,9 +9,9 @@ that operators must still enforce.
 | Identity | Source and meaning |
 | --- | --- |
 | Framework revision | Exact Git commit selected by the Jenkins branch job |
-| Engine ID | Tracked `bin/internal/engine.version`; namespace of the engine/Maven artifacts |
+| Engine ID | Tracked `bin/internal/engine.version`; upstream content hash selecting engine/Maven artifacts |
 | `engineRevision` | Build-source commit recorded in the downloaded `engine_stamp.json`; may differ from the artifact namespace |
-| `engineContentHash` | Content hash recorded by the engine build; not the artifact namespace |
+| `engineContentHash` | Engine input content hash recorded by the build; must match the artifact namespace |
 | `frameworkVersion` | Flutter-compatible numeric version; WSC exact tags supply their embedded upstream version |
 | `wscVersion` | Exact WSC release tag, or an automatically derived development identity |
 | Channel | Packaged local branch name selected by `RELEASE_BRANCH` |
@@ -70,32 +70,45 @@ checkouts can display `[user-branch]`; packaging supplies the desired channel.
 
 ### Engine identity
 
-After committing all engine/DEPS changes, run from the repository root:
+For the plain-language explanation, the Android failure that motivated this
+procedure, and the reasons for following upstream, read
+[Understanding engine versions and artifact downloads](engine-identity.md).
+
+After committing all engine/DEPS/patch changes, run from the repository root:
 
 ```sh
-bin/internal/last_engine_commit.sh
+python dev/bots/engine_identity.py
 ```
 
-On Windows use `bin\internal\last_engine_commit.ps1`. Put the returned full SHA
-in `bin/internal/engine.version`, commit that pin, then verify it again. Do not
-substitute the framework tip or a release tag for this calculation.
+Put the returned lowercase hash in `bin/internal/engine.version` and commit
+only the pin change. The helper reads committed engine inputs without switching
+branches or writing files. Framework-only changes and the pin commit itself do
+not change this hash; later engine/DEPS/patch changes require checking it again.
+Uncommitted edits in nested dependency checkouts must first become committed
+patch inputs.
 
-The pipeline checks the pin using full history. An exact recognized WSC release
-tag makes a mismatch fatal, even for incremental or engine-only builds and even
-with publication disabled. `REQUIRE_RELEASE_TAG=true` also rejects missing or
-ambiguous release tags. Untagged builds fail on a mismatch when `full_rebuild`
-and publication are enabled; other untagged testing runs retain the warning.
-Another engine-affecting commit requires repinning. Rewriting history can change this
-identity even with identical source contents. Agent/toolchain changes, however,
-are not encoded by this Git calculation; record them for accepted releases.
+After the pin commit, obtain the current full source SHA and validate it:
 
-Do not rewrite `flutter.version.json`'s `engineRevision` to match the pin. Upstream
-version reporting prefers the downloaded `engine_stamp.json` build-source commit;
-the launcher uses `engine.stamp` (normally derived from tracked `engine.version`)
-to select downloads. A framework-only commit can therefore build/package engine
-artifacts under the unchanged pin while reporting that later build-source commit.
-Matching identity stamps alone do not prove framework/platform-kernel API
-compatibility; an extracted-SDK application compile is still required.
+```sh
+git rev-parse HEAD
+python dev/bots/validate_sdk_identity.py --revision FULL_SOURCE_SHA
+```
+
+Replace `FULL_SOURCE_SHA` with the first command's output. The validator requires
+its checkout to match that revision and rejects stale pins on every build
+policy, including untagged incremental builds. Add `--require-release-tag` when
+checking a tagged release; that also requires an exact recognized WSC tag.
+
+Jenkins supplies the upstream-compatible local build-branch context, pins SDK
+packaging to the selected source SHA, and checks generated/published artifacts
+and SDK metadata. See the [identity guide](engine-identity.md) for the branch
+rule, Apple Git workaround, and why engine build provenance can legitimately
+differ from the framework revision. Source and metadata checks do not replace
+an extracted-SDK application build or rendering acceptance.
+
+The content-hash migration applies to new SDKs and artifact paths. Retain
+existing SDKs and their matching artifacts; validate a new candidate instead
+of rewriting previously accepted artifacts under an old ID.
 
 ## Release procedure
 

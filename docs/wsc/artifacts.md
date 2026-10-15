@@ -33,6 +33,9 @@ different distribution contract. Thin packages, bundled Maven, and arbitrary
 offline/CIPD mirroring are not implemented. Ordinary developer builds do not
 require engine sources, PDBs, or `--local-engine`.
 
+For an explanation of the different IDs and the Android Maven directory mapping,
+see [Understanding engine versions and artifact downloads](engine-identity.md).
+
 ## Storage layout
 
 The same server/root serves engine artifacts, Maven artifacts, and SDK ZIPs:
@@ -70,6 +73,16 @@ distinct storage roots if their outputs must remain separate.
 
 Do not hand-assemble runtime ZIP contents. The collector interprets the
 checked-in engine CI builder manifests and copies their declared archives.
+For Maven, the upstream build emits content-hash filenames and POM versions
+inside a Git-revision directory. The collector selects those existing variants
+from the current build and moves them into `1.0.0-<content-hash>` directories,
+matching upstream upload-recipe behavior. JAR and POM bytes are unchanged; legacy
+commit variants and stale incremental-output directories are not published.
+Missing files, incorrect POM coordinates, stale GN identity, or conflicting
+collected objects fail collection. The Android stage checks the uploaded Maven
+POM bytes and JAR sizes through the anonymous download root before SDK packaging.
+This verifies publication, not application compilation or rendering.
+
 Symbols/PDBs are excluded by default; separate symbol retention is an operator
 policy, not an automatic diagnostic publication feature of this pipeline.
 

@@ -15,11 +15,11 @@ for packaging, release tags, Jenkins settings, and developer acceptance.
   changes. A forward-port branch is not necessarily the most current patch set.
 - Finish and commit the changes to replay first. The helper refuses dirty or
   shallow source checkouts and unfinished Git operations; it never stashes work.
-- Use Python 3.10+ and Git. Tests and engine identity checks also use the normal
-  platform tools (PowerShell on Windows, Bash elsewhere). Run only trusted fork
+- Use Python 3.10+ and Git. Tests also use the normal platform tools
+  (PowerShell on Windows, Bash elsewhere). Run only trusted fork
   code: verification executes its scripts/tests and imports its patch inventory.
-  The Windows engine-pin check uses the same process-scoped execution-policy
-  override as Jenkins; it does not change user/machine PowerShell settings.
+  The upstream hash-helper regression test uses a process-scoped PowerShell
+  execution-policy override on Windows; it does not change persistent settings.
 - Choose a **new sibling worktree** on a volume with sufficient space. Source
   preparation does not download dependencies or compile engines. Dependency sync
   and CI builds later need much more space. Do not repurpose, move, or clean
@@ -145,14 +145,18 @@ the first-run migration from the old checkbox.
 
 ## 4. Commit source changes and derive the engine pin
 
-After all engine/DEPS/patch changes are committed, run the existing upstream
-identity script and put its output in `bin/internal/engine.version`, as described
+After all engine/DEPS/patch changes are committed, run
+`python dev/bots/engine_identity.py` to compute the upstream content hash of
+committed HEAD inputs, and put its output in `bin/internal/engine.version`, as
+described
 under [engine identity](releases.md#engine-identity). Commit only that pin change
 and verify it again. Use `git add -f bin/internal/engine.version` if the new base
 ignores an as-yet-untracked pin. Do not hand-copy the previous release's engine ID.
 
 The helper checks the committed pin but deliberately does not stage files or
-create a pin commit. Any later engine-affecting commit means repeating this step.
+create a pin commit. Any later change to the hashed engine inputs means repeating
+this step.
+Framework-only changes and the pin commit itself do not change this hash.
 
 ## 5. Run source checks
 
