@@ -1,0 +1,13 @@
+{
+  "enabled": false,
+  "repository": "https://bitbucket.org/schoolcraftteam/font_rendering_tester.git",
+  "ref": "master",
+  "credentials_id": "",
+  "fixture": "ci/cases/document-1.json",
+  "build_mode": "release",
+  "dpi": 192,
+  "baselines": {
+    "windows": {"url": "", "sha256": ""},
+    "macos": {"url": "", "sha256": ""}
+  }
+}

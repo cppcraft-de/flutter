@@ -220,6 +220,7 @@ machine-specific test environment paths.
 | Authenticated HTTP PUT | [upload_artifact_tree.py](../../dev/bots/upload_artifact_tree.py) |
 | Source-tag and SDK-JSON checks; SHA256 sidecars | [validate_sdk_identity.py](../../dev/bots/validate_sdk_identity.py) |
 | SDK cloning, warm cache, and archive creation | [prepare_package](../../dev/bots/prepare_package/) |
+| Desktop SDK rendering regression configuration and adapter | [frt_ci.json](../../dev/bots/frt_ci.json), [frt_ci.py](../../dev/bots/frt_ci.py); [setup and coverage](rendering-regression.md) |
 | WSC Git-tag parsing and generated version metadata | [version.dart](../../packages/flutter_tools/lib/src/version.dart) |
 
 Keep changes close to these existing paths. Do not introduce a second release

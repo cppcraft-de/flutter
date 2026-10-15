@@ -73,6 +73,93 @@ def sdkOutputDirectory(String host) {
     return "build/sdk-payload/sdk/${env.FRAMEWORK_REVISION}/${env.BUILD_NUMBER}/${host}"
 }
 
+@NonCPS
+def parseFrtPlan(String json) {
+    return new groovy.json.JsonSlurperClassic().parseText(json)
+}
+
+def checkoutFrt(Map plan, String revision) {
+    return checkout(
+        changelog: false,
+        poll: false, // FRT master changes must not trigger Flutter engine builds.
+        scm: [
+            $class: 'GitSCM',
+            branches: [[name: revision]],
+            userRemoteConfigs: [[
+                url: plan.repository,
+                credentialsId: plan.credentials_id ?: scm.userRemoteConfigs[0].credentialsId,
+            ]],
+            extensions: [[$class: 'CloneOption', shallow: false, noTags: false, timeout: 30]],
+        ],
+    )
+}
+
+def resolveFrt(Set<String> hosts) {
+    bat "${params.WINDOWS_PYTHON} dev/bots/frt_ci.py plan --hosts \"${hosts.sort().join(',')}\" --output build/frt-plan.json"
+    env.WSC_FRT_PLAN = readFile('build/frt-plan.json')
+    def plan = parseFrtPlan(env.WSC_FRT_PLAN)
+    if (!plan.enabled || hosts.isEmpty()) {
+        echo 'FRT regression NOT VALIDATED: disabled in configuration or no host SDKs selected.'
+        return
+    }
+    // Resolve a moving ref once, before parallel host work. Both agents check
+    // out this SHA, even if FRT master advances during engine compilation.
+    dir('build/frt-resolution') {
+        def checkoutResult = checkoutFrt(plan, plan.ref)
+        env.WSC_FRT_REVISION = checkoutResult.GIT_COMMIT
+    }
+    if (!(env.WSC_FRT_REVISION ==~ /[0-9a-fA-F]{40}/)) {
+        error('FRT checkout did not resolve to a full commit SHA.')
+    }
+    echo "FRT revision for all regression cells: ${env.WSC_FRT_REVISION}"
+    archiveArtifacts artifacts: 'build/frt-plan.json', fingerprint: true
+}
+
+def runFrt(String host) {
+    def plan = parseFrtPlan(env.WSC_FRT_PLAN)
+    if (!plan.enabled) {
+        echo "${host} FRT regression NOT VALIDATED: disabled; configure an approved baseline and enable FRT."
+        return
+    }
+    def output = "build/frt-results/${host}-${env.BUILD_NUMBER}"
+    def archive = "build/frt-evidence/${host}-${env.BUILD_NUMBER}.tar.gz"
+    def python = isUnix() ? 'python3' : params.WINDOWS_PYTHON
+    writeFile file: 'build/frt-plan.json', text: env.WSC_FRT_PLAN
+    try {
+        timeout(time: 90, unit: 'MINUTES') {
+            // Separate checkout; never borrow or modify the persistent engine tree.
+            dir('build/frt-source') { checkoutFrt(plan, env.WSC_FRT_REVISION) }
+            def command = "${python} dev/bots/frt_ci.py run --plan build/frt-plan.json --host ${host} --frt build/frt-source --revision ${env.WSC_FRT_REVISION} --sdk-directory ${sdkOutputDirectory(host)} --output ${output}"
+            def status = isUnix() ? sh(script: command, returnStatus: true) : bat(script: command, returnStatus: true)
+            def report = fileExists("${output}/jenkins-result.json")
+                ? parseFrtPlan(readFile("${output}/jenkins-result.json")) : null
+            // An uncaught Python error also exits 1. Only a verified FRT
+            // mismatch is UNSTABLE; missing/contradictory results are failures.
+            if (report == null || report.exit_code != status ||
+                (status == 0 && report.status != 'passed') ||
+                (status == 1 && report.status != 'failed')) {
+                error("${host} FRT did not produce a consistent result (exit ${status}).")
+            }
+            if (status == 1) {
+                unstable("${host} FRT rendering mismatch; candidate is not release-approved.")
+                mailBuildLog("${host} FRT regression", 'UNSTABLE')
+            } else if (status != 0) {
+                error("${host} FRT failed (exit ${status}); see private regression evidence.")
+            }
+        }
+    } finally {
+        // This tree is deliberately separate from build/sdk-payload: never
+        // publish captured documents/databases to the public artifact mirror.
+        if (fileExists(output)) {
+            timeout(time: 10, unit: 'MINUTES') {
+                def command = "${python} dev/bots/frt_ci.py archive --source ${output} --output ${archive}"
+                if (isUnix()) { sh command } else { bat command }
+                archiveArtifacts artifacts: archive, fingerprint: true
+            }
+        }
+    }
+}
+
 def mailBuildLog(String scope, String result) {
     def recipient = env.BUILD_LOG_MAIL_RECIPIENT?.trim()
     if (!recipient) {
@@ -702,6 +789,7 @@ pipeline {
                         ? '--full-rebuild-publication' : ''
                     bat "${params.WINDOWS_PYTHON} dev/bots/validate_sdk_identity.py --revision ${env.FRAMEWORK_REVISION} --engine-id ${env.ENGINE_ID} --expected-engine-id \"${expectedEngineId}\" ${requireTag} ${fullPublication}"
                     currentBuild.description = "${env.FRAMEWORK_REVISION.take(10)} / engine ${env.ENGINE_ID.take(10)} / ${params.BUILD_POLICY}"
+                    resolveFrt(hosts)
                     if (params.PUBLISH_ENGINE_ARTIFACTS && params.UPLOAD_TRANSPORT == 'http_put') {
                         withCredentials([string(credentialsId: uploadCredentialsId(), variable: 'HTTP_UPLOAD_KEY')]) {
                             if (!env.HTTP_UPLOAD_KEY?.trim()) {
@@ -855,34 +943,46 @@ pipeline {
                 stage('Windows SDK') {
                     when { expression { csvHas(params.HOST_SDKS, 'windows') } }
                     agent { label 'flutter_win' }
-                    steps {
-                        script {
-                            checkoutSdkSource()
-                            withSdkGitCredentials {
-                                createSdkArchiveWindows()
+                    stages {
+                        stage('Package Windows SDK') {
+                            steps {
+                                script {
+                                    checkoutSdkSource()
+                                    withSdkGitCredentials { createSdkArchiveWindows() }
+                                }
                             }
+                        }
+                        stage('Windows FRT regression') {
+                            when { expression { parseFrtPlan(env.WSC_FRT_PLAN).enabled } }
+                            steps { script { runFrt('windows') } }
                         }
                     }
                     post {
                         failure {
-                            script { mailBuildLog('Windows SDK packaging', 'FAILURE') }
+                            script { mailBuildLog('Windows SDK / FRT', 'FAILURE') }
                         }
                     }
                 }
                 stage('macOS SDK') {
                     when { expression { csvHas(params.HOST_SDKS, 'macos') } }
                     agent { label 'flutter_macos' }
-                    steps {
-                        script {
-                            checkoutSdkSource()
-                            withSdkGitCredentials {
-                                createSdkArchiveUnix('macos')
+                    stages {
+                        stage('Package macOS SDK') {
+                            steps {
+                                script {
+                                    checkoutSdkSource()
+                                    withSdkGitCredentials { createSdkArchiveUnix('macos') }
+                                }
                             }
+                        }
+                        stage('macOS FRT regression') {
+                            when { expression { parseFrtPlan(env.WSC_FRT_PLAN).enabled } }
+                            steps { script { runFrt('macos') } }
                         }
                     }
                     post {
                         failure {
-                            script { mailBuildLog('macOS SDK packaging', 'FAILURE') }
+                            script { mailBuildLog('macOS SDK / FRT', 'FAILURE') }
                         }
                     }
                 }

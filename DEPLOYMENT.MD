@@ -13,6 +13,8 @@ commands without `--local-engine`.
   upstream updates, dependency patches, and release gates.
 - [Updating the fork](docs/wsc/updating.md): one human/agent procedure, supported
   by safe candidate-preparation and source-check helpers.
+- [SDK rendering regression](docs/wsc/rendering-regression.md): FRT configuration,
+  approved baselines, private evidence and planned mobile/web test hosts.
 - [Local testing](docs/wsc/local-testing.md): installation-specific overrides
   and the temporary workspace-reuse exception. Not required on client CI.
 - [Agent entry point](AGENTS.md): navigation and repository safety constraints.
@@ -23,6 +25,9 @@ The pipeline is **`Jenkinsfile.testing`**. There is no separate production
 Jenkinsfile. It builds engine artifacts, uploads them directly from their agents,
 then packages and uploads Windows and macOS SDKs using those artifacts. Large
 engine payloads do not pass through Jenkins stashes.
+Optional desktop FRT comparison follows each host's SDK packaging. It is
+disabled until approved baselines are configured; a packaging-only green build
+does not certify rendering.
 
 | Agent label | Work |
 | --- | --- |
@@ -155,6 +160,7 @@ Email sends a compressed console log on target/SDK stage failure and a final
 summary/log from global cleanup. The early log contains the overall run so far;
 other targets may continue. Delivery errors are logged without replacing the
 build result. No recipient means no email.
+Enabled FRT comparisons also notify early on rendering mismatches (unstable).
 
 ## 4. Run the integration build
 
@@ -243,6 +249,11 @@ Debug-only SDK packaging is not implemented. Detailed tradeoffs are in
 | `TRANSFER_REMOTE_DIRECTORY` | Optional relative directory for FTP/SFTP |
 
 ## 5. Accept the SDKs before distribution
+
+A configurable [FRT regression stage](docs/wsc/rendering-regression.md) can
+compare each Windows/macOS candidate SDK against a manually approved SDK.
+Its versioned defaults and optional folder overrides are documented there.
+This covers desktop rendering only and complements the checks below.
 
 A successful upload is not a release approval. Extract each SDK into a fresh
 directory and use **that SDK's** `flutter` executable, without `--local-engine`.
