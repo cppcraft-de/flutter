@@ -88,7 +88,10 @@ platform prerequisites; WSC packaging requirements above are additional.
    could discover it and start builds. Keep one shared pipeline implementation.
 2. Install the required plugins: Declarative Pipeline, Git with
    `gitUsernamePassword`, Credentials Binding, Folder Properties with
-   build-start exposure, and Email Extension. Configure SMTP if using email.
+   build-start exposure, Pipeline Utility Steps (`readJSON`), and Email Extension.
+   Pipeline Utility Steps is required even when FRT is disabled: preflight reads
+   its configuration. No custom JSON-parser script approval is needed.
+   Configure SMTP if using email.
    FTP/SFTP plugins are needed only for those alternative upload transports.
 3. Set the SCM URL to
    `https://bitbucket.org/schoolcraftteam/flutter_wsc.git`. Select a Jenkins

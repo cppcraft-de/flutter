@@ -73,9 +73,9 @@ def sdkOutputDirectory(String host) {
     return "build/sdk-payload/sdk/${env.FRAMEWORK_REVISION}/${env.BUILD_NUMBER}/${host}"
 }
 
-@NonCPS
 def parseFrtPlan(String json) {
-    return new groovy.json.JsonSlurperClassic().parseText(json)
+    // Return plain maps/lists that can survive Pipeline checkpoints.
+    return readJSON(text: json, returnPojo: true)
 }
 
 def checkoutFrt(Map plan, String revision) {
