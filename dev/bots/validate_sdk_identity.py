@@ -11,6 +11,8 @@ import re
 import subprocess
 import zipfile
 
+from engine_identity import head_content_hash
+
 
 UPSTREAM_VERSION = r"\d+\.\d+\.\d+(?:-\d+\.\d+\.pre)?"
 RELEASE_TAG = re.compile(rf"wsc-({UPSTREAM_VERSION})-r[1-9]\d*")
@@ -28,30 +30,32 @@ def select_release_tag(tags: list[str], require_release_tag: bool) -> str | None
     return releases[0] if releases else None
 
 
-def validate_engine_pin(
-    engine_id: str, expected_engine_id: str, release_tag: str | None,
-    full_rebuild_publication: bool,
-) -> None:
+def validate_engine_pin(engine_id: str, expected_engine_id: str) -> None:
     for name, value in (("engine ID", engine_id), ("expected engine ID", expected_engine_id)):
-        if not re.fullmatch(r"[0-9a-fA-F]{40}", value):
-            raise ValueError(f"Invalid {name}: expected a full commit SHA.")
-    if engine_id.lower() == expected_engine_id.lower():
-        return
-    message = (
-        f"bin/internal/engine.version is {engine_id}, but the last "
-        f"engine-affecting commit is {expected_engine_id}."
-    )
-    if release_tag or full_rebuild_publication:
-        raise ValueError(f"{message} Tagged builds and full-rebuild publication require a matching engine ID.")
-    print(f"WARNING: {message} Untagged testing may continue; repin before releasing.")
+        if not re.fullmatch(r"[0-9a-f]{40}", value):
+            raise ValueError(f"Invalid {name}: expected a full lowercase content hash.")
+    if engine_id != expected_engine_id:
+        raise ValueError(
+            f"bin/internal/engine.version is {engine_id}, but the committed engine "
+            f"content hash is {expected_engine_id}. Update the pin before building/publishing."
+        )
 
 
-def validate_archive(archive: Path, revision: str, channel: str, release_tag: str | None) -> None:
+def validate_archive(archive: Path, revision: str, channel: str, release_tag: str | None, engine_id: str) -> None:
     with zipfile.ZipFile(archive) as sdk:
         metadata = json.loads(sdk.read("flutter/bin/cache/flutter.version.json"))
+        stamp = json.loads(sdk.read("flutter/bin/cache/engine_stamp.json"))
+        for name in ("bin/internal/engine.version", "bin/cache/engine.stamp"):
+            validate_engine_pin(sdk.read("flutter/" + name).decode("ascii").strip(), engine_id)
+        if not isinstance(stamp, dict) or stamp.get("content_hash") != engine_id:
+            raise ValueError(f"{archive.name}: engine stamp content hash does not match the pin")
+        engine_revision = stamp.get("git_revision", "")
+        if not isinstance(engine_revision, str) or not re.fullmatch(r"[0-9a-f]{40}", engine_revision):
+            raise ValueError(f"{archive.name}: invalid engine build-source revision")
     if not isinstance(metadata, dict):
         raise ValueError(f"{archive.name}: version metadata must be a JSON object.")
-    expected = {"frameworkRevision": revision, "channel": channel}
+    expected = {"frameworkRevision": revision, "channel": channel,
+                "engineRevision": engine_revision, "engineContentHash": engine_id}
     if release_tag:
         expected.update(
             wscVersion=release_tag,
@@ -92,32 +96,37 @@ def main() -> None:
     parser.add_argument("--channel", choices=["main", "master", "beta", "stable"])
     parser.add_argument("--write-checksums", action="store_true", help="Write SHA256 sidecars after validation")
     parser.add_argument("--engine-id", help="Tracked engine pin to check during CI preflight")
-    parser.add_argument("--expected-engine-id", help="Result of last_engine_commit for this source")
-    parser.add_argument("--full-rebuild-publication", action="store_true", help="Also reject an untagged engine-pin mismatch")
     args = parser.parse_args()
     if not re.fullmatch(r"[0-9a-f]{40}", args.revision):
         parser.error("--revision must be a full lowercase commit SHA")
     if args.directory is not None and args.channel is None:
         parser.error("--channel is required when validating SDK archives")
-    if (args.engine_id is None) != (args.expected_engine_id is None):
-        parser.error("--engine-id and --expected-engine-id must be supplied together")
-    if args.full_rebuild_publication and args.engine_id is None:
-        parser.error("--full-rebuild-publication requires engine IDs")
     try:
+        repo = Path(__file__).resolve().parents[2]
+        actual_revision = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], text=True, cwd=repo,
+        ).strip()
+        if actual_revision != args.revision:
+            raise ValueError(
+                f"Checkout is {actual_revision}, but --revision requests {args.revision}. "
+                "Check out the requested revision before validating its pin or SDK."
+            )
         tags = subprocess.check_output(
             ["git", "tag", "--points-at", args.revision], text=True,
             cwd=Path(__file__).resolve().parents[2],
         ).splitlines()
         release_tag = select_release_tag(tags, args.require_release_tag)
         print(f"Source identity: {release_tag or 'untagged WSC development build'}")
+        engine_id = (repo / "bin/internal/engine.version").read_text().strip()
+        validate_engine_pin(engine_id, head_content_hash(repo))
         if args.engine_id is not None:
-            validate_engine_pin(args.engine_id, args.expected_engine_id, release_tag, args.full_rebuild_publication)
+            validate_engine_pin(args.engine_id, engine_id)
         if args.directory is not None:
             archives = sorted(args.directory.glob("*.zip"))
             if not archives:
                 raise ValueError(f"No SDK ZIP found in {args.directory}")
             for archive in archives:
-                validate_archive(archive, args.revision, args.channel, release_tag)
+                validate_archive(archive, args.revision, args.channel, release_tag, engine_id)
                 if args.write_checksums:
                     write_checksum(archive)
                 print(f"Validated SDK identity: {archive.name}")

@@ -548,7 +548,7 @@ def buildWebTarget() {
 
 def validateSdkArchive(String host) {
     def requireTag = params.REQUIRE_RELEASE_TAG ? '--require-release-tag' : ''
-    def arguments = "--directory ${sdkOutputDirectory(host)} --revision ${env.FRAMEWORK_REVISION} --channel ${params.RELEASE_BRANCH} --write-checksums ${requireTag}"
+    def arguments = "--directory ${sdkOutputDirectory(host)} --revision ${env.FRAMEWORK_REVISION} --channel ${params.RELEASE_BRANCH} --engine-id ${env.ENGINE_ID} --write-checksums ${requireTag}"
     if (isUnix()) {
         sh "python3 dev/bots/validate_sdk_identity.py ${arguments}"
     } else {
@@ -623,13 +623,13 @@ def createSdkArchiveWindows() {
     publishArtifactTree('build/sdk-payload')
 }
 
-def checkoutFullSource(boolean cleanWorkspace) {
+def checkoutFullSource(boolean cleanWorkspace, String revision = null) {
     if (cleanWorkspace) {
         deleteDir()
     }
     checkout([
         $class: 'GitSCM',
-        branches: scm.branches,
+        branches: revision ? [[name: revision]] : scm.branches,
         extensions: [
             [
                 $class: 'CloneOption',
@@ -643,8 +643,19 @@ def checkoutFullSource(boolean cleanWorkspace) {
     ])
 }
 
+def selectEngineBuildBranch() {
+    // Upstream hashes HEAD on flutter-*-candidate.* branches. Use a local,
+    // CI-owned branch instead of changing the hash scripts or faking LUCI.
+    // GitSCM already selected the source; never move a public/channel ref.
+    if (isUnix()) {
+        sh 'git checkout -B flutter-wsc-candidate.ci HEAD'
+    } else {
+        bat 'git checkout -B flutter-wsc-candidate.ci HEAD'
+    }
+}
+
 def checkoutReleaseSource() {
-    // Release identity and last_engine_commit both require history. A full
+    // Release tag resolution requires full history. A full
     // fetch does not necessarily unshallow an existing repository, so replace
     // a legacy shallow checkout once and keep reusing the full clone afterward.
     checkoutFullSource(false)
@@ -663,12 +674,16 @@ def checkoutReleaseSource() {
     if (shallow != 'false') {
         error("Unable to obtain full Git history for release resolution: ${shallow}")
     }
+    selectEngineBuildBranch()
 }
 
 def checkoutSdkSource() {
-    // Package from a clean full-history checkout so Git tags and archive
-    // contents are independent of files left by earlier SDK builds.
-    checkoutFullSource(true)
+    // Keep the build's selected commit even if the source branch advances
+    // while engines are compiling. The packager and validator use this same SHA.
+    if (!(env.FRAMEWORK_REVISION ==~ /[0-9a-f]{40}/)) {
+        error('SDK checkout requires the selected FRAMEWORK_REVISION')
+    }
+    checkoutFullSource(true, env.FRAMEWORK_REVISION)
 }
 
 pipeline {
@@ -780,16 +795,10 @@ pipeline {
                     if (!(env.ENGINE_ID ==~ /[0-9a-fA-F]{40}/)) {
                         error("bin/internal/engine.version is not a full artifact ID: ${env.ENGINE_ID}")
                     }
-                    def expectedEngineId = powershell(
-                        script: '& powershell.exe -NoProfile -ExecutionPolicy Bypass -File bin\\internal\\last_engine_commit.ps1',
-                        returnStdout: true,
-                    ).trim()
-                    // Always inspect exact WSC tags, including engine-only and
-                    // incremental runs. Reuse the SDK validator's tag grammar.
+                    // Pin is the upstream content hash of the selected fork sources.
+                    // Every build policy rejects stale pins before artifact publication.
                     def requireTag = params.REQUIRE_RELEASE_TAG ? '--require-release-tag' : ''
-                    def fullPublication = params.BUILD_POLICY == 'full_rebuild' && params.PUBLISH_ENGINE_ARTIFACTS
-                        ? '--full-rebuild-publication' : ''
-                    bat "${params.WINDOWS_PYTHON} dev/bots/validate_sdk_identity.py --revision ${env.FRAMEWORK_REVISION} --engine-id ${env.ENGINE_ID} --expected-engine-id \"${expectedEngineId}\" ${requireTag} ${fullPublication}"
+                    bat "${params.WINDOWS_PYTHON} dev/bots/validate_sdk_identity.py --revision ${env.FRAMEWORK_REVISION} --engine-id ${env.ENGINE_ID} ${requireTag}"
                     currentBuild.description = "${env.FRAMEWORK_REVISION.take(10)} / engine ${env.ENGINE_ID.take(10)} / ${params.BUILD_POLICY}"
                     resolveFrt(hosts)
                     if (params.PUBLISH_ENGINE_ARTIFACTS && params.UPLOAD_TRANSPORT == 'http_put') {
@@ -878,6 +887,13 @@ pipeline {
                                 } else {
                                     checkout scm
                                 }
+                                selectEngineBuildBranch()
+                                def actualRevision = isUnix()
+                                    ? sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+                                    : bat(script: '@git rev-parse HEAD', returnStdout: true).trim()
+                                if (actualRevision != env.FRAMEWORK_REVISION) {
+                                    error("Target checkout ${actualRevision} differs from selected source ${env.FRAMEWORK_REVISION}")
+                                }
                                 echo "Persistent target workspace: ${pwd()}"
                                 if (params.BUILD_POLICY == 'full_rebuild') {
                                     dir('engine/src/out') { deleteDir() }
@@ -923,6 +939,9 @@ pipeline {
                         steps {
                             script {
                                 publishArtifactTree('build/artifact-payload')
+                                if (env.BUILD_TARGET == 'android') {
+                                    sh "python3 dev/bots/verify_maven_artifacts.py --root build/artifact-payload --base-url '${artifactBaseUrl()}'"
+                                }
                             }
                         }
                     }

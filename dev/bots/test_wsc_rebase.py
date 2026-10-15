@@ -267,18 +267,20 @@ def selected_patch_files(directory, groups):
     def verification_fixture(self):
         actual_repo = Path(__file__).resolve().parents[2]
         for name in (
-            "bin/internal/last_engine_commit.ps1", "bin/internal/last_engine_commit.sh",
+            "dev/bots/engine_identity.py",
             "dev/bots/validate_sdk_identity.py",
         ):
             self.write(self.repo, name, (actual_repo / name).read_text(encoding="utf-8"))
         self.write(self.repo, "bin/internal/release-candidate-branch.version", "fixture\n")
-        for filename in ("test_validate_sdk_identity.py", "test_artifact_publishing.py", "test_wsc_rebase.py"):
+        for filename in ("test_engine_identity.py", "test_collect_engine_artifacts.py", "test_verify_maven_artifacts.py", "test_validate_sdk_identity.py", "test_artifact_publishing.py", "test_wsc_rebase.py"):
             # The verify orchestration is under test, not a recursive invocation
             # of this suite. The real focused suites are run separately.
             self.write(self.repo, f"dev/bots/{filename}",
                        "import unittest\nclass Smoke(unittest.TestCase):\n    def test_ok(self):\n        self.assertTrue(True)\n")
-        reference = self.commit(self.repo, "Candidate scripts")
-        self.write(self.repo, "bin/internal/engine.version", reference + "\n")
+        self.write(self.repo, "DEPS", "fixture deps\n")
+        self.write(self.repo, "engine/fixture", "fixture engine\n")
+        self.commit(self.repo, "Candidate scripts")
+        self.write(self.repo, "bin/internal/engine.version", workflow.expected_engine(self.repo) + "\n")
         self.commit(self.repo, "Candidate pin")
         return argparse.Namespace(repo=self.repo, new_base=self.old, skia_dir=None, freetype_dir=None)
 

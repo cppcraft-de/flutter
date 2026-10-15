@@ -12,10 +12,11 @@ import argparse
 import importlib.util
 import os
 from pathlib import Path
-import re
 import subprocess
 import sys
 import tempfile
+
+from engine_identity import head_content_hash
 
 
 class WorkflowError(Exception):
@@ -117,20 +118,10 @@ def prepare(args):
 
 
 def expected_engine(repo):
-    suffix = "ps1" if os.name == "nt" else "sh"
-    script = repo / "bin/internal" / f"last_engine_commit.{suffix}"
-    if not script.is_file():
-        raise WorkflowError(f"Missing engine identity script: {script}")
-    # Match Jenkins' invocation. This affects only this child process, not the
-    # machine/user execution policy; no persistent settings are changed.
-    command = (
-        ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script]
-        if os.name == "nt" else ["bash", script]
-    )
-    value = run(command, repo)
-    if not re.fullmatch(r"[0-9a-f]{40}", value):
-        raise WorkflowError(f"Engine identity script did not return one full SHA: {value!r}")
-    return value
+    try:
+        return head_content_hash(repo)
+    except (ValueError, subprocess.CalledProcessError) as error:
+        raise WorkflowError(f"Cannot determine committed engine content hash: {error}") from error
 
 
 def check_pin(repo):
@@ -204,7 +195,7 @@ def verify(args):
     check_pin(repo)
     validator = repo / "dev/bots/validate_sdk_identity.py"
     print(run([sys.executable, "-B", validator, "--revision", tip], repo))
-    for filename in ("test_validate_sdk_identity.py", "test_artifact_publishing.py", "test_wsc_rebase.py"):
+    for filename in ("test_engine_identity.py", "test_collect_engine_artifacts.py", "test_verify_maven_artifacts.py", "test_validate_sdk_identity.py", "test_artifact_publishing.py", "test_wsc_rebase.py"):
         if not (repo / "dev/bots" / filename).is_file():
             raise WorkflowError(f"Missing expected test file: {filename}")
         print(run([sys.executable, "-B", "-m", "unittest", "discover", "-s", "dev/bots", "-p", filename], repo))
