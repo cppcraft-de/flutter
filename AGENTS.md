@@ -12,6 +12,10 @@ not permission to publish or change rendering baselines.
 
 ## Working rules
 
+For saved Jenkins email log archives, use the repo-local
+[Jenkins log triage skill](.agents/skills/triage-jenkins-logs/SKILL.md).
+It delegates read-only diagnosis; applying fixes needs separate authorization.
+
 - Keep the single pipeline in `Jenkinsfile.testing`. Do not introduce a root
   `Jenkinsfile`, change Jenkins settings/credentials, launch builds, or move
   public refs unless the user authorizes that action.
