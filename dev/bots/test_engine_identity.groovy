@@ -29,7 +29,7 @@ assert calls.every { it.contains('--engine-id ' + 'b' * 40) }
 assert calls.every { it.contains('--revision ' + 'a' * 40) }
 assert !source.contains('last_engine_commit')
 assert !source.contains('--full-rebuild-publication')
-assert source.contains('verify_maven_artifacts.py --root build/artifact-payload')
+assert source.contains('publishEngineArtifacts()')
 // Release discovery may follow the branch; packaging must use the saved SHA.
 script.checkoutFullSource(false)
 assert checkouts.last().branches == binding.scm.branches

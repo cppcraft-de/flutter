@@ -94,12 +94,16 @@ platform prerequisites; WSC packaging requirements above are additional.
    could discover it and start builds. Keep one shared pipeline implementation.
 2. Install the required plugins: Declarative Pipeline, Git with
    `gitUsernamePassword`, Credentials Binding, Folder Properties with
-   build-start exposure, Pipeline Utility Steps (`readJSON`), and Email Extension.
+   build-start exposure, Pipeline Utility Steps (`readJSON`), Lockable Resources
+   (`lock`), and Email Extension. Publication uses an automatically created
+   controller-wide lock; no manually configured lock resource is needed.
    Enabled FRT reporting also requires the JUnit plugin (`junit`).
    Pipeline Utility Steps is required even when FRT is disabled: preflight reads
    its configuration. No custom JSON-parser script approval is needed.
    Configure SMTP if using email.
-   FTP/SFTP plugins are needed only for those alternative upload transports.
+   Guarded engine publication currently requires HTTP PUT and authenticated GET
+   at the storage origin. FTP/SFTP engine publishing is rejected before builds;
+   it needs an equivalent receipt/read/locking adapter before being supported.
 3. Set the SCM URL to
    `https://bitbucket.org/schoolcraftteam/flutter_wsc.git`. Select a Jenkins
    **Username with password** credential: username
@@ -138,8 +142,8 @@ are inherited by all branch jobs; they are configuration, not secret storage.
 | --- | --- |
 | `DISABLE_SCM_POLLING` | Unset or `0`: poll for commits approximately every five minutes |
 | `BUILD_LOG_MAIL_RECIPIENT` | Desired email address; unset/empty disables email |
-| `WSC_ARTIFACT_BASE_URL` | Unset uses `https://fluttertest.b-cdn.net` |
-| `WSC_HTTP_UPLOAD_BASE_URL` | Unset uses `https://storage.bunnycdn.com/fluttertest` |
+| `WSC_ARTIFACT_BASE_URL` | Unset uses `https://fluttertest.b-cdn.net/ci-v2` |
+| `WSC_HTTP_UPLOAD_BASE_URL` | Unset uses `https://storage.bunnycdn.com/fluttertest/ci-v2` |
 | `WSC_UPLOAD_CREDENTIALS_ID` | Unset uses `HTTP_UPLOAD_KEY` |
 | `WSC_ENGINE_WORKSPACE_JOB` | Leave unset; local-testing exception only |
 | `WSC_ENGINE_WORKSPACE_KEY` | Leave unset; local-testing exception only |
@@ -148,6 +152,13 @@ URLs are base roots **without trailing slashes**. Explicit nonempty build
 parameters for URLs/credential ID override these properties. Leave those
 parameters empty to inherit; saved values on an existing job may override new
 defaults. Only the download URL is written into the SDK.
+
+The fixed `ci-v2` testing prefix starts guarded publication without overwriting
+legacy test artifacts. With these defaults, the first run needs neither the
+dangerous overwrite flag nor a CDN purge. Keep the prefix fixed across builds;
+normal publish-once reuse is compatible with CDN caching. Source-checkout
+bootstrap and approved FRT baseline URLs are intentionally not migrated by this
+CI URL change. Local Jenkins URL overrides remain effective.
 
 ### Polling and email
 
@@ -183,13 +194,15 @@ MODES=debug,profile,release
 BUILD_POLICY=incremental
 SYNC_ENGINE_DEPS=auto
 PUBLISH_ENGINE_ARTIFACTS=true
+DANGEROUSLY_OVERWRITE_BUILD_ARTIFACTS=false
 UPLOAD_TRANSPORT=http_put
 RELEASE_BRANCH=stable
 REQUIRE_RELEASE_TAG=false
 ```
 
 Start the first run manually. It seeds missing upstream-owned mirror inputs,
-builds/publishes the target artifacts, verifies Android Maven downloads, and then creates, validates, and uploads
+builds the target artifacts, publishes missing files or reuses verified publications,
+and then creates, validates, and uploads
 both host SDK ZIPs and checksum sidecars. See the
 [actual storage layout](docs/wsc/artifacts.md#storage-layout) for download paths.
 The first run on an empty agent must compile everything selected.
@@ -208,8 +221,12 @@ engine-workspaces/<full Jenkins JOB_NAME>/<BUILD_TARGET>
 ```
 
 - `incremental` preserves `engine/src/out`; Ninja decides which work is needed.
-  The pipeline still invokes every selected build and republishes its payload;
-  it does not skip builds because artifacts already exist remotely.
+  The pipeline still invokes every selected build. Publication reuses previously
+  completed remote files, even if rebuilt bytes differ, and adds missing target
+  coverage. It never silently overwrites a completed artifact. See
+  [publish-once policy and recovery](docs/wsc/artifacts.md#publish-once-policy-and-recovery).
+  Existing servers without publication receipts require an explicit migration;
+  the first guarded run will not silently adopt their files.
 - `SYNC_ENGINE_DEPS=auto` (default) synchronizes when dependency inputs change
   or dependencies are missing. It fingerprints tracked `DEPS` files, the engine
   tools subtree (including patches/hook helpers), engine Pub manifests/locks,
@@ -235,6 +252,8 @@ engine-workspaces/<full Jenkins JOB_NAME>/<BUILD_TARGET>
   a new cache. Incremental engine builds do not make packaging a no-op.
 - `full_rebuild` explicitly deletes `engine/src/out` before building. It does
   not recreate every dependency/toolchain/cache or make the agent hermetic.
+  It does not override publish-once behavior. Only the separately opt-in
+  `DANGEROUSLY_OVERWRITE_BUILD_ARTIFACTS` flag permits remote replacement.
 - Stable paths matter. Renaming the job, changing its workspace key, or adding
   a target can create new output directories. There is no cross-job workspace
   lock. Do not share paths or enable automatic cleanup of these workspaces.
@@ -260,8 +279,8 @@ Debug-only SDK packaging is not implemented. Detailed tradeoffs are in
 | `HTTP_UPLOAD_BASE_URL` | Explicit PUT root; empty inherits folder/default |
 | `UPLOAD_CREDENTIALS_ID` | Credential ID, not the key; empty inherits folder/default |
 | `WINDOWS_PYTHON` | Working Python command on Windows; default `python` |
-| `TRANSFER_CONFIG_NAME` | Jenkins FTP/SFTP server configuration, only for those transports |
-| `TRANSFER_REMOTE_DIRECTORY` | Optional relative directory for FTP/SFTP |
+| `TRANSFER_CONFIG_NAME` | Legacy FTP/SFTP setting; not usable for guarded engine publication |
+| `TRANSFER_REMOTE_DIRECTORY` | Legacy FTP/SFTP setting; not usable for guarded engine publication |
 
 ## 5. Accept the SDKs before distribution
 

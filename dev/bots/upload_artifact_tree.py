@@ -27,10 +27,9 @@ class _NoUploadRedirects(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def upload_file(path: Path, url: str, attempts: int = 3) -> None:
-    if attempts < 1:
-        raise ValueError("attempts must be positive")
-    headers = {"Content-Length": str(path.stat().st_size)}
+def authentication_headers() -> dict[str, str]:
+    """For the private storage endpoint only; never forward these to the CDN."""
+    headers = {}
     access_key = os.environ.get("HTTP_UPLOAD_KEY")
     if access_key is not None and not access_key.strip():
         raise ValueError("HTTP_UPLOAD_KEY must not be empty (use a dummy value for local testing)")
@@ -40,6 +39,13 @@ def upload_file(path: Path, url: str, attempts: int = 3) -> None:
         authorization = _authorization_header()
         if authorization:
             headers["Authorization"] = authorization
+    return headers
+
+
+def upload_file(path: Path, url: str, attempts: int = 3) -> None:
+    if attempts < 1:
+        raise ValueError("attempts must be positive")
+    headers = {"Content-Length": str(path.stat().st_size), **authentication_headers()}
     opener = urllib.request.build_opener(_NoUploadRedirects())
     for attempt in range(1, attempts + 1):
         try:

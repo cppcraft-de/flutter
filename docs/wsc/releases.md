@@ -145,8 +145,13 @@ or automatic promotion. Use the same pipeline source; do not create another
 Jenkinsfile during commissioning. `REQUIRE_RELEASE_TAG` validates identity but
 does not enforce clean policy, select storage, or approve a release.
 
-Production uses fresh compilation outputs for correctness; `full_rebuild`
-clears engine `out`, not every dependency or machine setting. A controlled
+For release source validation, `full_rebuild` clears engine `out`, not every
+dependency or machine setting. It does **not** replace an already published
+engine: packaging reuses that content hash's recorded artifacts. New IDs get
+their first publication. Leave `DANGEROUSLY_OVERWRITE_BUILD_ARTIFACTS=false`;
+see [publication policy and recovery](artifacts.md#publish-once-policy-and-recovery).
+Thus a clean compilation is not proof that its new bytes are the shipped bytes;
+acceptance tests must exercise the packaged/downloaded SDK. A controlled
 environment and runtime acceptance are still required. Repeat the same tag
 after a transient infrastructure failure only when preserving its intended
 inputs; do not silently replace already accepted binaries after toolchain
@@ -244,6 +249,7 @@ machine-specific test environment paths.
 | Engine artifact collection from builder manifests | [collect_engine_artifacts.py](../../dev/bots/collect_engine_artifacts.py) |
 | Upstream-owned seed inventory and HEAD checks | [seed_artifact_mirror.py](../../dev/bots/seed_artifact_mirror.py) |
 | Authenticated HTTP PUT | [upload_artifact_tree.py](../../dev/bots/upload_artifact_tree.py) |
+| Publish-once inventory, verification and explicit overwrite | [publish_engine_artifacts.py](../../dev/bots/publish_engine_artifacts.py) |
 | Source-tag and SDK-JSON checks; SHA256 sidecars | [validate_sdk_identity.py](../../dev/bots/validate_sdk_identity.py) |
 | SDK cloning, warm cache, and archive creation | [prepare_package](../../dev/bots/prepare_package/) |
 | Desktop SDK rendering regression configuration and adapter | [frt_ci.json](../../dev/bots/frt_ci.json), [frt_ci.py](../../dev/bots/frt_ci.py); [setup and coverage](rendering-regression.md) |

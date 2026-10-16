@@ -47,11 +47,11 @@ def bootstrapEngineDependenciesUnix(boolean includeWeb) {
 
 // Explicit build parameters win over Jenkins installation settings.
 def artifactBaseUrl() {
-    return params.ARTIFACT_BASE_URL?.trim() ?: env.WSC_ARTIFACT_BASE_URL?.trim() ?: 'https://fluttertest.b-cdn.net'
+    return params.ARTIFACT_BASE_URL?.trim() ?: env.WSC_ARTIFACT_BASE_URL?.trim() ?: 'https://fluttertest.b-cdn.net/ci-v2'
 }
 
 def uploadBaseUrl() {
-    return params.HTTP_UPLOAD_BASE_URL?.trim() ?: env.WSC_HTTP_UPLOAD_BASE_URL?.trim() ?: 'https://storage.bunnycdn.com/fluttertest'
+    return params.HTTP_UPLOAD_BASE_URL?.trim() ?: env.WSC_HTTP_UPLOAD_BASE_URL?.trim() ?: 'https://storage.bunnycdn.com/fluttertest/ci-v2'
 }
 
 def uploadCredentialsId() {
@@ -329,6 +329,25 @@ def collectArtifactsWindows(String builder, List<String> buildNames, boolean inc
     def builds = buildNames.collect { "--build \"${it}\"" }.join(' ')
     def globalArgument = includeGlobal ? '--include-global' : ''
     bat "${params.WINDOWS_PYTHON} dev\\bots\\collect_engine_artifacts.py --engine-src engine\\src --engine-id ${env.ENGINE_ID} --output build\\artifact-payload --builder ${builder} ${builds} ${globalArgument}"
+}
+
+def publishEngineArtifacts() {
+    if (params.UPLOAD_TRANSPORT != 'http_put') {
+        error('Guarded engine publication requires HTTP PUT plus direct authenticated storage GET. FTP/SFTP is not supported by this guard.')
+    }
+    // One controller-wide lock covers shared files and receipt updates across
+    // targets AND branch jobs. Other controllers must use separate storage roots.
+    lock(resource: 'wsc-engine-artifact-publication') {
+        withCredentials([string(credentialsId: uploadCredentialsId(), variable: 'HTTP_UPLOAD_KEY')]) {
+            def overwrite = params.DANGEROUSLY_OVERWRITE_BUILD_ARTIFACTS ? '--dangerously-overwrite' : ''
+            def arguments = "--root build/artifact-payload --upload-base-url \"${uploadBaseUrl()}\" --base-url \"${artifactBaseUrl()}\" --engine-id ${env.ENGINE_ID} ${overwrite}"
+            if (isUnix()) {
+                sh "python3 dev/bots/publish_engine_artifacts.py ${arguments}"
+            } else {
+                bat "${params.WINDOWS_PYTHON} dev/bots/publish_engine_artifacts.py ${arguments}"
+            }
+        }
+    }
 }
 
 def publishArtifactTree(String root) {
@@ -787,10 +806,11 @@ pipeline {
         choice(name: 'BUILD_POLICY', choices: ['incremental', 'full_rebuild'], description: 'incremental always invokes the selected builds and keeps local Ninja outputs; full_rebuild first deletes engine/src/out.')
         choice(name: 'RELEASE_BRANCH', choices: ['stable', 'main', 'beta', 'master'], description: 'Branch/channel stored in the SDK archive.')
         booleanParam(name: 'REQUIRE_RELEASE_TAG', defaultValue: false, description: 'Require an exact WSC release tag and matching SDK ZIP metadata. Leave false for development/staging builds; independent of BUILD_POLICY.')
-        string(name: 'ARTIFACT_BASE_URL', defaultValue: '', description: 'Download root override, no trailing slash. Empty uses WSC_ARTIFACT_BASE_URL or https://fluttertest.b-cdn.net.')
+        string(name: 'ARTIFACT_BASE_URL', defaultValue: '', description: 'Download root override, no trailing slash. Empty uses WSC_ARTIFACT_BASE_URL or https://fluttertest.b-cdn.net/ci-v2.')
         booleanParam(name: 'PUBLISH_ENGINE_ARTIFACTS', defaultValue: true, description: 'Publish each target artifact tree directly from its build agent.')
-        choice(name: 'UPLOAD_TRANSPORT', choices: ['http_put', 'ftp', 'sftp'], description: 'HTTP PUT helper, Publish Over FTP, or Publish Over SSH/SFTP.')
-        string(name: 'HTTP_UPLOAD_BASE_URL', defaultValue: '', description: 'Upload root override, no trailing slash. Empty uses WSC_HTTP_UPLOAD_BASE_URL or https://storage.bunnycdn.com/fluttertest.')
+        booleanParam(name: 'DANGEROUSLY_OVERWRITE_BUILD_ARTIFACTS', defaultValue: false, description: 'Replace selected published engine artifacts, including incomplete-publication recovery. Affects existing SDKs; requires CDN/developer cache handling. Does NOT force a local rebuild. Leave false normally, including releases.')
+        choice(name: 'UPLOAD_TRANSPORT', choices: ['http_put', 'ftp', 'sftp'], description: 'Engine publication requires http_put with direct storage GET. Legacy FTP/SFTP helpers do not support the publication guard.')
+        string(name: 'HTTP_UPLOAD_BASE_URL', defaultValue: '', description: 'Upload root override, no trailing slash. Empty uses WSC_HTTP_UPLOAD_BASE_URL or https://storage.bunnycdn.com/fluttertest/ci-v2.')
         string(name: 'UPLOAD_CREDENTIALS_ID', defaultValue: '', description: 'Secret-text credential for AccessKey. Empty uses WSC_UPLOAD_CREDENTIALS_ID or HTTP_UPLOAD_KEY. Local servers may use a dummy secret.')
         string(name: 'TRANSFER_CONFIG_NAME', defaultValue: '', description: 'Jenkins Publish Over FTP or Publish Over SSH server configuration name.')
         string(name: 'TRANSFER_REMOTE_DIRECTORY', defaultValue: '', description: 'Remote directory below the configured FTP/SFTP server root. Empty publishes at its root.')
@@ -828,7 +848,7 @@ pipeline {
                         error('Upstream SDK packaging runs an unfiltered precache; select all modes or leave HOST_SDKS empty.')
                     }
                     if (!hosts.isEmpty() && !params.PUBLISH_ENGINE_ARTIFACTS) {
-                        error('Host SDK packaging requires PUBLISH_ENGINE_ARTIFACTS=true so it consumes artifacts produced by this build.')
+                        error('Host SDK packaging requires PUBLISH_ENGINE_ARTIFACTS=true to publish or verify/reuse its required engine artifacts.')
                     }
                     def requiredTargets = [
                         windows: ['android', 'web', 'windows'] as Set,
@@ -840,9 +860,11 @@ pipeline {
                             error("${host} SDK packaging precaches its standard target set; add ${missing.sort().join(', ')} to TARGETS or omit ${host} from HOST_SDKS.")
                         }
                     }
-                    if (params.PUBLISH_ENGINE_ARTIFACTS && params.UPLOAD_TRANSPORT != 'http_put' &&
-                        params.TRANSFER_CONFIG_NAME.trim().isEmpty()) {
-                        error('TRANSFER_CONFIG_NAME is required for FTP/SFTP publishing.')
+                    if (params.PUBLISH_ENGINE_ARTIFACTS && params.UPLOAD_TRANSPORT != 'http_put') {
+                        error('Guarded engine publication requires http_put and direct storage GET; FTP/SFTP cannot bypass the publication guard.')
+                    }
+                    if (params.DANGEROUSLY_OVERWRITE_BUILD_ARTIFACTS) {
+                        echo 'DANGER: selected engine artifacts may be overwritten. Existing SDKs and cached downloads can disagree. This does not change BUILD_POLICY.'
                     }
 
                     env.FRAMEWORK_REVISION = bat(script: '@git rev-parse HEAD', returnStdout: true).trim()
@@ -860,6 +882,10 @@ pipeline {
                     currentBuild.description = "${env.FRAMEWORK_REVISION.take(10)} / engine ${env.ENGINE_ID.take(10)} / ${params.BUILD_POLICY}"
                     resolveFrt(hosts)
                     if (params.PUBLISH_ENGINE_ARTIFACTS && params.UPLOAD_TRANSPORT == 'http_put') {
+                        // Fail before compilation if the required plugin is absent.
+                        lock(resource: 'wsc-engine-artifact-publication') {
+                            echo 'Guarded engine publication lock is available.'
+                        }
                         withCredentials([string(credentialsId: uploadCredentialsId(), variable: 'HTTP_UPLOAD_KEY')]) {
                             if (!env.HTTP_UPLOAD_KEY?.trim()) {
                                 error('HTTP_UPLOAD_KEY must contain a key, or a dummy value for a local server.')
@@ -996,10 +1022,7 @@ pipeline {
                         when { expression { params.PUBLISH_ENGINE_ARTIFACTS } }
                         steps {
                             script {
-                                publishArtifactTree('build/artifact-payload')
-                                if (env.BUILD_TARGET == 'android') {
-                                    sh "python3 dev/bots/verify_maven_artifacts.py --root build/artifact-payload --base-url '${artifactBaseUrl()}'"
-                                }
+                                publishEngineArtifacts()
                             }
                         }
                     }

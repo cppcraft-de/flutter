@@ -53,6 +53,13 @@ prove that rendering is correct. Machine configuration and toolchain changes
 are not fully captured by it. Artifact checksums, application builds, and FRT
 comparisons still serve separate purposes.
 
+Rebuilding identical hashed inputs can change archive bytes without changing
+their download ID. Normal publication therefore reuses completed remote files;
+it does not overwrite them with the latest local output. See
+[publish-once policy and explicit recovery](artifacts.md#publish-once-policy-and-recovery)
+for the receipt, cache dilemma, and dangerous overwrite option. A release tag
+or `full_rebuild` does not override that policy.
+
 ## Where the IDs are stored
 
 The similar filenames below are easy to confuse:
@@ -215,8 +222,9 @@ an old SDK's pin alone cannot supply the missing artifacts.
 | SDK metadata check fails | The packaged pin, downloaded engine record, or generated version metadata disagree. Inspect packaging inputs and caches instead of hand-editing the stamps. |
 
 The pipeline checks source identity, generated outputs, POM coordinates, and
-packaged metadata. After Android upload it fetches POMs and checks JAR sizes
-through the anonymous download endpoint. These checks establish publication
+packaged metadata. Publication hashes new downloads through the anonymous
+endpoint; reused artifacts are checked against the receipt rather than new
+local bytes. These checks establish publication
 consistency; they do not replace an extracted-SDK app build or device testing.
 
 Implementation and regression tests live in `dev/bots/engine_identity.py`,
