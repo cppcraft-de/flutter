@@ -29,9 +29,11 @@ The pipeline is **`Jenkinsfile.testing`**. There is no separate production
 Jenkinsfile. It builds engine artifacts, uploads them directly from their agents,
 then packages and uploads Windows and macOS SDKs using those artifacts. Large
 engine payloads do not pass through Jenkins stashes.
-Optional desktop FRT comparison follows each host's SDK packaging. It is
-disabled until approved baselines are configured; a packaging-only green build
-does not certify rendering.
+FRT comparison follows each host's SDK packaging: Windows and Web on Windows,
+macOS on macOS. It remains disabled by default while the first Windows baseline
+SDK is being produced. Enabling it requires approved baseline SDK URLs/checksums;
+missing configuration then fails preflight. A packaging-only green build does
+not certify rendering.
 
 | Agent label | Work |
 | --- | --- |
@@ -93,6 +95,7 @@ platform prerequisites; WSC packaging requirements above are additional.
 2. Install the required plugins: Declarative Pipeline, Git with
    `gitUsernamePassword`, Credentials Binding, Folder Properties with
    build-start exposure, Pipeline Utility Steps (`readJSON`), and Email Extension.
+   Enabled FRT reporting also requires the JUnit plugin (`junit`).
    Pipeline Utility Steps is required even when FRT is disabled: preflight reads
    its configuration. No custom JSON-parser script approval is needed.
    Configure SMTP if using email.
@@ -265,7 +268,8 @@ Debug-only SDK packaging is not implemented. Detailed tradeoffs are in
 A configurable [FRT regression stage](docs/wsc/rendering-regression.md) can
 compare each Windows/macOS candidate SDK against a manually approved SDK.
 Its versioned defaults and optional folder overrides are documented there.
-This covers desktop rendering only and complements the checks below.
+This covers desktop and Chromium Web rendering and complements the checks below;
+it does not capture Android or iOS.
 
 A successful upload is not a release approval. Extract each SDK into a fresh
 directory and use **that SDK's** `flutter` executable, without `--local-engine`.
