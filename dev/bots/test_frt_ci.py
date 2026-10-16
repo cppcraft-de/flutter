@@ -2,16 +2,15 @@
 
 import argparse
 from contextlib import redirect_stdout
-import copy
 import hashlib
 import io
 import json
 from pathlib import Path
 import subprocess
-import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
+from zipfile import ZipFile
 
 import frt_ci
 
@@ -46,17 +45,24 @@ class FrtCiTest(unittest.TestCase):
             bundle.mkdir(exist_ok=True)
             (bundle / "frt-pubspec.lock").write_text("identical pinned dependencies\n")
 
-    def test_defaults_are_explicitly_disabled_and_master(self):
+    def test_defaults_disable_capture_but_plan_windows_macos_web(self):
+        config = json.loads(self.config.read_text())
+        self.assertFalse(config["enabled"])
+        with self.assertRaises(ValueError):
+            frt_ci.load_plan(self.config, ["windows", "macos"], {"WSC_FRT_ENABLED": "1"})
         plan = frt_ci.load_plan(self.config, ["windows", "macos"], {})
-        self.assertFalse(plan["enabled"])
+        self.assertEqual(plan["targets"], ["windows", "web", "macos"])
         self.assertEqual(plan["ref"], "master")
+        self.assertFalse(plan["enabled"])
+        self.assertEqual(frt_ci.load_plan(self.config, [], {})["targets"], [])
 
     def test_overrides_and_missing_selected_host(self):
         plan = frt_ci.load_plan(self.config, ["windows"], self.enabled)
         self.assertTrue(plan["enabled"])
         self.assertEqual(plan["baselines"]["windows"]["sha256"], "a" * 64)
+        missing = {**self.enabled, "WSC_FRT_BASELINE_MACOS_SHA256": "invalid"}
         with self.assertRaises(ValueError):
-            frt_ci.load_plan(self.config, ["windows", "macos"], self.enabled)
+            frt_ci.load_plan(self.config, ["windows", "macos"], missing)
         with self.assertRaises(ValueError):
             frt_ci.load_plan(self.config, ["android"], {})
 
@@ -87,43 +93,24 @@ class FrtCiTest(unittest.TestCase):
                     else:
                         frt_ci.download_baseline(stream.url, expected, destination)
 
-    def test_pass_and_mismatch(self):
-        self.write_result()
-        self.assertEqual(frt_ci.validate_result(self.root, 0)["exit_code"], 0)
-        self.result.update(status="failed", exit_code=1, passed_case_count=107)
-        self.result["comparison_summary"]["failed_count"] = 1
-        self.write_result()
-        self.assertEqual(frt_ci.validate_result(self.root, 1)["exit_code"], 1)
-
-    def test_error_missing_report_unexpected_exit_and_dependencies(self):
-        with self.assertRaises(FileNotFoundError):
-            frt_ci.validate_result(self.root, 0)
-        self.write_result()
+    def test_browser_prefers_edge_and_allows_explicit_override(self):
+        edge = self.root / "Microsoft/Edge/Application/msedge.exe"
+        chrome = self.root / "Google/Chrome/Application/chrome.exe"
+        for browser in (edge, chrome):
+            browser.parent.mkdir(parents=True)
+            browser.touch()
+        self.assertEqual(frt_ci.web_browser({"ProgramFiles": str(self.root)}), edge.resolve())
+        self.assertEqual(frt_ci.web_browser({"WSC_FRT_BROWSER": str(chrome)}), chrome.resolve())
         with self.assertRaises(ValueError):
-            frt_ci.validate_result(self.root, 17)
-        (self.root / "specimen-client/frt-pubspec.lock").write_text("different")
-        with self.assertRaisesRegex(ValueError, "lockfiles"):
-            frt_ci.validate_result(self.root, 0)
-        self.result.update(status="error", exit_code=2)
-        self.write_result()
-        self.assertEqual(frt_ci.validate_result(self.root, 2)["exit_code"], 2)
+            frt_ci.web_browser({"WSC_FRT_BROWSER": str(self.root / "missing.exe")})
+        with self.assertRaises(ValueError):
+            frt_ci.web_browser({})
 
-    def test_incomplete_or_contradictory_comparison_never_passes(self):
-        variants = [
-            {"unavailable_field_count": 1}, {"pass_check_ids": []},
-            {"total_case_count": 0}, {"specimen_run_id": 1}, {"passed_case_count": 107},
-            {"status": "failed"}, {"exit_code": 1},
-        ]
-        for change in variants:
-            with self.subTest(change=change), self.assertRaises(ValueError):
-                self.write_result(dict(self.result, **change))
-                frt_ci.validate_result(self.root, 0)
-        for key in ("missing_baseline_count", "missing_specimen_count"):
-            result = copy.deepcopy(self.result)
-            result["comparison_summary"][key] = 1
-            self.write_result(result)
-            with self.assertRaises(ValueError):
-                frt_ci.validate_result(self.root, 0)
+    def test_browser_falls_back_to_installed_chrome(self):
+        chrome = self.root / "Google/Chrome/Application/chrome.exe"
+        chrome.parent.mkdir(parents=True)
+        chrome.touch()
+        self.assertEqual(frt_ci.web_browser({"ProgramFiles": str(self.root)}), chrome.resolve())
 
     def test_wrapper_uses_two_zips_and_keeps_evidence_not_inputs(self):
         plan = frt_ci.load_plan(self.config, ["windows"], self.enabled)
@@ -144,12 +131,18 @@ class FrtCiTest(unittest.TestCase):
             if "compare" in command:
                 self.assertIn("--locked", command)
                 self.assertIn("--dpi", command)
+                self.assertEqual(command[command.index("--targets") + 1:command.index("--fixture")],
+                                 ["windows", "web"])
+                self.assertEqual(command[-2:], ["--browser", str(self.root / "edge.exe")])
                 self.assertNotIn("--interactive-comparison", command)
                 self.write_result(root=output / "results")
+                # FRT, not this adapter, owns SDK-aware dependency validation.
+                (output / "results/specimen-client/frt-pubspec.lock").write_text("SDK metadata differs")
             return subprocess.CompletedProcess(command, 0)
 
         with patch.object(frt_ci.subprocess, "check_output", return_value="b" * 40), \
                 patch.object(frt_ci.subprocess, "run", side_effect=fake_run), \
+                patch.object(frt_ci, "web_browser", return_value=self.root / "edge.exe"), \
                 patch.object(frt_ci, "download_baseline"), redirect_stdout(io.StringIO()):
             self.assertEqual(frt_ci.run_comparison(args), 0)
         self.assertTrue((output / "identity.json").is_file())
@@ -169,17 +162,71 @@ class FrtCiTest(unittest.TestCase):
         with patch("sys.argv", command), redirect_stdout(io.StringIO()):
             self.assertEqual(frt_ci.main(), 2)
 
-    def test_evidence_archive_excludes_interrupted_scratch(self):
-        source = self.root / "evidence"
-        self.write_result(root=source)
-        scratch = source / "results/work-interrupted/sdk"
-        scratch.mkdir(parents=True)
-        (scratch / "huge.zip").write_bytes(b"do not archive")
-        archive = self.root / "private/evidence.tar.gz"
-        frt_ci.archive_evidence(source, archive)
-        with tarfile.open(archive) as contents:
-            self.assertIn("evidence/result.json", contents.getnames())
-            self.assertFalse(any("work-interrupted" in name for name in contents.getnames()))
+    def report_args(self, hosts=("windows", "macos")):
+        plan = self.root / "plan.json"
+        frt_ci.write_json(plan, {"hosts": list(hosts),
+                                "targets": [target for host in hosts for target in frt_ci.HOST_TARGETS[host]]})
+        return argparse.Namespace(plan=plan, frt=self.root, inputs=self.root / "inputs",
+                                  output=self.root / "artifacts")
+
+    def fake_report(self, args, code=0, xml=True):
+        def run(command, **kwargs):
+            if "report" in command:
+                self.assertIn("--locked", command)
+                self.assertIn("--format", command)
+                self.assertEqual(command[command.index("--expect-targets") + 1:command.index("--output")],
+                                 json.loads(args.plan.read_text())["targets"])
+                self.assertEqual(command.count("--input"), len(json.loads(args.plan.read_text())["hosts"]))
+                with ZipFile(args.output / "frt-comparisons.zip", "w") as archive:
+                    archive.writestr("index.html", "offline report")
+                    if xml:
+                        archive.writestr("junit.xml", "<testsuites/>")
+                return subprocess.CompletedProcess(command, code)
+            return subprocess.CompletedProcess(command, 0)
+        return run
+
+    def capture_codes(self, args, values):
+        for host, value in values.items():
+            folder = args.inputs / host
+            folder.mkdir(parents=True)
+            (folder / "capture-exit.txt").write_text(str(value))
+
+    def test_reporting_pass_mismatch_error_and_unexpected_status(self):
+        for capture, report, expected in [(0, 0, 0), (1, 0, 1), (0, 1, 1),
+                                           (2, 0, 2), (0, 2, 2), (0, 17, 2), (17, 0, 2)]:
+            with self.subTest(capture=capture, report=report):
+                args = self.report_args(("windows",))
+                args.inputs = self.root / f"inputs-{capture}-{report}"
+                args.output = self.root / f"artifacts-{capture}-{report}"
+                self.capture_codes(args, {"windows": capture})
+                with patch.object(frt_ci.subprocess, "run", side_effect=self.fake_report(args, report)):
+                    self.assertEqual(frt_ci.aggregate_reports(args), expected)
+                self.assertEqual((args.output / "frt-junit.xml").read_text(), "<testsuites/>")
+
+    def test_missing_host_is_not_removed_from_expectations(self):
+        args = self.report_args()
+        self.capture_codes(args, {"windows": 0})
+        with patch.object(frt_ci.subprocess, "run", side_effect=self.fake_report(args)):
+            self.assertEqual(frt_ci.aggregate_reports(args), 2)
+        self.assertTrue((args.output / "frt-comparisons.zip").exists())
+
+    def test_missing_xml_keeps_zip_and_stale_outputs_are_rejected(self):
+        args = self.report_args(("windows",))
+        self.capture_codes(args, {"windows": 0})
+        with patch.object(frt_ci.subprocess, "run", side_effect=self.fake_report(args, xml=False)):
+            with self.assertRaises(KeyError):
+                frt_ci.aggregate_reports(args)
+        self.assertTrue((args.output / "frt-comparisons.zip").exists())
+        with self.assertRaises(FileExistsError):
+            frt_ci.aggregate_reports(args)
+
+    def test_missing_zip_is_error_not_success(self):
+        args = self.report_args(("windows",))
+        self.capture_codes(args, {"windows": 0})
+        with patch.object(frt_ci.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)):
+            with self.assertRaises(FileNotFoundError):
+                frt_ci.aggregate_reports(args)
+
 
 
 if __name__ == "__main__":

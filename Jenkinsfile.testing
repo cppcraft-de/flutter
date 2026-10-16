@@ -113,6 +113,8 @@ def resolveFrt(Set<String> hosts) {
     }
     echo "FRT revision for all regression cells: ${env.WSC_FRT_REVISION}"
     archiveArtifacts artifacts: 'build/frt-plan.json', fingerprint: true
+    stash name: 'frt-report-tools', includes: 'dev/bots/frt_ci.py,build/frt-plan.json'
+    env.WSC_FRT_REPORT_READY = 'true'
 }
 
 def runFrt(String host) {
@@ -122,8 +124,8 @@ def runFrt(String host) {
         return
     }
     def output = "build/frt-results/${host}-${env.BUILD_NUMBER}"
-    def archive = "build/frt-evidence/${host}-${env.BUILD_NUMBER}.tar.gz"
     def python = isUnix() ? 'python3' : params.WINDOWS_PYTHON
+    int captureStatus = 2
     writeFile file: 'build/frt-plan.json', text: env.WSC_FRT_PLAN
     try {
         timeout(time: 90, unit: 'MINUTES') {
@@ -140,6 +142,7 @@ def runFrt(String host) {
                 (status == 1 && report.status != 'failed')) {
                 error("${host} FRT did not produce a consistent result (exit ${status}).")
             }
+            captureStatus = status
             if (status == 1) {
                 unstable("${host} FRT rendering mismatch; candidate is not release-approved.")
                 mailBuildLog("${host} FRT regression", 'UNSTABLE')
@@ -148,13 +151,68 @@ def runFrt(String host) {
             }
         }
     } finally {
-        // This tree is deliberately separate from build/sdk-payload: never
-        // publish captured documents/databases to the public artifact mirror.
-        if (fileExists(output)) {
-            timeout(time: 10, unit: 'MINUTES') {
-                def command = "${python} dev/bots/frt_ci.py archive --source ${output} --output ${archive}"
-                if (isUnix()) { sh command } else { bat command }
-                archiveArtifacts artifacts: archive, fingerprint: true
+        // Only small, portable reports cross nodes. Never stash SDKs, client
+        // bundles or databases, or send document content to the public mirror.
+        catchError(buildResult: 'FAILURE', stageResult: 'FAILURE', catchInterruptions: false) {
+            dir(output) {
+                writeFile file: 'capture-exit.txt', text: "${captureStatus}\n"
+                stash name: "frt-${host}", includes:
+                    'capture-exit.txt,results/result.json,results/*/result.json,' +
+                    'results/comparison/comparison.json,results/comparison/comparison.html,' +
+                    'results/*/comparison/comparison.json,results/*/comparison/comparison.html'
+            }
+            archiveArtifacts artifacts:
+                "${output}/inputs.json,${output}/identity.json,${output}/jenkins-result.json,${output}/runner.log,${output}/capture-exit.txt",
+                allowEmptyArchive: false
+        }
+    }
+}
+
+def aggregateFrt() {
+    if (env.WSC_FRT_REPORT_READY != 'true') {
+        return // Disabled, no selected hosts, or preflight did not complete.
+    }
+    if (currentBuild.currentResult == 'ABORTED') {
+        echo 'FRT aggregation skipped after cancellation; available cell logs remain archived.'
+        return
+    }
+    // Global post runs after failed parallel cells too. Bound node allocation
+    // and reporting so an unavailable agent cannot hold final notifications forever.
+    timeout(time: 20, unit: 'MINUTES') {
+        node('flutter_win') {
+            dir("${pwd(tmp: true)}/frt-report-${env.BUILD_NUMBER}") {
+                // Only this isolated report scratch directory, never an engine workspace.
+                deleteDir()
+                unstash 'frt-report-tools'
+                def plan = parseFrtPlan(readFile('build/frt-plan.json'))
+                dir('frt-source') { checkoutFrt(plan, env.WSC_FRT_REVISION) }
+                boolean collectionFailed = false
+                for (host in plan.hosts) {
+                    boolean restored = false
+                    catchError(buildResult: 'FAILURE', stageResult: 'FAILURE', catchInterruptions: false) {
+                        dir("results/${host}") { unstash "frt-${host}" }
+                        restored = true
+                    }
+                    if (!restored) { collectionFailed = true }
+                }
+                int status = 2
+                try {
+                    status = bat(returnStatus: true, script:
+                        "@${params.WINDOWS_PYTHON} dev/bots/frt_ci.py report --plan build/frt-plan.json --frt frt-source --inputs results --output artifacts")
+                } finally {
+                    // Preserve a diagnostic ZIP even when JUnit extraction fails.
+                    archiveArtifacts artifacts: 'artifacts/*', fingerprint: true, allowEmptyArchive: true
+                }
+                if (!fileExists('artifacts/frt-comparisons.zip') || !fileExists('artifacts/frt-junit.xml')) {
+                    error('FRT report ZIP or JUnit XML missing; inspect cell and aggregation logs.')
+                }
+                junit testResults: 'artifacts/frt-junit.xml', allowEmptyResults: false
+                if (collectionFailed || !(status in [0, 1])) {
+                    error('FRT execution, collection or reporting failed; inspect frt-comparisons.zip.')
+                }
+                if (status == 1) {
+                    unstable('FRT rendering mismatch; inspect frt-comparisons.zip.')
+                }
             }
         }
     }
@@ -973,7 +1031,7 @@ pipeline {
                                 }
                             }
                         }
-                        stage('Windows FRT regression') {
+                        stage('Windows + Web FRT regression') {
                             when { expression { parseFrtPlan(env.WSC_FRT_PLAN).enabled } }
                             steps { script { runFrt('windows') } }
                         }
@@ -1014,6 +1072,7 @@ pipeline {
     post {
         always {
             echo "Framework: ${env.FRAMEWORK_REVISION ?: 'unresolved'}; engine: ${env.ENGINE_ID ?: 'unresolved'}"
+            script { aggregateFrt() }
         }
         cleanup {
             script { mailBuildLog('Final result', currentBuild.currentResult) }

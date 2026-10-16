@@ -8,6 +8,9 @@
   "dpi": 192,
   "baselines": {
     "windows": {"url": "", "sha256": ""},
-    "macos": {"url": "", "sha256": ""}
+    "macos": {
+      "url": "https://fluttertest.b-cdn.net/sdk/9d4b04ad183ce7b5efad2f455af450b0e1151dc3/16/macos/flutter_macos_wsc-3.44.4-dev.34-g9d4b04ad18-stable.zip",
+      "sha256": "f3c16d0065ea085da2fdde09163d0dc870b9162498d9f1581498750af5ae3aa3"
+    }
   }
 }

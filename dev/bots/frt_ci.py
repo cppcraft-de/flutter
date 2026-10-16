@@ -11,13 +11,14 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
-import tarfile
 import tempfile
 from urllib.parse import urlsplit
 from urllib.request import urlopen
+from zipfile import BadZipFile, ZipFile
 
 
-HOSTS = ("windows", "macos")
+HOST_TARGETS = {"windows": ("windows", "web"), "macos": ("macos",)}
+HOSTS = tuple(HOST_TARGETS)
 
 
 def write_json(path: Path, value: dict) -> None:
@@ -50,6 +51,7 @@ def load_plan(path: Path, hosts: list[str], environ=None) -> dict:
     if any(host not in HOSTS for host in hosts):
         raise ValueError("Only Windows/macOS FRT capture is implemented")
     plan["hosts"] = hosts
+    plan["targets"] = [target for host in hosts for target in HOST_TARGETS[host]]
     for host in HOSTS:
         for key in ("url", "sha256"):
             override = environ.get(f"WSC_FRT_BASELINE_{host.upper()}_{key.upper()}", "").strip()
@@ -92,37 +94,21 @@ def download_baseline(url: str, checksum: str, destination: Path) -> None:
         raise ValueError("Baseline SDK SHA-256 mismatch; refusing to run it")
 
 
-def validate_result(results: Path, exit_code: int) -> dict:
-    result = json.loads((results / "result.json").read_text(encoding="utf-8"))
-    if (exit_code not in (0, 1, 2)
-            or result.get("schema") != "font-rendering-tester/regression-result/v1"
-            or result.get("exit_code") != exit_code
-            or result.get("status") != {0: "passed", 1: "failed", 2: "error"}.get(exit_code)):
-        raise ValueError("FRT exit status and result.json disagree or use an unsupported schema")
-    if exit_code == 2:
-        return result
-    counts = result["comparison_summary"]
-    total, passed = result["total_case_count"], result["passed_case_count"]
-    if (type(total) is not int or type(passed) is not int or total <= 0
-            or not 0 <= passed <= total or counts["total_field_count"] != total
-            or counts["missing_baseline_count"] or counts["missing_specimen_count"]
-            or result["unavailable_field_count"]
-            or not {"line_metrics", "fonts"}.issubset(result["pass_check_ids"])):
-        raise ValueError("FRT comparison is empty/incomplete or required checks are unavailable")
-    baseline, specimen = result["baseline_run_id"], result["specimen_run_id"]
-    if (type(baseline) is not int or type(specimen) is not int
-            or min(baseline, specimen) <= 0 or baseline == specimen):
-        raise ValueError("FRT must compare two distinct committed runs")
-    if (exit_code == 0 and (passed != total or counts["failed_count"])) or (
-            exit_code == 1 and not counts["failed_count"]):
-        raise ValueError("FRT case counts disagree with the reported outcome")
-    # The runner uses pub get. Detect different resolved dependencies without
-    # introducing a YAML parser or silently accepting a changed test client.
-    baseline_lock = (results / "baseline-client/frt-pubspec.lock").read_bytes()
-    specimen_lock = (results / "specimen-client/frt-pubspec.lock").read_bytes()
-    if not baseline_lock or baseline_lock != specimen_lock:
-        raise ValueError("FRT clients resolved different dependency lockfiles; review compatibility in FRT")
-    return result
+def web_browser(environ=None) -> Path:
+    """Prefer installed Edge on the Windows capture host; no browser downloads."""
+    environ = os.environ if environ is None else environ
+    override = environ.get("WSC_FRT_BROWSER", "").strip()
+    if override:
+        browser = Path(override)
+        if not browser.is_file():
+            raise ValueError("WSC_FRT_BROWSER must point to an existing Chrome/Edge executable")
+        return browser.resolve()
+    for relative in ("Microsoft/Edge/Application/msedge.exe", "Google/Chrome/Application/chrome.exe"):
+        for variable in ("ProgramFiles(x86)", "ProgramFiles", "LOCALAPPDATA"):
+            directory = environ.get(variable)
+            if directory and (browser := Path(directory) / relative).is_file():
+                return browser.resolve()
+    raise ValueError("Web capture needs Edge or Chrome; install it or set WSC_FRT_BROWSER to its executable")
 
 
 def run_comparison(args) -> int:
@@ -163,16 +149,20 @@ def run_comparison(args) -> int:
                 command = [
                     "uv", "run", "--locked", "font-rendering-regression", "compare",
                     "--baseline-sdk", str(baseline_zip), "--specimen-sdk", str(candidate),
-                    "--target", args.host, "--fixture", str(fixture),
+                    "--targets", *HOST_TARGETS[args.host], "--fixture", str(fixture),
                     "--build-mode", plan["build_mode"], "--dpi", str(plan["dpi"]),
                     "--output-dir", str(output / "results"),
                 ]
+                if "web" in HOST_TARGETS[args.host]:
+                    command.extend(["--browser", str(web_browser())])
                 print(f"FRT {args.host}: building/capturing both clients; details in runner.log", flush=True)
                 completed = subprocess.run(command, cwd=frt, stdout=log, stderr=subprocess.STDOUT)
-        result = validate_result(output / "results", completed.returncode)
-        print(result.get("summary", result["status"]), flush=True)
+        # FRT compare owns dependency compatibility; FRT report owns result
+        # validation. Do not duplicate either policy in this Jenkins adapter.
+        code = completed.returncode if completed.returncode in (0, 1, 2) else 2
+        result = {"status": {0: "passed", 1: "failed", 2: "error"}[code], "exit_code": code}
         write_json(output / "jenkins-result.json", result)
-        return completed.returncode
+        return code
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
         # Summarize the cause in emailed console logs; retain full build logs
         # privately. No credential values are supplied to this adapter.
@@ -181,14 +171,35 @@ def run_comparison(args) -> int:
         return 2
 
 
-def archive_evidence(source: Path, destination: Path) -> None:
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    # Preserve macOS bundle symlinks. Exclude interrupted extraction/build
-    # scratch trees; these are not useful retained evidence and may be huge.
-    def retained(member):
-        return None if any(part.startswith("work-") for part in Path(member.name).parts) else member
-    with tarfile.open(destination, "x:gz", dereference=False) as archive:
-        archive.add(source, arcname=source.name, filter=retained)
+def aggregate_reports(args) -> int:
+    """Package saved reports offline; missing hosts remain expected inputs."""
+    plan = json.loads(args.plan.read_text(encoding="utf-8"))
+    hosts = plan["hosts"]
+    if not hosts or any(host not in HOSTS for host in hosts):
+        raise ValueError("Expected at least one configured desktop host")
+    frt = args.frt.resolve(strict=True)
+    output = args.output.resolve()
+    # Never accept a ZIP/XML left by an earlier attempt.
+    output.mkdir(parents=True, exist_ok=False)
+    subprocess.run(["uv", "sync", "--locked"], cwd=frt, check=True)
+    command = ["uv", "run", "--locked", "font-rendering-regression", "report", "--format", "zip"]
+    codes = []
+    for host in hosts:
+        source = args.inputs.resolve() / host
+        command.extend(["--input", str(source / "results")])
+        try:
+            saved = (source / "capture-exit.txt").read_text(encoding="utf-8").strip()
+        except OSError:
+            saved = ""
+        codes.append(int(saved) if saved in ("0", "1", "2") else 2)
+    archive = output / "frt-comparisons.zip"
+    command.extend(["--expect-targets", *plan["targets"], "--output", str(archive)])
+    codes.append(subprocess.run(command, cwd=frt, check=False).returncode)
+    # Read one known member, not extractall. Jenkins still archives the ZIP if
+    # XML extraction fails, and checks both outputs independently.
+    with ZipFile(archive) as contents:
+        (output / "frt-junit.xml").write_bytes(contents.read("junit.xml"))
+    return 2 if any(code not in (0, 1) for code in codes) else max(codes)
 
 
 def main() -> int:
@@ -205,22 +216,22 @@ def main() -> int:
     run.add_argument("--revision", required=True)
     run.add_argument("--sdk-directory", type=Path, required=True)
     run.add_argument("--output", type=Path, required=True)
-    archive = commands.add_parser("archive")
-    archive.add_argument("--source", type=Path, required=True)
-    archive.add_argument("--output", type=Path, required=True)
+    report = commands.add_parser("report")
+    report.add_argument("--plan", type=Path, required=True)
+    report.add_argument("--frt", type=Path, required=True)
+    report.add_argument("--inputs", type=Path, required=True)
+    report.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.command == "plan":
         write_json(args.output, load_plan(args.config, [host for host in args.hosts.split(",") if host]))
-    elif args.command == "run":
+    else:
         try:
-            return run_comparison(args)
-        except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
+            return run_comparison(args) if args.command == "run" else aggregate_reports(args)
+        except (OSError, ValueError, KeyError, TypeError, BadZipFile, subprocess.SubprocessError) as error:
             # Precondition errors occur before evidence creation. Never let a
             # Python exception's usual exit 1 masquerade as a rendering mismatch.
-            print(f"FRT could not start: {error}", flush=True)
+            print(f"FRT {args.command} failed: {error}", flush=True)
             return 2
-    else:
-        archive_evidence(args.source, args.output)
     return 0
 
 
