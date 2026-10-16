@@ -74,7 +74,20 @@ For the plain-language explanation, the Android failure that motivated this
 procedure, and the reasons for following upstream, read
 [Understanding engine versions and artifact downloads](engine-identity.md).
 
-After committing all engine/DEPS/patch changes, run from the repository root:
+The pin-update procedure below prepares a distributable SDK candidate, including
+an untagged Jenkins candidate. It is not required after each local development
+commit.
+
+For ordinary local engine development, retain a published, compatible
+`bin/internal/engine.version` so Flutter and the IDE can bootstrap from the
+mirror. Build your changes locally and select the outputs with `--local-engine`
+and `--local-engine-host` (and `--local-engine-src-path` when needed). Local
+commits do not automatically change the tracked pin, and local engine builds do
+not need HTTP publication. See the [local development explanation](engine-identity.md#local-engine-development)
+for bootstrap and SDK compatibility limits.
+
+When preparing a distributable candidate, after committing all engine/DEPS/patch
+changes, run from the repository root:
 
 ```sh
 python dev/bots/engine_identity.py

@@ -163,7 +163,30 @@ identifies itself as Apple Git. This handles an older Xcode Git reading an index
 written by newer Git; it changes neither repository nor machine configuration.
 See [upstream issue 184376](https://github.com/flutter/flutter/issues/184376).
 
-## What a developer needs to do
+## Local engine development
+
+A source checkout uses the published engine selected by the tracked
+`bin/internal/engine.version` to bootstrap its Dart SDK and tooling. Keep that
+pin at a published, compatible version while making local commits. The launcher
+uses the tracked pin rather than recalculating it from each local commit.
+
+Build the modified engine locally and select its outputs with `--local-engine`
+and `--local-engine-host`, optionally supplying `--local-engine-src-path`.
+See [using the Flutter tool with a local engine](../tool/README.md).
+These local builds do not need to be uploaded to the mirror before using the
+IDE or running an app with the local engine.
+
+The bootstrap happens before the Flutter tool processes `--local-engine`.
+Changing the pin to an unpublished ID can therefore prevent tool and IDE startup
+even when local engine outputs exist. Changes to Dart itself or exposed
+`dart:ui` APIs may also require a matching local SDK and generated API files;
+keeping the bootstrap pin does not guarantee compatibility with arbitrary changes.
+
+## Preparing a distributable candidate
+
+The following steps apply when preparing engine artifacts and an SDK for
+publication, including untagged Jenkins candidates. They are not required for
+each local development commit.
 
 1. Commit engine, dependency, and patch-file changes first. The hash is based on
    committed inputs; saving a source edit without committing it is insufficient.
