@@ -5,6 +5,7 @@ from contextlib import redirect_stdout
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -129,6 +130,11 @@ class FrtCiTest(unittest.TestCase):
 
         def fake_run(command, **kwargs):
             if "compare" in command:
+                gradle = Path(kwargs["env"]["GRADLE_USER_HOME"])
+                self.assertTrue(gradle.is_dir())
+                self.assertIn("org.gradle.daemon=false", (gradle / "gradle.properties").read_text())
+                self.assertIn("-Dorg.gradle.daemon=false", kwargs["env"]["GRADLE_OPTS"])
+                (gradle / "downloaded-maven.jar").write_bytes(b"temporary dependency")
                 self.assertIn("--locked", command)
                 self.assertIn("--dpi", command)
                 self.assertEqual(command[command.index("--targets") + 1:command.index("--fixture")],
@@ -152,6 +158,48 @@ class FrtCiTest(unittest.TestCase):
         with self.assertRaises(FileExistsError), patch.object(
                 frt_ci.subprocess, "check_output", return_value="b" * 40):
             frt_ci.run_comparison(args)
+
+    def test_gradle_home_is_fresh_each_run_and_cleaned_on_failure(self):
+        plan = frt_ci.load_plan(self.config, ["macos"], {"WSC_FRT_ENABLED": "1"})
+        plan_path = self.root / "plan.json"
+        frt_ci.write_json(plan_path, plan)
+        fixture = self.root / "frt" / plan["fixture"]
+        fixture.parent.mkdir(parents=True)
+        fixture.write_text("{}")
+        sdk = self.root / "sdk"
+        sdk.mkdir()
+        (sdk / "candidate.zip").write_bytes(b"sdk")
+        shared = self.root / "shared-gradle-home"
+        shared.mkdir()
+        (shared / "keep.jar").write_bytes(b"agent cache")
+        homes = []
+        failure = [False]
+
+        def run(command, **kwargs):
+            if "compare" in command:
+                home = Path(kwargs["env"]["GRADLE_USER_HOME"])
+                homes.append(home)
+                self.assertNotEqual(home, shared)
+                self.assertFalse((home / "download.jar").exists())
+                (home / "download.jar").write_bytes(b"new dependency")
+                if failure[0]:
+                    raise OSError("client could not start")
+                return subprocess.CompletedProcess(command, 1)
+            return subprocess.CompletedProcess(command, 0)
+
+        with patch.dict(os.environ, {"GRADLE_USER_HOME": str(shared)}), \
+                patch.object(frt_ci.subprocess, "check_output", return_value="b" * 40), \
+                patch.object(frt_ci.subprocess, "run", side_effect=run), \
+                patch.object(frt_ci, "download_baseline"), redirect_stdout(io.StringIO()):
+            for index in range(2):
+                failure[0] = bool(index)
+                args = argparse.Namespace(plan=plan_path, host="macos", frt=self.root / "frt",
+                    revision="b" * 40, output=self.root / f"evidence-{index}", sdk_directory=sdk)
+                self.assertEqual(frt_ci.run_comparison(args), 2 if failure[0] else 1)
+                self.assertFalse(homes[-1].exists())
+        self.assertNotEqual(homes[0], homes[1])
+        self.assertEqual((shared / "keep.jar").read_bytes(), b"agent cache")
+        self.assertFalse(list(self.root.glob("frt-input-*")))
 
     def test_run_precondition_errors_exit_two_not_mismatch(self):
         command = [

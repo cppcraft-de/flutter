@@ -89,6 +89,24 @@ runs `uv sync --locked`, then calls `uv run --locked font-rendering-regression
 compare`. FRT extracts the ZIPs, builds isolated clients, creates a fresh database,
 imports the fixture, captures both runs and compares their explicit IDs.
 
+Each comparison gets a **fresh temporary `GRADLE_USER_HOME`**. Baseline and
+candidate may share it within that comparison, but no Gradle/Maven downloads or
+Gradle build-cache outputs are reused from earlier CI comparisons. Persistent
+Gradle daemons and Gradle build caching are disabled for this subprocess. The
+owned home is removed with the temporary inputs after success or ordinary
+failure; the agent's normal cache is untouched. Cleanup errors fail the adapter
+rather than silently accumulating caches. A hard agent/process crash can leave
+an identifiable `frt-input-*` directory beside the result directory; inspect
+and remove only abandoned directories after confirming no comparison is active.
+
+This is Gradle dependency-cache isolation, not a Maven CLI flag or a CDN bypass.
+`--refresh-dependencies` can reuse cached bytes, so it is not equivalent. It
+also does not refresh the warm Flutter cache inside an SDK ZIP. Disable/purge
+CDN caching separately for an overwrite-enabled test mirror. Current FRT CI
+targets are Windows/macOS/Web, **not Android**, so they do not exercise Android
+Maven resolution; this isolation takes effect for Android when that target is
+enabled. Fresh-cache Android app acceptance remains a separate release check.
+
 Agents need `uv` on their actual process PATH, Python 3.14+ available to uv, the
 native app-build toolchain and a working graphical desktop session. The Jenkins
 wrapper uses the existing `WINDOWS_PYTHON` or `python3`; FRT's environment is

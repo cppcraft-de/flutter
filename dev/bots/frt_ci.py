@@ -144,6 +144,20 @@ def run_comparison(args) -> int:
             # Only this owned temporary input directory is removed. Engine
             # workspaces, candidate ZIPs and result bundles are never cleaned.
             with tempfile.TemporaryDirectory(prefix="frt-input-", dir=output.parent) as temporary:
+                # A fresh Gradle home avoids old Maven artifacts and Gradle build
+                # caches without deleting anything in the agent's shared home.
+                # Owned by this context: removed on success or ordinary failure.
+                gradle_home = Path(temporary) / "gradle-home"
+                gradle_home.mkdir()
+                (gradle_home / "gradle.properties").write_text(
+                    "org.gradle.daemon=false\norg.gradle.caching=false\n", encoding="utf-8")
+                environment = os.environ.copy()
+                environment["GRADLE_USER_HOME"] = str(gradle_home)
+                environment["GRADLE_OPTS"] = (
+                    environment.get("GRADLE_OPTS", "") + " -Dorg.gradle.daemon=false -Dorg.gradle.caching=false"
+                ).strip()
+                print("FRT: fresh temporary GRADLE_USER_HOME; removed after comparison. "
+                      "CDN caching is configured separately.", flush=True)
                 baseline_zip = Path(temporary) / "baseline.zip"
                 download_baseline(baseline["url"], baseline["sha256"], baseline_zip)
                 command = [
@@ -156,7 +170,7 @@ def run_comparison(args) -> int:
                 if "web" in HOST_TARGETS[args.host]:
                     command.extend(["--browser", str(web_browser())])
                 print(f"FRT {args.host}: building/capturing both clients; details in runner.log", flush=True)
-                completed = subprocess.run(command, cwd=frt, stdout=log, stderr=subprocess.STDOUT)
+                completed = subprocess.run(command, cwd=frt, env=environment, stdout=log, stderr=subprocess.STDOUT)
         # FRT compare owns dependency compatibility; FRT report owns result
         # validation. Do not duplicate either policy in this Jenkins adapter.
         code = completed.returncode if completed.returncode in (0, 1, 2) else 2
