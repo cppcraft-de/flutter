@@ -165,9 +165,15 @@ channel branch to the exact build revision, bootstraps tools/packages, warms
 the cache, and archives it. WSC modifications include the fork origin,
 Windows long-path handling, WSC archive identity, and a packaged mirror file.
 
-`bin/internal/flutter_storage_base_url` is generated from the resolved download
-root. The SDK launchers load it only when `FLUTTER_STORAGE_BASE_URL` is not
-explicitly set. Developers normally need no mirror environment variable.
+`bin/internal/flutter_storage_base_url` is tracked with the default download
+root `https://fluttertest.b-cdn.net`, so fresh source clones have a mirror
+configured. SDK packaging overwrites this file in its temporary checkout with
+the resolved deployment download root. The Flutter launchers load it only when
+`FLUTTER_STORAGE_BASE_URL` is not explicitly set. Set that environment variable
+to use another mirror for a local checkout without editing the tracked default.
+The selected mirror must contain the artifacts for the checkout's engine pin;
+configuring its URL does not publish them. See [local engine development](engine-identity.md#local-engine-development)
+for working with local commits and engine builds.
 There is no availability fallback from a configured private mirror to public
 storage. The fork bootstrap requires a configured root; bypassing/removing
 that setup does not make public storage contain the fork's engine ID.
