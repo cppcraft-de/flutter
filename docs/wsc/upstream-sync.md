@@ -41,7 +41,9 @@ python dev/bots/sync_upstream.py --prune --apply
 The first invocation previews changes using remote ref lists only. `--apply`
 fetches upstream history into a temporary bare repository and requests an atomic
 push; a server that does not advertise atomic pushes is rejected, with no fallback
-to non-atomic publication. The helper verifies the published refs afterwards.
+to non-atomic publication. The helper waits one second before verifying the
+published refs. A mismatch or failed read gets up to two additional read-only
+attempts, five seconds apart; the push is never retried automatically.
 Unchanged runs are a no-op. Source changes during fetch abort before pushing;
 rerun the preview. The apply invocation computes a fresh plan, not a saved one.
 

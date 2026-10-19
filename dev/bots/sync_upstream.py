@@ -15,6 +15,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 
 
 class SyncError(Exception):
@@ -66,6 +67,21 @@ def check_tags(wanted: dict[str, str], existing: dict[str, str]) -> None:
     if conflicts:
         raise SyncError("Conflicting upstream tags; nothing pushed. Investigate without reseating tags:\n"
                         + "\n".join(sorted(conflicts)))
+
+
+def verify_publication(repo: Path, url: str, wanted: dict[str, str], deleted: list[str], *, env=None) -> None:
+    for attempt, delay in enumerate((1, 5, 5), start=1):
+        time.sleep(delay)
+        try:
+            actual = read_refs(repo, url, env=env)
+            if (any(actual.get(ref) != oid for ref, oid in wanted.items())
+                    or any(ref in actual for ref in deleted)):
+                raise SyncError("Push completed but verification differs. Check concurrent writers and rerun preview.")
+            return
+        except SyncError:
+            if attempt == 3:
+                raise
+            print(f"Verification attempt {attempt}/3 failed; retrying read-back in 5 seconds (no push).", flush=True)
 
 
 def sync(repo: Path, source="upstream", destination="origin", *, apply=False, prune=False) -> None:
@@ -159,10 +175,7 @@ def sync(repo: Path, source="upstream", destination="origin", *, apply=False, pr
         except SyncError as error:
             raise SyncError(f"{error}\nInspect a fresh preview before retrying: the server may have "
                             "accepted some refs. No automatic rollback was attempted.") from error
-        actual = read_refs(scratch, destination_url, env=env)
-        if (any(actual.get(ref) != oid for ref, oid in wanted.items())
-                or any(ref in actual for ref in deleted)):
-            raise SyncError("Push completed but verification differs. Check concurrent writers and rerun preview.")
+        verify_publication(scratch, destination_url, wanted, deleted, env=env)
     print("Synchronization verified. WSC branches/channel refs and destination-only tags were not changed.")
 
 

@@ -7,13 +7,16 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import sync_upstream as workflow
 
 
 class SyncUpstreamTest(unittest.TestCase):
     def setUp(self):
+        sleep = patch.object(workflow.time, "sleep")
+        sleep.start()
+        self.addCleanup(sleep.stop)
         self.temporary = tempfile.TemporaryDirectory(prefix="wsc-sync-test-")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
@@ -330,6 +333,37 @@ class SyncUpstreamTest(unittest.TestCase):
             self.sync()
         with self.assertRaisesRegex(workflow.SyncError, "different repositories"):
             workflow.sync(self.repo, destination="upstream")
+
+
+class VerificationTest(unittest.TestCase):
+    def verify(self, responses, delays, *, fails=False, deleted=None):
+        wanted = {"refs/heads/upstream/main": "a" * 40}
+        with patch.object(workflow, "read_refs", side_effect=responses) as reads, \
+                patch.object(workflow.time, "sleep") as sleep, redirect_stdout(io.StringIO()):
+            if fails:
+                with self.assertRaises(workflow.SyncError):
+                    workflow.verify_publication(Path("unused"), "unused", wanted, deleted or [])
+            else:
+                workflow.verify_publication(Path("unused"), "unused", wanted, deleted or [])
+            self.assertEqual(reads.call_count, len(delays))
+            self.assertEqual(sleep.call_args_list, [call(delay) for delay in delays])
+
+    def test_first_attempt_waits_one_second(self):
+        self.verify([{"refs/heads/upstream/main": "a" * 40}], [1])
+
+    def test_stale_read_recovers_on_first_retry(self):
+        self.verify([{}, {"refs/heads/upstream/main": "a" * 40}], [1, 5])
+
+    def test_read_errors_recover_on_second_retry(self):
+        self.verify([workflow.SyncError("network"), workflow.SyncError("network"),
+                     {"refs/heads/upstream/main": "a" * 40}], [1, 5, 5])
+
+    def test_persistent_mismatch_still_fails_after_three_reads(self):
+        self.verify([{}, {}, {}], [1, 5, 5], fails=True)
+
+    def test_deleted_ref_must_disappear(self):
+        stale = {"refs/heads/upstream/main": "a" * 40, "refs/heads/upstream/old": "b" * 40}
+        self.verify([stale, stale, stale], [1, 5, 5], fails=True, deleted=["refs/heads/upstream/old"])
 
 
 if __name__ == "__main__":
