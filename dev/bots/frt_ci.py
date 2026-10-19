@@ -95,7 +95,7 @@ def download_baseline(url: str, checksum: str, destination: Path) -> None:
 
 
 def web_browser(environ=None) -> Path:
-    """Prefer installed Edge on the Windows capture host; no browser downloads."""
+    """Use installed Edge unless explicitly overridden; no browser downloads."""
     environ = os.environ if environ is None else environ
     override = environ.get("WSC_FRT_BROWSER", "").strip()
     if override:
@@ -103,12 +103,11 @@ def web_browser(environ=None) -> Path:
         if not browser.is_file():
             raise ValueError("WSC_FRT_BROWSER must point to an existing Chrome/Edge executable")
         return browser.resolve()
-    for relative in ("Microsoft/Edge/Application/msedge.exe", "Google/Chrome/Application/chrome.exe"):
-        for variable in ("ProgramFiles(x86)", "ProgramFiles", "LOCALAPPDATA"):
-            directory = environ.get(variable)
-            if directory and (browser := Path(directory) / relative).is_file():
-                return browser.resolve()
-    raise ValueError("Web capture needs Edge or Chrome; install it or set WSC_FRT_BROWSER to its executable")
+    for variable in ("ProgramFiles(x86)", "ProgramFiles", "LOCALAPPDATA"):
+        directory = environ.get(variable)
+        if directory and (browser := Path(directory) / "Microsoft/Edge/Application/msedge.exe").is_file():
+            return browser.resolve()
+    raise ValueError("Web capture needs Edge; install it or explicitly set WSC_FRT_BROWSER to a Chrome/Edge executable")
 
 
 def run_comparison(args) -> int:

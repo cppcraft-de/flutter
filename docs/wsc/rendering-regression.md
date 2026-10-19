@@ -23,10 +23,11 @@ for those commands. This pipeline continues to use isolated per-cell instances.
 ## Configure once, then version the defaults
 
 [frt_ci.json](../../dev/bots/frt_ci.json) owns the configuration. Testing is
-disabled by default pending the first Windows baseline SDK. The macOS baseline
-from client build #16 is already pinned. Run packaging without FRT first, then
-pin the approved Windows ZIP URL/checksum and set `enabled` to `true` (or use
-`WSC_FRT_ENABLED=1`). Do not automatically select a moving latest build.
+enabled by default for Windows, macOS and Web. Both host baseline SDKs are pinned
+to client build #19 by URL and published SHA-256; Web reuses the Windows SDK.
+These are commissioning baselines, not independent proof of rendering
+correctness. Their first real-agent comparisons still need acceptance.
+Do not automatically select a moving latest build.
 When enabled, missing baselines fail preflight rather than silently skipping
 tests. Disabled runs log **NOT VALIDATED** and skip regression stages.
 Packaging success with regression disabled is not rendering acceptance.
@@ -50,7 +51,7 @@ During commissioning, nonempty folder properties override the JSON defaults:
 | `WSC_FRT_BASELINE_WINDOWS_SHA256` | Its SHA-256, exactly 64 hexadecimal characters |
 | `WSC_FRT_BASELINE_MACOS_URL` | Approved macOS SDK ZIP URL |
 | `WSC_FRT_BASELINE_MACOS_SHA256` | Its SHA-256 |
-| `WSC_FRT_BROWSER` | Optional Windows agent path to Chrome/Edge; otherwise detect Edge first, then Chrome in standard installation directories |
+| `WSC_FRT_BROWSER` | Optional explicit Windows agent path to Chrome/Edge; otherwise require Edge in standard installation directories |
 
 Expose folder properties at build start as described in the [CI runbook](../../DEPLOYMENT.MD).
 Remove overrides when adopting committed defaults; inherited nonempty values
@@ -117,7 +118,8 @@ settings and rendering flags consistent for both clients. Serialize GUI tests
 across jobs sharing one desktop; `disableConcurrentBuilds()` only covers a
 single branch job, not every job on an agent.
 
-Web uses installed Edge by preference, or Chrome if Edge is absent. A nonempty
+Web uses installed Edge by default and fails if it is absent; it does not
+silently substitute Chrome. A nonempty
 `WSC_FRT_BROWSER` selects an exact executable and must exist; it does not fall
 back silently. No browser is downloaded. FRT launches a fresh headless Chromium
 profile for each capture, with a 1280 x 1024 viewport and device scale factor 1,
@@ -175,8 +177,12 @@ turned green or downgraded to unstable.
 
 Download `artifacts/frt-comparisons.zip` from Jenkins, extract it, and open
 `index.html` locally. It contains the portable HTML comparisons, `summary.json`
-and `junit.xml`. Jenkins also publishes that XML as test results and archives
-`artifacts/frt-junit.xml`. Diagnostic ZIPs are retained when reporting fails,
+and `junit.xml`. Jenkins publishes that XML through `junit`, populating the
+build's **Test Result** page and job test trends, and also archives
+`artifacts/frt-junit.xml`. This requires the JUnit plugin, not a separate xUnit
+plugin. Passing, mismatched and diagnostic error reports all use this publisher;
+missing/empty XML fails the build rather than silently skipping test results.
+Diagnostic ZIPs are retained when reporting fails,
 including when extracting JUnit fails. A failed checkout/tool startup may prevent
 ZIP creation; consult archived cell logs and the console in that case.
 
@@ -209,7 +215,7 @@ be built/tested using a Windows or macOS SDK.
 | --- | --- | --- |
 | Windows | Windows | Existing FRT desktop flow; validate Jenkins execution |
 | macOS | macOS | Existing FRT desktop flow; validate Jenkins execution |
-| Web | Windows | Wired into CI; headless Edge/Chrome, SDK CanvasKit; validate actual agent capture |
+| Web | Windows | Wired into CI; headless Edge by default, SDK CanvasKit; validate actual agent capture |
 | Android | macOS | Validate emulator/device build/install/capture before Jenkins integration; pin device/API/ABI and rendering configuration |
 | iOS | macOS | Validate simulator/device capture before Jenkins integration; pin model/runtime and handle signing for devices |
 

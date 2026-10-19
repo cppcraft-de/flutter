@@ -46,15 +46,15 @@ class FrtCiTest(unittest.TestCase):
             bundle.mkdir(exist_ok=True)
             (bundle / "frt-pubspec.lock").write_text("identical pinned dependencies\n")
 
-    def test_defaults_disable_capture_but_plan_windows_macos_web(self):
-        config = json.loads(self.config.read_text())
-        self.assertFalse(config["enabled"])
-        with self.assertRaises(ValueError):
-            frt_ci.load_plan(self.config, ["windows", "macos"], {"WSC_FRT_ENABLED": "1"})
+    def test_defaults_enable_windows_macos_web_with_pinned_baselines(self):
         plan = frt_ci.load_plan(self.config, ["windows", "macos"], {})
         self.assertEqual(plan["targets"], ["windows", "web", "macos"])
         self.assertEqual(plan["ref"], "master")
-        self.assertFalse(plan["enabled"])
+        self.assertTrue(plan["enabled"])
+        for host in ("windows", "macos"):
+            self.assertIn(f"/19/{host}/", plan["baselines"][host]["url"])
+            self.assertRegex(plan["baselines"][host]["sha256"], r"^[0-9a-f]{64}$")
+        self.assertFalse(frt_ci.load_plan(self.config, plan["hosts"], {"WSC_FRT_ENABLED": "0"})["enabled"])
         self.assertEqual(frt_ci.load_plan(self.config, [], {})["targets"], [])
 
     def test_overrides_and_missing_selected_host(self):
@@ -107,11 +107,12 @@ class FrtCiTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             frt_ci.web_browser({})
 
-    def test_browser_falls_back_to_installed_chrome(self):
+    def test_browser_does_not_silently_substitute_chrome_for_edge(self):
         chrome = self.root / "Google/Chrome/Application/chrome.exe"
         chrome.parent.mkdir(parents=True)
         chrome.touch()
-        self.assertEqual(frt_ci.web_browser({"ProgramFiles": str(self.root)}), chrome.resolve())
+        with self.assertRaisesRegex(ValueError, "needs Edge"):
+            frt_ci.web_browser({"ProgramFiles": str(self.root)})
 
     def test_wrapper_uses_two_zips_and_keeps_evidence_not_inputs(self):
         plan = frt_ci.load_plan(self.config, ["windows"], self.enabled)

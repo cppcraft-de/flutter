@@ -1,5 +1,5 @@
 {
-  "enabled": false,
+  "enabled": true,
   "repository": "https://bitbucket.org/schoolcraftteam/font_rendering_tester.git",
   "ref": "master",
   "credentials_id": "",
@@ -7,10 +7,13 @@
   "build_mode": "release",
   "dpi": 192,
   "baselines": {
-    "windows": {"url": "", "sha256": ""},
+    "windows": {
+      "url": "https://fluttertest.b-cdn.net/ci-v2/sdk/a15e799a2c5572d88fa215cc0d3bfb18272e2b2d/19/windows/flutter_windows_wsc-3.44.4-dev.41-ga15e799a2c-stable.zip",
+      "sha256": "ac132b3f2c4e131711ee25800d4071490df149c75ebeafffaeb269f0d7409c03"
+    },
     "macos": {
-      "url": "https://fluttertest.b-cdn.net/sdk/9d4b04ad183ce7b5efad2f455af450b0e1151dc3/16/macos/flutter_macos_wsc-3.44.4-dev.34-g9d4b04ad18-stable.zip",
-      "sha256": "f3c16d0065ea085da2fdde09163d0dc870b9162498d9f1581498750af5ae3aa3"
+      "url": "https://fluttertest.b-cdn.net/ci-v2/sdk/a15e799a2c5572d88fa215cc0d3bfb18272e2b2d/19/macos/flutter_macos_wsc-3.44.4-dev.41-ga15e799a2c-stable.zip",
+      "sha256": "e718a590b050809813979ff82413ec8be4e31a3a387f92771a5fc73ca6774bf7"
     }
   }
 }

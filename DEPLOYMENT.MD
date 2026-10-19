@@ -18,7 +18,7 @@ for the meaning of the IDs, the Maven failure, and the rationale for the fix.
 - [Updating the fork](docs/wsc/updating.md): one human/agent procedure, supported
   by safe candidate-preparation and source-check helpers.
 - [SDK rendering regression](docs/wsc/rendering-regression.md): FRT configuration,
-  approved baselines, private evidence and planned mobile/web test hosts.
+  approved baselines, private evidence and planned mobile test hosts.
 - [Local testing](docs/wsc/local-testing.md): installation-specific overrides
   and the temporary workspace-reuse exception. Not required on client CI.
 - [Agent entry point](AGENTS.md): navigation and repository safety constraints.
@@ -30,10 +30,10 @@ Jenkinsfile. It builds engine artifacts, uploads them directly from their agents
 then packages and uploads Windows and macOS SDKs using those artifacts. Large
 engine payloads do not pass through Jenkins stashes.
 FRT comparison follows each host's SDK packaging: Windows and Web on Windows,
-macOS on macOS. It remains disabled by default while the first Windows baseline
-SDK is being produced. Enabling it requires approved baseline SDK URLs/checksums;
-missing configuration then fails preflight. A packaging-only green build does
-not certify rendering.
+macOS on macOS. It is enabled by default with client build #19's Windows/macOS
+SDKs pinned as commissioning baselines; Web uses Edge. Missing baseline
+configuration fails preflight. Real-agent FRT execution still needs acceptance;
+a packaging-only green build does not certify rendering.
 
 | Agent label | Work |
 | --- | --- |
@@ -157,8 +157,9 @@ The fixed `ci-v2` testing prefix starts guarded publication without overwriting
 legacy test artifacts. With these defaults, the first run needs neither the
 dangerous overwrite flag nor a CDN purge. Keep the prefix fixed across builds;
 normal publish-once reuse is compatible with CDN caching. Source-checkout
-bootstrap and approved FRT baseline URLs are intentionally not migrated by this
-CI URL change. Local Jenkins URL overrides remain effective.
+bootstrap and approved FRT baseline URLs do not automatically follow CI URL
+changes; baseline pins are reviewed separately. Local Jenkins URL overrides
+remain effective.
 
 ### Polling and email
 

@@ -50,7 +50,11 @@ def exercise = { Map options ->
         },
         archiveArtifacts: { Map args -> events << 'archive' },
         fileExists: { String path -> !(options.noXml && path.endsWith('.xml')) },
-        junit: { Map args -> assert !args.allowEmptyResults; events << 'junit' },
+        junit: { Map args ->
+            assert args.testResults == 'artifacts/frt-junit.xml'
+            assert !args.allowEmptyResults
+            events << 'junit'
+        },
         unstable: { String text -> worsen('UNSTABLE') },
         error: { String text -> worsen('FAILURE'); throw new IllegalArgumentException(text) },
     ])
@@ -65,8 +69,10 @@ def pass = exercise([:])
 assert pass.result == 'SUCCESS'
 assert pass.events.indexOf('archive') < pass.events.indexOf('junit')
 assert pass.events.contains('checkout-pinned-frt')
-assert exercise([code: 1]).result == 'UNSTABLE'
-assert exercise([code: 2]).result == 'FAILURE'
+def mismatch = exercise([code: 1])
+assert mismatch.result == 'UNSTABLE' && mismatch.events.contains('junit')
+def executionError = exercise([code: 2])
+assert executionError.result == 'FAILURE' && executionError.events.contains('junit')
 assert exercise([code: 17]).result == 'FAILURE'
 assert exercise([initial: 'FAILURE', code: 1]).result == 'FAILURE'
 def missing = exercise([missing: true])
