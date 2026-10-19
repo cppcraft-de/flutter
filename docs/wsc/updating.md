@@ -29,11 +29,15 @@ for packaging, release tags, Jenkins settings, and developer acceptance.
   execute the same commands within those approvals. Never weaken tests or update
   rendering references merely to make a candidate pass.
 
-The helper never fetches, pushes, tags, moves channel refs, starts Jenkins, or
+The rebase helper never fetches, pushes, tags, moves channel refs, starts Jenkins, or
 cleans workspaces. `prepare --apply` creates a local branch/worktree and commits
 the replay. `verify` checks sources; its exit code is **not release approval**.
 
 ## 1. Choose and review the inputs
+
+To refresh the upstream history stored in the client's fork, first use the
+separate [upstream synchronization helper](upstream-sync.md). It copies branches
+under `upstream/*` and preserves original tags; it never updates WSC channel refs.
 
 Check the upstream URL, then fetch branches/tags without forcing tag updates.
 In the maintained source checkout:

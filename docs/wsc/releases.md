@@ -177,8 +177,10 @@ proof of semantic correctness.
 
 The intended channel policy is that fork `main`/`beta`/`stable` point to accepted
 patched equivalents of the selected upstream lines. These are moving refs;
-immutable WSC tags identify releases. There is no checked-in automation that
-continuously rebases/mirrors every upstream channel. Do not treat an arbitrary
+immutable WSC tags identify releases. The separate
+[upstream sync helper](upstream-sync.md) copies vanilla branches under `upstream/*`
+and adds original tags, without advancing WSC channels or replaying patches.
+There is no automatic WSC channel promotion. Do not treat an arbitrary
 existing ref or a forward-port branch as certified without checking it. Beta
 support is optional; there is no need to visit every intermediate release.
 
@@ -244,6 +246,7 @@ machine-specific test environment paths.
 
 | Responsibility | Source |
 | --- | --- |
+| Upstream branches/tags in the fork; no WSC channel updates | [sync_upstream.py](../../dev/bots/sync_upstream.py), used by the [sync procedure](upstream-sync.md) |
 | Candidate preparation and source checks | [wsc_rebase.py](../../dev/bots/wsc_rebase.py), used by the [update procedure](updating.md) |
 | Orchestration, workspace policy, credentials, polling, notifications | [Jenkinsfile.testing](../../Jenkinsfile.testing) |
 | Engine artifact collection from builder manifests | [collect_engine_artifacts.py](../../dev/bots/collect_engine_artifacts.py) |
