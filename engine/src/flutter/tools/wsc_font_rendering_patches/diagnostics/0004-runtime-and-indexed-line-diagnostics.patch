@@ -1,0 +1,429 @@
+diff --git a/modules/canvaskit/externs.js b/modules/canvaskit/externs.js
+index d18afd7d5d..84feb4af68 100644
+--- a/modules/canvaskit/externs.js
++++ b/modules/canvaskit/externs.js
+@@ -1332,3 +1332,6 @@ var LibraryEGL = {
+     majorVersion: {}
+   }
+ }
++
++CanvasKit.ConfigureFontRenderingDiagnostics = function(enabled) {};
++CanvasKit.FontRenderingDiagnosticsEnabled = function() {};
+diff --git a/modules/canvaskit/paragraph_bindings.cpp b/modules/canvaskit/paragraph_bindings.cpp
+index 70c4e75744..3033cd5448 100644
+--- a/modules/canvaskit/paragraph_bindings.cpp
++++ b/modules/canvaskit/paragraph_bindings.cpp
+@@ -367,6 +367,11 @@ JSObject JSObjectFromLineMetrics(skia::textlayout::LineMetrics& metrics) {
+     m.set("lineHeightBranch", metrics.fLineHeightBranch);
+     m.set("nextLineBaselinePitch", metrics.fNextLineBaselinePitch);
+     m.set("lineBoxHeight", metrics.fLineBoxHeight);
++    m.set("availableWidth", metrics.fAvailableWidth);
++    m.set("advanceBeforeJustification", metrics.fAdvanceBeforeJustification);
++    m.set("advanceAfterJustification", metrics.fAdvanceAfterJustification);
++    m.set("isEllipsized", metrics.fIsEllipsized);
++    m.set("isTrailingEmptyLine", metrics.fIsTrailingEmptyLine);
+     return m;
+ }
+ 
+@@ -634,6 +639,8 @@ JSArray UnresolvedCodepoints(para::Paragraph& self) {
+ }
+ 
+ EMSCRIPTEN_BINDINGS(Paragraph) {
++    function("ConfigureFontRenderingDiagnostics", &para::ConfigureFontDiagnostics);
++    function("FontRenderingDiagnosticsEnabled", &para::FontDiagnosticsEnabled);
+ 
+     class_<para::Paragraph>("Paragraph")
+         .function("didExceedMaxLines", &para::Paragraph::didExceedMaxLines)
+diff --git a/modules/skparagraph/include/FontDiagnostics.h b/modules/skparagraph/include/FontDiagnostics.h
+new file mode 100644
+index 0000000000..109967639f
+--- /dev/null
++++ b/modules/skparagraph/include/FontDiagnostics.h
+@@ -0,0 +1,45 @@
++// Copyright 2026 Google LLC
++#ifndef FontDiagnostics_DEFINED
++#define FontDiagnostics_DEFINED
++
++#include <atomic>
++#include <cstdlib>
++#include <cstring>
++
++namespace skia {
++namespace textlayout {
++
++// One startup mode for all paragraphs and their shared shaping caches.
++// Bit 0 enables collection; bit 1 freezes configuration at the first builder.
++inline std::atomic<unsigned>& FontDiagnosticsState() {
++    static std::atomic<unsigned> state{[] {
++        const char* value = std::getenv("WSC_FONT_DIAGNOSTICS");
++        return value && (std::strcmp(value, "1") == 0 || std::strcmp(value, "true") == 0)
++                ? 1u : 0u;
++    }()};
++    return state;
++}
++
++inline bool FontDiagnosticsEnabled() {
++    return (FontDiagnosticsState().load(std::memory_order_relaxed) & 1u) != 0;
++}
++
++inline bool ConfigureFontDiagnostics(bool enabled) {
++    auto& state = FontDiagnosticsState();
++    unsigned previous = state.load(std::memory_order_relaxed);
++    while ((previous & 2u) == 0) {
++        if (state.compare_exchange_weak(previous, enabled ? 1u : 0u,
++                                       std::memory_order_relaxed)) {
++            return true;
++        }
++    }
++    return ((previous & 1u) != 0) == enabled;
++}
++
++inline void FreezeFontDiagnostics() {
++    FontDiagnosticsState().fetch_or(2u, std::memory_order_relaxed);
++}
++
++}  // namespace textlayout
++}  // namespace skia
++#endif  // FontDiagnostics_DEFINED
+diff --git a/modules/skparagraph/include/Metrics.h b/modules/skparagraph/include/Metrics.h
+index b254d7d74d..6432a15cf1 100644
+--- a/modules/skparagraph/include/Metrics.h
++++ b/modules/skparagraph/include/Metrics.h
+@@ -103,6 +103,12 @@ public:
+     double fNextLineBaselinePitch = 0.0;
+     // The occupied line height, tracked separately from baseline pitch.
+     double fLineBoxHeight = 0.0;
++    // Exact final-line diagnostics; widths exclude ghost spaces and ellipsis.
++    double fAvailableWidth = 0.0;
++    double fAdvanceBeforeJustification = 0.0;
++    double fAdvanceAfterJustification = 0.0;
++    bool fIsEllipsized = false;
++    bool fIsTrailingEmptyLine = false;
+ 
+     // Mapping between text index ranges and the FontMetrics associated with
+     // them. The first run will be keyed under start_index. The metrics here
+diff --git a/modules/skparagraph/include/Paragraph.h b/modules/skparagraph/include/Paragraph.h
+index a7ca646fc7..492a3dd604 100644
+--- a/modules/skparagraph/include/Paragraph.h
++++ b/modules/skparagraph/include/Paragraph.h
+@@ -6,6 +6,7 @@
+ #include "include/core/SkPath.h"
+ #include "include/core/SkString.h"
+ #include "modules/skparagraph/include/FontCollection.h"
++#include "modules/skparagraph/include/FontDiagnostics.h"
+ #include "modules/skparagraph/include/Metrics.h"
+ #include "modules/skparagraph/include/ParagraphStyle.h"
+ #include "modules/skparagraph/include/TextStyle.h"
+diff --git a/modules/skparagraph/src/OneLineShaper.cpp b/modules/skparagraph/src/OneLineShaper.cpp
+index 89d3c16a33..b8b7913c9b 100644
+--- a/modules/skparagraph/src/OneLineShaper.cpp
++++ b/modules/skparagraph/src/OneLineShaper.cpp
+@@ -732,10 +732,12 @@ bool OneLineShaper::shape() {
+                         }
+                     }
+ 
+-                    fCurrentFeatureCount = static_cast<uint32_t>(adjustedFeatures.size());
+-                    fCurrentFeatureMask = this->shapingFeatureMask(
+-                            SkSpan<const SkShaper::Feature>(adjustedFeatures.data(),
+-                                                            adjustedFeatures.size()));
++                    if (FontDiagnosticsEnabled()) {
++                        fCurrentFeatureCount = static_cast<uint32_t>(adjustedFeatures.size());
++                        fCurrentFeatureMask = this->shapingFeatureMask(
++                                SkSpan<const SkShaper::Feature>(adjustedFeatures.data(),
++                                                                adjustedFeatures.size()));
++                    }
+                     shaper->shape(unresolvedText.data(), unresolvedText.size(),
+                             fontIter, bidiIter,*scriptIter, langIter,
+                             adjustedFeatures.data(), adjustedFeatures.size(),
+diff --git a/modules/skparagraph/src/ParagraphBuilderImpl.cpp b/modules/skparagraph/src/ParagraphBuilderImpl.cpp
+index 6e13350f56..ee9c8dc067 100644
+--- a/modules/skparagraph/src/ParagraphBuilderImpl.cpp
++++ b/modules/skparagraph/src/ParagraphBuilderImpl.cpp
+@@ -43,6 +43,7 @@ ParagraphBuilderImpl::ParagraphBuilderImpl(
+         , fUsingClientInfo(false)
+ #endif
+ {
++    FreezeFontDiagnostics();
+     SkASSERT(fFontCollection);
+     startStyledBlock();
+ }
+diff --git a/modules/skparagraph/src/ParagraphImpl.cpp b/modules/skparagraph/src/ParagraphImpl.cpp
+index c7ca8ffb64..a0b0c24903 100644
+--- a/modules/skparagraph/src/ParagraphImpl.cpp
++++ b/modules/skparagraph/src/ParagraphImpl.cpp
+@@ -1293,6 +1293,9 @@ void ParagraphImpl::visit(const Visitor& visitor) {
+ 
+ std::vector<Paragraph::GlyphDiagnostic> ParagraphImpl::getGlyphDiagnostics() {
+     std::vector<Paragraph::GlyphDiagnostic> result;
++    if (!FontDiagnosticsEnabled()) {
++        return result;
++    }
+     int lineNumber = 0;
+     for (auto& line : fLines) {
+         line.ensureTextBlobCachePopulated();
+diff --git a/modules/skparagraph/src/Run.cpp b/modules/skparagraph/src/Run.cpp
+index 5496d8557c..d932329a55 100644
+--- a/modules/skparagraph/src/Run.cpp
++++ b/modules/skparagraph/src/Run.cpp
+@@ -40,7 +40,10 @@ Run::Run(ParagraphImpl* owner,
+ {
+     fBidiLevel = info.fBidiLevel;
+     fScript = info.fScript;
+-    fLanguage = info.fLanguage;
++    // Script remains unconditional: cursive spacing uses it in both modes.
++    if (FontDiagnosticsEnabled()) {
++        fLanguage = info.fLanguage;
++    }
+     fShapingFeatureCount = 0;
+     fShapingFeatureMask = 0;
+     fAdvance = info.fAdvance;
+@@ -92,19 +95,25 @@ SkShaper::RunHandler::Buffer Run::newRunBuffer() {
+ }
+ 
+ void Run::commit() {
+-    if (!InternalLineMetrics::useQtLikeIntegerMetrics() || this->isPlaceholder()) {
++    if (this->isPlaceholder()) {
+         return;
+     }
+ 
+-    if (fRawPositions.empty()) {
+-        fRawPositions = fPositions;
++    if (FontDiagnosticsEnabled() && fRawPositions.empty()) {
++        fRawPositions.assign(fPositions.begin(), fPositions.end());
++    }
++    if (!InternalLineMetrics::useQtLikeIntegerMetrics()) {
++        return;
+     }
++    // Preserve native advance selection without retaining diagnostic positions.
++    SkScalar previousRawX = fPositions.empty() ? 0.0f : fPositions[0].fX;
+ 
+     SkScalar x = fPositions.empty() ? 0.0f : fPositions[0].fX;
+     SkScalar width = 0.0f;
+     for (size_t i = 0; i < this->size(); ++i) {
+-        SkScalar advance =
+-                SkScalarRoundToInt(fRawPositions[i + 1].fX - fRawPositions[i].fX);
++        const SkScalar nextRawX = fPositions[i + 1].fX;
++        SkScalar advance = SkScalarRoundToInt(nextRawX - previousRawX);
++        previousRawX = nextRawX;
+         if (SkTypeface* typeface = fFont.getTypeface()) {
+             SkTypeface::QtLikeGlyphAdvanceDiagnostics diagnostics;
+             if (typeface->getQtLikeGlyphAdvanceDiagnostics(
+diff --git a/modules/skparagraph/src/Run.h b/modules/skparagraph/src/Run.h
+index e3102e2a1e..504dac66b4 100644
+--- a/modules/skparagraph/src/Run.h
++++ b/modules/skparagraph/src/Run.h
+@@ -21,6 +21,8 @@
+ #include <functional>
+ #include <limits>
+ #include <tuple>
++#include <vector>
++#include "modules/skparagraph/include/FontDiagnostics.h"
+ 
+ class SkTextBlobBuilder;
+ 
+@@ -197,14 +199,14 @@ private:
+     struct GlyphData {
+         skia_private::STArray<64, SkGlyphID, true> glyphs;
+         skia_private::STArray<64, SkPoint, true> positions;
+-        skia_private::STArray<64, SkPoint, true> rawPositions;
++        std::vector<SkPoint> rawPositions;
+         skia_private::STArray<64, SkPoint, true> offsets;
+         skia_private::STArray<64, uint32_t, true> clusterIndexes;
+     };
+     std::shared_ptr<GlyphData> fGlyphData;
+     skia_private::STArray<64, SkGlyphID, true>& fGlyphs;
+     skia_private::STArray<64, SkPoint, true>& fPositions;
+-    skia_private::STArray<64, SkPoint, true>& fRawPositions;
++    std::vector<SkPoint>& fRawPositions;
+     skia_private::STArray<64, SkPoint, true>& fOffsets;
+     skia_private::STArray<64, uint32_t, true>& fClusterIndexes;
+ 
+diff --git a/modules/skparagraph/src/TextLine.cpp b/modules/skparagraph/src/TextLine.cpp
+index 55ea972b2c..ee24503436 100644
+--- a/modules/skparagraph/src/TextLine.cpp
++++ b/modules/skparagraph/src/TextLine.cpp
+@@ -297,6 +297,10 @@ void TextLine::ensureTextBlobCachePopulated() {
+ }
+ 
+ void TextLine::format(TextAlign align, SkScalar maxWidth) {
++    if (FontDiagnosticsEnabled() && !fCapturedAdvanceBeforeJustification) {
++        fAdvanceBeforeJustification = fAdvance.fX;
++        fCapturedAdvanceBeforeJustification = true;
++    }
+     SkScalar delta = maxWidth - this->width();
+     if (delta <= 0) {
+         return;
+@@ -1146,9 +1150,11 @@ LineMetrics TextLine::getMetrics() const {
+             ? this->baseline()
+             : this->height() - this->sizes().descent());
+     result.fLineNumber = this - fOwner->lines().data();
+-    result.fRawAscent = -this->sizes().rawAscent();
+-    result.fRawDescent = this->sizes().rawDescent();
+-    result.fRawLeading = this->sizes().rawLeading();
++    // Match the current diagnostic contract without changing the legacy raw*
++    // accessors, which also participate in painting and edge-line layout.
++    result.fRawAscent = -this->sizes().fRawAscent;
++    result.fRawDescent = this->sizes().fRawDescent;
++    result.fRawLeading = this->sizes().fDiagnosticRawLeading;
+     result.fEffectiveAscent = InternalLineMetrics::useQtLikeIntegerMetrics()
+         ? this->sizes().layoutAscent()
+         : -this->sizes().ascent();
+@@ -1168,6 +1174,14 @@ LineMetrics TextLine::getMetrics() const {
+         ? this->sizes().lineBoxHeight()
+         : this->height();
+ 
++    result.fIsTrailingEmptyLine = fIsTrailingEmptyLine;
++    if (FontDiagnosticsEnabled()) {
++        result.fAvailableWidth = fOwner->getMaxWidth();
++        result.fAdvanceBeforeJustification = fAdvanceBeforeJustification;
++        result.fAdvanceAfterJustification = fAdvance.fX;
++        result.fIsEllipsized = fEllipsis != nullptr;
++    }
++
+     // Fill out the style parts
+     this->iterateThroughVisualRuns(false,
+         [this, &result]
+diff --git a/modules/skparagraph/src/TextLine.h b/modules/skparagraph/src/TextLine.h
+index 9edce48380..5f012b28dd 100644
+--- a/modules/skparagraph/src/TextLine.h
++++ b/modules/skparagraph/src/TextLine.h
+@@ -103,6 +103,7 @@ public:
+                                              const ClustersVisitor& visitor) const;
+ 
+     void format(TextAlign align, SkScalar maxWidth);
++    void markTrailingEmptyLine() { fIsTrailingEmptyLine = true; }
+     void paint(ParagraphPainter* painter, SkScalar x, SkScalar y);
+     void visit(SkScalar x, SkScalar y);
+     void ensureTextBlobCachePopulated();
+@@ -178,6 +179,9 @@ private:
+     // Avoid the malloc/free in the common case of one run per line
+     skia_private::STArray<1, size_t, true> fRunsInVisualOrder;
+     SkVector fAdvance;                  // Text size
++    SkScalar fAdvanceBeforeJustification = 0; // Captured before format mutates advances.
++    bool fIsTrailingEmptyLine = false;
++    bool fCapturedAdvanceBeforeJustification = false;
+     SkVector fOffset;                   // Text position
+     SkScalar fShift;                    // Let right
+     SkScalar fWidthWithSpaces;
+diff --git a/modules/skparagraph/src/TextWrapper.cpp b/modules/skparagraph/src/TextWrapper.cpp
+index 718687cd2b..0908030880 100644
+--- a/modules/skparagraph/src/TextWrapper.cpp
++++ b/modules/skparagraph/src/TextWrapper.cpp
+@@ -499,6 +499,7 @@ void TextWrapper::breakTextIntoLines(ParagraphImpl* parent,
+                 needEllipsis);
+         fHeight += fEndLine.metrics().height();
+         parent->lines().back().setMaxRunMetrics(maxRunMetrics);
++        parent->lines().back().markTrailingEmptyLine();
+     }
+ 
+     if (parent->lines().empty()) {
+diff --git a/src/ports/SkFontHost_FreeType.cpp b/src/ports/SkFontHost_FreeType.cpp
+index b62d3b571c..8e3a16da32 100644
+--- a/src/ports/SkFontHost_FreeType.cpp
++++ b/src/ports/SkFontHost_FreeType.cpp
+@@ -24,6 +24,7 @@
+ #include "include/private/base/SkTPin.h"
+ #include "include/private/base/SkTemplates.h"
+ #include "include/private/base/SkTo.h"
++#include "modules/skparagraph/include/FontDiagnostics.h"
+ #include "src/base/SkTSearch.h"
+ #include "src/core/SkAdvancedTypefaceMetrics.h"
+ #include "src/core/SkColorData.h"
+@@ -1019,21 +1020,23 @@ bool SkTypeface_FreeType::onGetQtLikeGlyphAdvanceDiagnostics(
+     diagnostics->fBackend = 1;
+     diagnostics->fAdvance =
+             SkIntToScalar(static_cast<int>((face->glyph->advance.x + 32) >> 6));
+-    diagnostics->fAdvance26Dot6 = SkFDot6ToScalar(face->glyph->advance.x);
+-    diagnostics->fLinearHoriAdvance16Dot16 =
+-            SkFixedToScalar(face->glyph->linearHoriAdvance);
+-    diagnostics->fMetricsHoriAdvance26Dot6 =
+-            SkFDot6ToScalar(face->glyph->metrics.horiAdvance);
+-    diagnostics->fLoadFlags = loadFlags;
+-    diagnostics->fUnitsPerEm = face->units_per_EM;
+-    diagnostics->fXppem = face->size ? face->size->metrics.x_ppem : 0;
+-    diagnostics->fYppem = face->size ? face->size->metrics.y_ppem : 0;
+-    diagnostics->fXScale = face->size ? SkFixedToScalar(face->size->metrics.x_scale) : 0;
+-    diagnostics->fYScale = face->size ? SkFixedToScalar(face->size->metrics.y_scale) : 0;
+-    diagnostics->fFaceIndex = static_cast<int>(face->face_index);
+-    diagnostics->fFaceFlags = static_cast<int>(face->face_flags);
+-    diagnostics->fStyleFlags = static_cast<int>(face->style_flags);
+-    diagnostics->fNumGlyphs = static_cast<int>(face->num_glyphs);
++    if (skia::textlayout::FontDiagnosticsEnabled()) {
++        diagnostics->fAdvance26Dot6 = SkFDot6ToScalar(face->glyph->advance.x);
++        diagnostics->fLinearHoriAdvance16Dot16 =
++                SkFixedToScalar(face->glyph->linearHoriAdvance);
++        diagnostics->fMetricsHoriAdvance26Dot6 =
++                SkFDot6ToScalar(face->glyph->metrics.horiAdvance);
++        diagnostics->fLoadFlags = loadFlags;
++        diagnostics->fUnitsPerEm = face->units_per_EM;
++        diagnostics->fXppem = face->size ? face->size->metrics.x_ppem : 0;
++        diagnostics->fYppem = face->size ? face->size->metrics.y_ppem : 0;
++        diagnostics->fXScale = face->size ? SkFixedToScalar(face->size->metrics.x_scale) : 0;
++        diagnostics->fYScale = face->size ? SkFixedToScalar(face->size->metrics.y_scale) : 0;
++        diagnostics->fFaceIndex = static_cast<int>(face->face_index);
++        diagnostics->fFaceFlags = static_cast<int>(face->face_flags);
++        diagnostics->fStyleFlags = static_cast<int>(face->style_flags);
++        diagnostics->fNumGlyphs = static_cast<int>(face->num_glyphs);
++    }
+ 
+     FT_Activate_Size(oldSize);
+     FT_Set_Transform(face, &oldTransform, &oldDelta);
+diff --git a/src/ports/SkTypeface_mac_ct.cpp b/src/ports/SkTypeface_mac_ct.cpp
+index 076fbf6553..96bf45c9c7 100644
+--- a/src/ports/SkTypeface_mac_ct.cpp
++++ b/src/ports/SkTypeface_mac_ct.cpp
+@@ -6,6 +6,7 @@
+  */
+ 
+ #include "include/core/SkTypes.h"
++#include "modules/skparagraph/include/FontDiagnostics.h"
+ #if defined(SK_BUILD_FOR_MAC) || defined(SK_BUILD_FOR_IOS)
+ 
+ #ifdef SK_BUILD_FOR_MAC
+@@ -812,9 +813,11 @@ bool SkTypeface_Mac::onGetQtLikeGlyphAdvanceDiagnostics(
+     diagnostics->fBackend = 2;
+     diagnostics->fAdvance = SkDoubleToScalar(advance.width);
+     diagnostics->fDesignAdvance = SkDoubleToScalar(advance.width);
+-    diagnostics->fUnitsPerEm = this->getUnitsPerEm();
+-    diagnostics->fDesignUnitsPerEm = diagnostics->fUnitsPerEm;
+-    diagnostics->fNumGlyphs = this->countGlyphs();
++    if (skia::textlayout::FontDiagnosticsEnabled()) {
++        diagnostics->fUnitsPerEm = this->getUnitsPerEm();
++        diagnostics->fDesignUnitsPerEm = diagnostics->fUnitsPerEm;
++        diagnostics->fNumGlyphs = this->countGlyphs();
++    }
+     return true;
+ }
+ 
+diff --git a/src/ports/SkTypeface_win_dw.cpp b/src/ports/SkTypeface_win_dw.cpp
+index ab1ae767ce..cf91da08fc 100644
+--- a/src/ports/SkTypeface_win_dw.cpp
++++ b/src/ports/SkTypeface_win_dw.cpp
+@@ -7,6 +7,7 @@
+ #include "src/utils/win/SkDWriteNTDDI_VERSION.h"
+ 
+ #include "include/core/SkTypes.h"
++#include "modules/skparagraph/include/FontDiagnostics.h"
+ #if defined(SK_BUILD_FOR_WIN)
+ 
+ #include "src/base/SkLeanWindows.h"
+@@ -393,7 +394,9 @@ bool DWriteFontTypeface::onGetQtLikeGlyphAdvanceDiagnostics(
+     diagnostics->fBackend = 3;
+     diagnostics->fUnitsPerEm = fontMetrics.designUnitsPerEm;
+     diagnostics->fDesignUnitsPerEm = fontMetrics.designUnitsPerEm;
+-    diagnostics->fNumGlyphs = this->countGlyphs();
++    if (skia::textlayout::FontDiagnosticsEnabled()) {
++        diagnostics->fNumGlyphs = this->countGlyphs();
++    }
+     diagnostics->fDesignAdvance =
+             textSize * SkIntToScalar(designMetrics.advanceWidth) /
+             SkIntToScalar(fontMetrics.designUnitsPerEm);
+@@ -404,7 +407,7 @@ bool DWriteFontTypeface::onGetQtLikeGlyphAdvanceDiagnostics(
+     // neutral on DWrite until we have a real FreeType-backed metric source.
+     diagnostics->fAdvance = diagnostics->fDesignAdvance;
+ 
+-    if (fDWriteFontFace1) {
++    if (skia::textlayout::FontDiagnosticsEnabled() && fDWriteFontFace1) {
+         DWRITE_GLYPH_METRICS gdiMetrics = {};
+         if (SUCCEEDED(fDWriteFontFace1->GetGdiCompatibleGlyphMetrics(
+                     textSize,

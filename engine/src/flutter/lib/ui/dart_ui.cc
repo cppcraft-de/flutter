@@ -75,6 +75,8 @@ typedef CanvasPath Path;
   V(Gradient::Create)                                              \
   V(ImageFilter::Create)                                           \
   V(ImageShader::Create)                                           \
+  V(Paragraph::configureFontRenderingDiagnostics)                  \
+  V(Paragraph::fontRenderingDiagnosticsEnabled)                    \
   V(ParagraphBuilder::Create)                                      \
   V(PathMeasure::Create)                                           \
   V(Path::Create)                                                  \
@@ -227,6 +229,7 @@ typedef CanvasPath Path;
   V(ParagraphBuilder, pushStyle)                         \
   V(Paragraph, alphabeticBaseline)                       \
   V(Paragraph, computeDetailedLineMetricsForDiagnostics) \
+  V(Paragraph, computeLineLayoutMetricsForDiagnostics)   \
   V(Paragraph, computeGlyphMetricsForDiagnostics)        \
   V(Paragraph, computeLineMetrics)                       \
   V(Paragraph, didExceedMaxLines)                        \

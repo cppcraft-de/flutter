@@ -27,6 +27,8 @@ class Paragraph : public RefCountedDartWrappable<Paragraph> {
 
   double width();
   double height();
+  static bool configureFontRenderingDiagnostics(bool enabled);
+  static bool fontRenderingDiagnosticsEnabled();
   double longestLine();
   double minIntrinsicWidth();
   double maxIntrinsicWidth();
@@ -52,6 +54,7 @@ class Paragraph : public RefCountedDartWrappable<Paragraph> {
   Dart_Handle getLineBoundary(unsigned offset);
   tonic::Float64List computeLineMetrics() const;
   tonic::Float64List computeDetailedLineMetricsForDiagnostics() const;
+  tonic::Float64List computeLineLayoutMetricsForDiagnostics() const;
   Dart_Handle computeGlyphMetricsForDiagnostics() const;
   Dart_Handle getLineMetricsAt(int lineNumber, Dart_Handle constructor) const;
   size_t getNumberOfLines() const;

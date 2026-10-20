@@ -43,6 +43,8 @@ external CanvasKit? get windowFlutterCanvasKit;
 external JSPromise<CanvasKit>? get windowFlutterCanvasKitLoaded;
 
 extension type CanvasKit(JSObject _) implements JSObject {
+  external bool ConfigureFontRenderingDiagnostics(bool enabled);
+  external bool FontRenderingDiagnosticsEnabled();
   external SkBlendModeEnum get BlendMode;
   external SkPaintStyleEnum get PaintStyle;
   external SkStrokeCapEnum get StrokeCap;
@@ -2196,6 +2198,11 @@ extension type SkLineMetrics(JSObject _) implements JSObject {
   external double get lineHeightBranch;
   external double get nextLineBaselinePitch;
   external double get lineBoxHeight;
+  external double get availableWidth;
+  external double get advanceBeforeJustification;
+  external double get advanceAfterJustification;
+  external bool get isEllipsized;
+  external bool get isTrailingEmptyLine;
 }
 
 extension type SkGlyphClusterInfo(JSObject _) implements JSObject {

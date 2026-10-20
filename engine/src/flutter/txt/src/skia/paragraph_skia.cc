@@ -257,6 +257,11 @@ std::vector<LineMetrics>& ParagraphSkia::GetLineMetrics() {
       txtm.line_height_branch = skm.fLineHeightBranch;
       txtm.next_line_baseline_pitch = skm.fNextLineBaselinePitch;
       txtm.line_box_height = skm.fLineBoxHeight;
+      txtm.available_width = skm.fAvailableWidth;
+      txtm.advance_before_justification = skm.fAdvanceBeforeJustification;
+      txtm.advance_after_justification = skm.fAdvanceAfterJustification;
+      txtm.is_ellipsized = skm.fIsEllipsized;
+      txtm.is_trailing_empty_line = skm.fIsTrailingEmptyLine;
 
       for (const auto& sk_iter : skm.fLineMetrics) {
         const skt::StyleMetrics& sk_style_metrics = sk_iter.second;

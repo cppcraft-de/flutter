@@ -64,6 +64,11 @@ class LineMetrics {
   double line_height_branch = 0.0;
   double next_line_baseline_pitch = 0.0;
   double line_box_height = 0.0;
+  double available_width = 0.0;
+  double advance_before_justification = 0.0;
+  double advance_after_justification = 0.0;
+  bool is_ellipsized = false;
+  bool is_trailing_empty_line = false;
 
   // Mapping between text index ranges and the FontMetrics associated with
   // them. The first run will be keyed under start_index. The metrics here

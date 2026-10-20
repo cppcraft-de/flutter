@@ -9,6 +9,23 @@ part of dart.ui;
 // To change the sentinel value, search for "kTextHeightNone" in the source code.
 const double kTextHeightNone = 0.0;
 
+/// Enables font diagnostic collection before the first paragraph is created.
+/// Defaults to false (or the native startup environment WSC_FONT_DIAGNOSTICS).
+/// Repeating the same setting is allowed; changing it after startup throws.
+/// This setting does not affect shaping, layout, or painting.
+void configureFontRenderingDiagnostics({required bool enabled}) {
+  if (!_configureFontRenderingDiagnostics(enabled)) {
+    throw StateError('Font diagnostics must be configured before the first paragraph');
+  }
+}
+
+@Native<Bool Function(Bool)>(symbol: 'Paragraph::configureFontRenderingDiagnostics', isLeaf: true)
+external bool _configureFontRenderingDiagnostics(bool enabled);
+
+/// Whether font diagnostic collection is enabled for this engine process.
+@Native<Bool Function()>(symbol: 'Paragraph::fontRenderingDiagnosticsEnabled', isLeaf: true)
+external bool get fontRenderingDiagnosticsEnabled;
+
 /// Whether to use the italic type variation of glyphs in the font.
 ///
 /// Some modern fonts allow this to be selected in a more fine-grained manner.
@@ -3155,6 +3172,18 @@ abstract class Paragraph {
   /// pitch. Backends that do not expose these values return an empty list.
   Float64List computeDetailedLineMetricsForDiagnostics() => Float64List(0);
 
+  /// Returns indexed final line layout diagnostics, or an empty list if unavailable.
+  ///
+  /// The Float64 header is [version = 1, recordLength = 10, recordCount]. Each
+  /// record contains line number, UTF-16 start, end, end excluding whitespace,
+  /// end including newline, available width, advance before justification,
+  /// advance after justification, paragraph complete (0/1), and ellipsized (0/1).
+  /// Widths are paragraph logical pixels; advances exclude trailing ghost spaces
+  /// and generated ellipsis. Available width is the engine's actual layout width.
+  /// Paragraph complete means max-lines/ellipsis did not truncate the paragraph.
+  /// All records must be decoded using the version and shape, never guessed.
+  Float64List computeLineLayoutMetricsForDiagnostics() => Float64List(0);
+
   /// Returns engine-specific glyph metrics from the final laid-out paragraph.
   List<Object?> computeGlyphMetricsForDiagnostics() => const <Object?>[];
 
@@ -3393,6 +3422,12 @@ base class _NativeParagraph extends NativeFieldWrapperClass1 implements Paragrap
     symbol: 'Paragraph::computeDetailedLineMetricsForDiagnostics',
   )
   external Float64List computeDetailedLineMetricsForDiagnostics();
+
+  @override
+  @Native<Handle Function(Pointer<Void>)>(
+    symbol: 'Paragraph::computeLineLayoutMetricsForDiagnostics',
+  )
+  external Float64List computeLineLayoutMetricsForDiagnostics();
 
   @override
   @Native<Handle Function(Pointer<Void>)>(symbol: 'Paragraph::computeGlyphMetricsForDiagnostics')

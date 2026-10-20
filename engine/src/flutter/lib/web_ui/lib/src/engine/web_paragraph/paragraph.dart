@@ -1000,6 +1000,9 @@ class WebParagraph implements ui.Paragraph {
   Float64List computeDetailedLineMetricsForDiagnostics() => Float64List(0);
 
   @override
+  Float64List computeLineLayoutMetricsForDiagnostics() => Float64List(0);
+
+  @override
   List<Object?> computeGlyphMetricsForDiagnostics() => const <Object?>[];
 
   @override

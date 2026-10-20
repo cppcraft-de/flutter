@@ -18,7 +18,8 @@ import 'dart:ui'
         ParagraphConstraints,
         ParagraphStyle,
         PlaceholderAlignment,
-        TextStyle;
+        TextStyle,
+        fontRenderingDiagnosticsEnabled;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -33,6 +34,60 @@ import 'text_style.dart';
 
 export 'dart:ui' show LineMetrics;
 export 'package:flutter/services.dart' show TextRange, TextSelection;
+
+/// Indexed ranges and horizontal metrics from the actual laid-out paragraph.
+///
+/// Offsets use UTF-16. Widths use paragraph logical pixels and are unaffected by
+/// the TextPainter paint offset. The consumed range is [startIndex] through
+/// [endIncludingNewline], including wrap whitespace and hard-break separators.
+class DiagnosticLineLayoutMetrics {
+  /// Creates a validated final-line diagnostic record.
+  const DiagnosticLineLayoutMetrics({
+    required this.lineNumber,
+    required this.startIndex,
+    required this.endIndex,
+    required this.endExcludingWhitespaces,
+    required this.endIncludingNewline,
+    required this.availableWidth,
+    required this.advanceBeforeJustification,
+    required this.advanceAfterJustification,
+    required this.isComplete,
+    required this.isEllipsized,
+  });
+
+  /// Zero-based index in the paragraph's actual line list.
+  final int lineNumber;
+
+  /// First consumed UTF-16 offset.
+  final int startIndex;
+
+  /// End excluding the hard-break separator, including trailing whitespace.
+  final int endIndex;
+
+  /// End of the measured content, excluding trailing whitespace.
+  final int endExcludingWhitespaces;
+
+  /// End including consumed wrap whitespace and hard-break separators.
+  final int endIncludingNewline;
+
+  /// Actual width used by the paragraph engine for wrapping and justification.
+  final double availableWidth;
+
+  /// Exact content advance before justification, excluding trailing ghost spaces.
+  final double advanceBeforeJustification;
+
+  /// Exact content advance after justification, excluding trailing ghost spaces.
+  final double advanceAfterJustification;
+
+  /// Whether the paragraph was laid out without max-lines/ellipsis truncation.
+  ///
+  /// This paragraph-level value is repeated on each record. It does not mean
+  /// that this line consumes all paragraph text.
+  final bool isComplete;
+
+  /// Whether this line contains a generated ellipsis (excluded from advances).
+  final bool isEllipsized;
+}
 
 /// Detailed engine line metrics associated with a final laid-out line.
 class DiagnosticLineMetrics {
@@ -2138,8 +2193,83 @@ class TextPainter {
               .toList(growable: false);
   }
 
+  /// Translation from raw engine paragraph coordinates to this painter's output.
+  ///
+  /// Valid after [layout]. Public line metrics and glyph cluster bounds already
+  /// contain this offset; raw glyph diagnostics do not.
+  Offset get diagnosticPaintOffset {
+    assert(_debugAssertTextLayoutIsValid);
+    assert(!_debugNeedsRelayout);
+    return _layoutCache!.paintOffset;
+  }
+
+  /// Returns indexed diagnostics from the exact paragraph used for layout.
+  ///
+  /// Unsupported versions, malformed records, and unavailable backends return
+  /// an empty list. This query never reconstructs lines using caret positions.
+  List<DiagnosticLineLayoutMetrics> computeLineLayoutMetricsForDiagnostics() {
+    if (!ui.fontRenderingDiagnosticsEnabled) {
+      return const <DiagnosticLineLayoutMetrics>[];
+    }
+    assert(_debugAssertTextLayoutIsValid);
+    assert(!_debugNeedsRelayout);
+    // The bootstrap dart:ui summary may predate the patched engine API.
+    // ignore: undefined_method
+    final Float64List encoded = _layoutCache!.paragraph.computeLineLayoutMetricsForDiagnostics();
+    const recordLength = 10;
+    if (encoded.length < 3 ||
+        encoded[0] != 1 ||
+        encoded[1] != recordLength ||
+        !encoded[2].isFinite ||
+        encoded[2] < 0 ||
+        encoded[2] != encoded[2].truncateToDouble() ||
+        encoded.length != 3 + encoded[2] * recordLength ||
+        encoded[2] != _layoutCache!.lineMetrics.length) {
+      return const <DiagnosticLineLayoutMetrics>[];
+    }
+    final result = <DiagnosticLineLayoutMetrics>[];
+    for (var position = 3; position < encoded.length; position += recordLength) {
+      final List<double> indexes = encoded.sublist(position, position + 5);
+      if (indexes.any(
+            (double value) => !value.isFinite || value < 0 || value != value.truncateToDouble(),
+          ) ||
+          indexes[0] != result.length ||
+          indexes[1] > indexes[3] ||
+          indexes[3] > indexes[2] ||
+          indexes[2] > indexes[4] ||
+          encoded[position + 5].isNaN ||
+          encoded[position + 5] < 0 ||
+          !encoded[position + 6].isFinite ||
+          encoded[position + 6] < 0 ||
+          !encoded[position + 7].isFinite ||
+          encoded[position + 7] < 0 ||
+          (encoded[position + 8] != 0 && encoded[position + 8] != 1) ||
+          (encoded[position + 9] != 0 && encoded[position + 9] != 1)) {
+        return const <DiagnosticLineLayoutMetrics>[];
+      }
+      result.add(
+        DiagnosticLineLayoutMetrics(
+          lineNumber: indexes[0].toInt(),
+          startIndex: indexes[1].toInt(),
+          endIndex: indexes[2].toInt(),
+          endExcludingWhitespaces: indexes[3].toInt(),
+          endIncludingNewline: indexes[4].toInt(),
+          availableWidth: encoded[position + 5],
+          advanceBeforeJustification: encoded[position + 6],
+          advanceAfterJustification: encoded[position + 7],
+          isComplete: encoded[position + 8] == 1,
+          isEllipsized: encoded[position + 9] == 1,
+        ),
+      );
+    }
+    return result;
+  }
+
   /// Returns detailed metrics from the exact paragraph used for layout.
   List<DiagnosticLineMetrics> computeDetailedLineMetricsForDiagnostics() {
+    if (!ui.fontRenderingDiagnosticsEnabled) {
+      return const <DiagnosticLineMetrics>[];
+    }
     assert(_debugAssertTextLayoutIsValid);
     assert(!_debugNeedsRelayout);
     final _TextPainterLayoutCacheWithOffset layout = _layoutCache!;
@@ -2175,6 +2305,9 @@ class TextPainter {
 
   /// Returns detailed glyph metrics from the exact paragraph used for layout.
   List<DiagnosticGlyphMetrics> computeGlyphMetricsForDiagnostics() {
+    if (!ui.fontRenderingDiagnosticsEnabled) {
+      return const <DiagnosticGlyphMetrics>[];
+    }
     assert(_debugAssertTextLayoutIsValid);
     assert(!_debugNeedsRelayout);
     final _TextPainterLayoutCacheWithOffset layout = _layoutCache!;

@@ -65,6 +65,25 @@ EXPECTED_REVISIONS = {
     'harfbuzz': EXPECTED_HARFBUZZ_REVISION,
 }
 
+# A legacy checkout may already have the overlapping original patches applied.
+# Upgrade only the new overlays in that case; do not reverse/reset native layout.
+GROUP_UPGRADES = {
+    'text_layout': (
+        '0007-freetype-windows-static-loader.patch',
+        {('skia', 'src/ports/SkFontHost_FreeType.cpp'): 'defined(SK_BUILD_FOR_WIN) ||'},
+    ),
+    'diagnostics': (
+        '0004-runtime-and-indexed-line-diagnostics.patch',
+        {
+            ('skia', 'modules/skparagraph/include/FontDiagnostics.h'): 'FreezeFontDiagnostics',
+            ('skia', 'modules/skparagraph/src/Run.cpp'):
+                'FontDiagnosticsEnabled() && fRawPositions.empty()',
+            ('skia', 'modules/skparagraph/src/TextLine.h'): 'fAdvanceBeforeJustification',
+            ('skia', 'modules/canvaskit/externs.js'): 'ConfigureFontRenderingDiagnostics',
+        },
+    ),
+}
+
 
 def run_git(repo_dir, args, *, check=True, capture_output=False):
   command = [
@@ -102,8 +121,8 @@ def expand_groups(groups):
   return [group for group in PATCH_GROUP_ORDER if group in selected]
 
 
-def patch_group_already_applied(repo_dirs, group):
-  for (repo_name, relative_path), marker in GROUP_MARKERS[group].items():
+def markers_present(repo_dirs, markers):
+  for (repo_name, relative_path), marker in markers.items():
     marker_path = repo_dirs[repo_name] / relative_path
     if not marker_path.exists():
       return False
@@ -111,6 +130,16 @@ def patch_group_already_applied(repo_dirs, group):
     if marker not in contents:
       return False
   return True
+
+
+def patch_group_already_applied(repo_dirs, group):
+  return markers_present(repo_dirs, GROUP_MARKERS[group]) and (
+      group not in GROUP_UPGRADES or markers_present(repo_dirs, GROUP_UPGRADES[group][1])
+  )
+
+
+def patch_groups_already_applied(repo_dirs, groups):
+  return all(patch_group_already_applied(repo_dirs, group) for group in groups)
 
 
 def unapplied_groups(repo_dirs, groups):
@@ -196,6 +225,13 @@ def main(argv):
     return 0
 
   patch_files = selected_patch_files(patch_dir, groups_to_apply)
+  for group, (upgrade_name, _) in GROUP_UPGRADES.items():
+    if group in groups_to_apply and markers_present(repo_dirs, GROUP_MARKERS[group]):
+      legacy_files = set(selected_patch_files(patch_dir, [group]))
+      patch_files = [
+          (repo_name, patch) for repo_name, patch in patch_files
+          if (repo_name, patch) not in legacy_files or patch.name == upgrade_name
+      ]
 
   if not patch_files:
     print('No WSC font-rendering patch files found.')

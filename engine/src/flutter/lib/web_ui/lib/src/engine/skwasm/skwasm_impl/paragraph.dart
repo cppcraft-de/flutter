@@ -5,6 +5,7 @@
 import 'dart:convert';
 import 'dart:ffi';
 import 'dart:js_interop';
+import 'dart:typed_data';
 
 import 'package:ui/src/engine.dart';
 import 'package:ui/src/engine/skwasm/skwasm_impl.dart';
@@ -276,6 +277,9 @@ class SkwasmParagraph extends SkwasmObjectWrapper<RawParagraph> implements ui.Pa
 
   @override
   Float64List computeDetailedLineMetricsForDiagnostics() => Float64List(0);
+
+  @override
+  Float64List computeLineLayoutMetricsForDiagnostics() => Float64List(0);
 
   @override
   List<Object?> computeGlyphMetricsForDiagnostics() => const <Object?>[];

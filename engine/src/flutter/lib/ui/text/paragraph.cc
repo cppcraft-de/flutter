@@ -30,6 +30,14 @@ double Paragraph::width() {
   return m_paragraph_->GetMaxWidth();
 }
 
+bool Paragraph::configureFontRenderingDiagnostics(bool enabled) {
+  return skia::textlayout::ConfigureFontDiagnostics(enabled);
+}
+
+bool Paragraph::fontRenderingDiagnosticsEnabled() {
+  return skia::textlayout::FontDiagnosticsEnabled();
+}
+
 double Paragraph::height() {
   return m_paragraph_->GetHeight();
 }
@@ -212,7 +220,43 @@ tonic::Float64List Paragraph::computeLineMetrics() const {
   return result;
 }
 
+tonic::Float64List Paragraph::computeLineLayoutMetricsForDiagnostics() const {
+  if (!fontRenderingDiagnosticsEnabled()) {
+    return tonic::Float64List(Dart_NewTypedData(Dart_TypedData_kFloat64, 0));
+  }
+  const auto& metrics = m_paragraph_->GetLineMetrics();
+  // Header: schema version, record length, record count. See dart:ui contract.
+  constexpr size_t kRecordLength = 10;
+  tonic::Float64List result(Dart_NewTypedData(
+      Dart_TypedData_kFloat64, 3 + metrics.size() * kRecordLength));
+  size_t position = 0;
+  result[position++] = 1;
+  result[position++] = kRecordLength;
+  result[position++] = metrics.size();
+  const bool complete = !m_paragraph_->DidExceedMaxLines();
+  for (const auto& line : metrics) {
+    result[position++] = line.line_number;
+    // The source marks the empty line appended after a terminal hard break.
+    // Normalize only this diagnostic API; preserve public caret/range behavior.
+    const auto end = line.end_including_newline;
+    result[position++] = line.is_trailing_empty_line ? end : line.start_index;
+    result[position++] = line.is_trailing_empty_line ? end : line.end_index;
+    result[position++] =
+        line.is_trailing_empty_line ? end : line.end_excluding_whitespace;
+    result[position++] = line.end_including_newline;
+    result[position++] = line.available_width;
+    result[position++] = line.advance_before_justification;
+    result[position++] = line.advance_after_justification;
+    result[position++] = complete ? 1 : 0;
+    result[position++] = line.is_ellipsized ? 1 : 0;
+  }
+  return result;
+}
+
 tonic::Float64List Paragraph::computeDetailedLineMetricsForDiagnostics() const {
+  if (!fontRenderingDiagnosticsEnabled()) {
+    return tonic::Float64List(Dart_NewTypedData(Dart_TypedData_kFloat64, 0));
+  }
   std::vector<txt::LineMetrics> metrics = m_paragraph_->GetLineMetrics();
 
   // Groups of 13: raw ascent/descent/leading, effective
@@ -240,6 +284,9 @@ tonic::Float64List Paragraph::computeDetailedLineMetricsForDiagnostics() const {
 }
 
 Dart_Handle Paragraph::computeGlyphMetricsForDiagnostics() const {
+  if (!fontRenderingDiagnosticsEnabled()) {
+    return Dart_NewList(0);
+  }
   const auto glyphs = m_paragraph_->GetGlyphDiagnostics();
   Dart_Handle result = Dart_NewList(glyphs.size());
   for (intptr_t i = 0; i < static_cast<intptr_t>(glyphs.size()); ++i) {
