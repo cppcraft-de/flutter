@@ -666,6 +666,9 @@ abstract class Paragraph {
   List<TextBox> getBoxesForPlaceholders();
   List<LineMetrics> computeLineMetrics();
   Float64List computeDetailedLineMetricsForDiagnostics();
+
+  /// Versioned indexed final-line diagnostics; matches dart:ui's record contract.
+  Float64List computeLineLayoutMetricsForDiagnostics();
   List<Object?> computeGlyphMetricsForDiagnostics();
   LineMetrics? getLineMetricsAt(int lineNumber);
   int get numberOfLines;

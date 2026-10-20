@@ -24,6 +24,7 @@
 #include "testing/canvas_test.h"
 #include "testing/testing.h"
 #include "third_party/skia/modules/skparagraph/src/Run.h"
+#include "third_party/skia/modules/skunicode/include/SkUnicode_icu.h"
 #include "txt/platform.h"
 
 namespace flutter {
@@ -178,6 +179,21 @@ class PainterTestBase : public CanvasTestBase<T> {
     return paragraph;
   }
 
+  std::unique_ptr<skia::textlayout::Paragraph> makeJustifiedSkiaParagraph()
+      const {
+    skia::textlayout::ParagraphStyle style;
+    style.setTextAlign(skia::textlayout::TextAlign::kJustify);
+    skia::textlayout::TextStyle text_style;
+    text_style.setFontFamilies({SkString("ahem")});
+    text_style.setFontSize(14);
+    style.setTextStyle(text_style);
+    auto builder = skia::textlayout::ParagraphBuilder::make(
+        style, makeFontCollection()->CreateSktFontCollection(),
+        SkUnicodes::ICU::Make());
+    builder->addText("aa bb cc dd ee ff");
+    return builder->Build();
+  }
+
  private:
   std::shared_ptr<txt::FontCollection> makeFontCollection() const {
     auto f_collection = std::make_shared<txt::FontCollection>();
@@ -209,6 +225,113 @@ class PainterTestBase : public CanvasTestBase<T> {
 };
 
 using PainterTest = PainterTestBase<::testing::Test>;
+
+TEST_F(PainterTest, IndexedLineLayoutPreservesConsumedUtf16Ranges) {
+  fml::icu::InitializeICU("icudtl.dat");
+  for (const std::u16string text : {u"", u"a\n", u"a\r\n", u"a\u2028", u"a\n\n",
+                                    u"\n", u"aa  bb cc  \n\U0001F600 dd\n"}) {
+    auto paragraph = layoutText(makeStyle(), text);
+    paragraph->Layout(70);
+    const auto& lines = paragraph->GetLineMetrics();
+    if (text.empty()) {
+      EXPECT_TRUE(lines.empty());
+      continue;
+    }
+    ASSERT_GT(lines.size(), 1u);
+    size_t consumed = 0;
+    for (size_t i = 0; i < lines.size(); ++i) {
+      const auto& line = lines[i];
+      EXPECT_EQ(line.line_number, i);
+      // This marker comes from the actual appended line, not a guessed range.
+      const size_t start = line.is_trailing_empty_line
+                               ? line.end_including_newline
+                               : line.start_index;
+      EXPECT_EQ(start, consumed);
+      EXPECT_LE(line.start_index, line.end_excluding_whitespace);
+      EXPECT_LE(line.end_excluding_whitespace, line.end_index);
+      EXPECT_LE(line.end_index, line.end_including_newline);
+      consumed = line.end_including_newline;
+      EXPECT_EQ(line.is_trailing_empty_line, i + 1 == lines.size());
+    }
+    EXPECT_EQ(consumed, text.size());
+    EXPECT_TRUE(lines.back().is_trailing_empty_line);
+    EXPECT_EQ(lines.back().end_including_newline, text.size());
+    EXPECT_FALSE(paragraph->DidExceedMaxLines());
+  }
+}
+
+TEST_F(PainterTest, LineLayoutDiagnosticsPreserveJustifiedPainting) {
+  fml::icu::InitializeICU("icudtl.dat");
+  txt::ParagraphStyle paragraph_style;
+  paragraph_style.text_align = txt::TextAlign::justify;
+  auto paragraph =
+      layoutText(makeStyle(), u"aa bb cc dd ee ff", paragraph_style);
+  paragraph->Layout(100);
+  DisplayListBuilder before;
+  paragraph->Paint(&before, 0, 0);
+  const auto picture_before = before.Build();
+  const auto& lines = paragraph->GetLineMetrics();
+  ASSERT_GT(lines.size(), 1u);
+  if (skia::textlayout::FontDiagnosticsEnabled()) {
+    EXPECT_DOUBLE_EQ(lines.front().available_width, 100);
+    EXPECT_LT(lines.front().advance_before_justification, 100);
+    EXPECT_DOUBLE_EQ(lines.front().advance_after_justification, 100);
+    EXPECT_DOUBLE_EQ(lines.back().advance_before_justification,
+                     lines.back().advance_after_justification);
+    EXPECT_FALSE(lines.front().is_ellipsized);
+  }
+  DisplayListBuilder after;
+  paragraph->Paint(&after, 0, 0);
+  EXPECT_TRUE(picture_before->Equals(after.Build()));
+  // A second layout must capture the new pre-justification width, not stale
+  // data.
+  paragraph->Layout(10000);
+  const auto& relaid_out = paragraph->GetLineMetrics();
+  ASSERT_EQ(relaid_out.size(), 1u);
+  if (skia::textlayout::FontDiagnosticsEnabled()) {
+    EXPECT_DOUBLE_EQ(relaid_out.front().available_width, 10000);
+    EXPECT_DOUBLE_EQ(relaid_out.front().advance_before_justification,
+                     relaid_out.front().advance_after_justification);
+  }
+}
+
+TEST_F(PainterTest, LineLayoutDiagnosticsKeepPreJustificationAfterReformat) {
+  fml::icu::InitializeICU("icudtl.dat");
+  auto paragraph = makeJustifiedSkiaParagraph();
+  paragraph->layout(100);
+  std::vector<skia::textlayout::LineMetrics> first;
+  paragraph->getLineMetrics(first);
+  ASSERT_GT(first.size(), 1u);
+  paragraph->updateTextAlign(skia::textlayout::TextAlign::kJustify);
+  paragraph->layout(100);
+  std::vector<skia::textlayout::LineMetrics> reformatted;
+  paragraph->getLineMetrics(reformatted);
+  ASSERT_EQ(first.size(), reformatted.size());
+  if (skia::textlayout::FontDiagnosticsEnabled()) {
+    EXPECT_LT(first.front().fAdvanceBeforeJustification, 100);
+    EXPECT_DOUBLE_EQ(first.front().fAdvanceBeforeJustification,
+                     reformatted.front().fAdvanceBeforeJustification);
+    EXPECT_DOUBLE_EQ(reformatted.front().fAdvanceAfterJustification, 100);
+  }
+}
+
+TEST_F(PainterTest, LineLayoutDiagnosticsIdentifyTruncation) {
+  fml::icu::InitializeICU("icudtl.dat");
+  txt::ParagraphStyle paragraph_style;
+  paragraph_style.max_lines = 1;
+  paragraph_style.ellipsis = u"...";
+  auto paragraph =
+      layoutText(makeStyle(), u"aa bb cc dd ee ff", paragraph_style);
+  paragraph->Layout(100);
+  EXPECT_TRUE(paragraph->DidExceedMaxLines());
+  const auto& lines = paragraph->GetLineMetrics();
+  ASSERT_EQ(lines.size(), 1u);
+  if (skia::textlayout::FontDiagnosticsEnabled()) {
+    EXPECT_TRUE(lines.front().is_ellipsized);
+    EXPECT_DOUBLE_EQ(lines.front().advance_before_justification,
+                     lines.front().advance_after_justification);
+  }
+}
 
 TEST_F(PainterTest, DetailedLineMetricsComeFromFinalLayout) {
   auto paragraph = layoutText(makeStyle(), u"HHHH");

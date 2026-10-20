@@ -47,6 +47,8 @@ GROUP_MARKERS = {
             'For Worksheet Crafter it is essential that the ascender',
     },
     'diagnostics': {
+        ('skia', 'modules/skparagraph/src/TextLine.h'):
+            'fAdvanceBeforeJustification',
         ('skia', 'modules/skparagraph/src/ParagraphImpl.cpp'): ('getParagraphBottomCorrection'),
         ('skia', 'modules/skparagraph/include/Paragraph.h'):
             'fRawShapePosition',

@@ -220,6 +220,39 @@ tonic::Float64List Paragraph::computeLineMetrics() const {
   return result;
 }
 
+tonic::Float64List Paragraph::computeLineLayoutMetricsForDiagnostics() const {
+  if (!fontRenderingDiagnosticsEnabled()) {
+    return tonic::Float64List(Dart_NewTypedData(Dart_TypedData_kFloat64, 0));
+  }
+  const auto& metrics = m_paragraph_->GetLineMetrics();
+  // Header: schema version, record length, record count. See dart:ui contract.
+  constexpr size_t kRecordLength = 10;
+  tonic::Float64List result(Dart_NewTypedData(
+      Dart_TypedData_kFloat64, 3 + metrics.size() * kRecordLength));
+  size_t position = 0;
+  result[position++] = 1;
+  result[position++] = kRecordLength;
+  result[position++] = metrics.size();
+  const bool complete = !m_paragraph_->DidExceedMaxLines();
+  for (const auto& line : metrics) {
+    result[position++] = line.line_number;
+    // The source marks the empty line appended after a terminal hard break.
+    // Normalize only this diagnostic API; preserve public caret/range behavior.
+    const auto end = line.end_including_newline;
+    result[position++] = line.is_trailing_empty_line ? end : line.start_index;
+    result[position++] = line.is_trailing_empty_line ? end : line.end_index;
+    result[position++] =
+        line.is_trailing_empty_line ? end : line.end_excluding_whitespace;
+    result[position++] = line.end_including_newline;
+    result[position++] = line.available_width;
+    result[position++] = line.advance_before_justification;
+    result[position++] = line.advance_after_justification;
+    result[position++] = complete ? 1 : 0;
+    result[position++] = line.is_ellipsized ? 1 : 0;
+  }
+  return result;
+}
+
 tonic::Float64List Paragraph::computeDetailedLineMetricsForDiagnostics() const {
   if (!fontRenderingDiagnosticsEnabled()) {
     return tonic::Float64List(Dart_NewTypedData(Dart_TypedData_kFloat64, 0));

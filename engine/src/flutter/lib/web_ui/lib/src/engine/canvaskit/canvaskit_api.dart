@@ -2203,6 +2203,11 @@ extension type SkLineMetrics(JSObject _) implements JSObject {
   external double get lineHeightBranch;
   external double get nextLineBaselinePitch;
   external double get lineBoxHeight;
+  external double get availableWidth;
+  external double get advanceBeforeJustification;
+  external double get advanceAfterJustification;
+  external bool get isEllipsized;
+  external bool get isTrailingEmptyLine;
 }
 
 extension type SkGlyphClusterInfo(JSObject _) implements JSObject {

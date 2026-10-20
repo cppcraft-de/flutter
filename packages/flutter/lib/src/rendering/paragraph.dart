@@ -1103,6 +1103,21 @@ class RenderParagraph extends RenderBox
     return _textPainter.computeDetailedLineMetricsForDiagnostics();
   }
 
+  /// Returns indexed ranges and horizontal metrics from the painted paragraph.
+  List<DiagnosticLineLayoutMetrics> computeLineLayoutMetricsForDiagnostics() {
+    assert(!debugNeedsLayout);
+    _layoutTextWithConstraints(constraints);
+    return _textPainter.computeLineLayoutMetricsForDiagnostics();
+  }
+
+  /// Translation from raw engine paragraph coordinates to this render object's
+  /// local painted coordinates. Valid after layout.
+  Offset get diagnosticPaintOffset {
+    assert(!debugNeedsLayout);
+    _layoutTextWithConstraints(constraints);
+    return _textPainter.diagnosticPaintOffset;
+  }
+
   /// Returns detailed glyph metrics from the exact paragraph used to paint this
   /// render object.
   List<DiagnosticGlyphMetrics> computeGlyphMetricsForDiagnostics() {

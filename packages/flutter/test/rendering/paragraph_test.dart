@@ -4,7 +4,14 @@
 
 import 'dart:ui'
     as ui
-    show BoxHeightStyle, BoxWidthStyle, GlyphInfo, LineMetrics, Paragraph, TextBox, fontRenderingDiagnosticsEnabled;
+    show
+        BoxHeightStyle,
+        BoxWidthStyle,
+        GlyphInfo,
+        LineMetrics,
+        Paragraph,
+        TextBox,
+        fontRenderingDiagnosticsEnabled;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
@@ -125,6 +132,55 @@ void main() {
 
     final double height5 = paragraph.getFullHeightForCaret(const TextPosition(offset: 5));
     expect(height5, equals(10.0));
+  });
+
+  test('indexed diagnostics preserve consumed ranges and exact paragraph width', () {
+    const text = 'aa  bb cc  \n\u{1f600} dd\n';
+    final paragraph = RenderParagraph(
+      const TextSpan(
+        text: text,
+        style: TextStyle(fontFamily: 'Ahem', fontSize: 14),
+      ),
+      textDirection: TextDirection.ltr,
+      textAlign: TextAlign.justify,
+    );
+    layout(paragraph, constraints: BoxConstraints.tight(const Size(100, 300)));
+    final Size before = paragraph.size;
+    final List<DiagnosticLineLayoutMetrics> lines = paragraph
+        .computeLineLayoutMetricsForDiagnostics();
+    expect(paragraph.size, before);
+    expect(paragraph.debugNeedsLayout, isFalse);
+    if (!ui.fontRenderingDiagnosticsEnabled) {
+      expect(lines, isEmpty);
+      return;
+    }
+    expect(lines.length, paragraph.computeLineMetricsForDiagnostics().length);
+    var consumed = 0;
+    for (final line in lines) {
+      expect(line.startIndex, consumed);
+      expect(line.availableWidth, 100);
+      expect(line.isComplete, isTrue);
+      expect(line.isEllipsized, isFalse);
+      consumed = line.endIncludingNewline;
+    }
+    expect(consumed, text.length);
+    expect(lines.last.startIndex, text.length);
+    expect(lines.first.advanceBeforeJustification, lessThan(lines.first.advanceAfterJustification));
+    expect(lines.first.advanceAfterJustification, 100);
+  });
+
+  test('paint offset relates raw paragraph and render-local coordinates', () {
+    final painter = TextPainter(
+      text: const TextSpan(
+        text: 'AB',
+        style: TextStyle(fontFamily: 'Ahem', fontSize: 14),
+      ),
+      textDirection: TextDirection.ltr,
+      textAlign: TextAlign.right,
+    )..layout(minWidth: 200);
+    addTearDown(painter.dispose);
+    expect(painter.diagnosticPaintOffset.dx, greaterThan(0));
+    expect(painter.computeLineMetrics().single.left, painter.diagnosticPaintOffset.dx);
   });
 
   test('read-only paragraph diagnostics expose the painted layout', () {

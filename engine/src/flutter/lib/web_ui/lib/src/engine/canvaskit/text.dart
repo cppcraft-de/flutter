@@ -1047,6 +1047,37 @@ class CkParagraph implements ui.Paragraph {
   }
 
   @override
+  Float64List computeLineLayoutMetricsForDiagnostics() {
+    if (!fontDiagnosticsEnabled) {
+      return Float64List(0);
+    }
+    assert(!_disposed, 'Paragraph has been disposed.');
+    final List<SkLineMetrics> metrics = skiaObject.getLineMetrics();
+    const recordLength = 10;
+    final result = Float64List(3 + metrics.length * recordLength);
+    result[0] = 1;
+    result[1] = recordLength.toDouble();
+    result[2] = metrics.length.toDouble();
+    var position = 3;
+    final bool complete = !skiaObject.didExceedMaxLines();
+    for (final line in metrics) {
+      result[position++] = line.lineNumber;
+      // Normalize the explicitly marked terminal empty line only in this API.
+      final double end = line.endIncludingNewline;
+      result[position++] = line.isTrailingEmptyLine ? end : line.startIndex;
+      result[position++] = line.isTrailingEmptyLine ? end : line.endIndex;
+      result[position++] = line.isTrailingEmptyLine ? end : line.endExcludingWhitespaces;
+      result[position++] = line.endIncludingNewline;
+      result[position++] = line.availableWidth;
+      result[position++] = line.advanceBeforeJustification;
+      result[position++] = line.advanceAfterJustification;
+      result[position++] = complete ? 1 : 0;
+      result[position++] = line.isEllipsized ? 1 : 0;
+    }
+    return result;
+  }
+
+  @override
   Float64List computeDetailedLineMetricsForDiagnostics() {
     if (!fontDiagnosticsEnabled) {
       return Float64List(0);
