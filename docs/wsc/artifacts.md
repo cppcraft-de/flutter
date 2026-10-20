@@ -180,6 +180,10 @@ publication, not release approval or another source/version identity.
   receipt. After every new/replaced file is uploaded, it streams that file
   through the anonymous download URL and verifies SHA-256. This costs one full
   download per newly published file, not per normal reused binary.
+- Download verification logs the URL and retries transient connection failures,
+  timeouts, interrupted reads and HTTP 404/408/429/500/502/503/504 up to six
+  attempts, five seconds apart. Authentication, TLS certificate and integrity
+  failures are not retried. These retries do not repeat uploads or rebuilds.
 - Only after successful verification is the receipt saved with no pending
   paths. A failed/interrupted publication blocks ordinary publication for that
   engine until reviewed. Unknown files, malformed receipts, unavailable recorded

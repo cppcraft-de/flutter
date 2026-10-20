@@ -6,13 +6,99 @@ import io
 import json
 import os
 from pathlib import Path
+import ssl
 import tempfile
 import threading
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 import urllib.error
 
 import publish_engine_artifacts as publish
+
+
+class DownloadRetryTest(unittest.TestCase):
+    url = "https://downloads.example/runtime.zip"
+    expected = {"size": 3, "sha256": publish.hashlib.sha256(b"zip").hexdigest()}
+
+    def response(self):
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.status = 200
+        response.headers = {"Content-Length": "3"}
+        response.read.side_effect = [b"zip", b""]
+        return response
+
+    def verify(self, full=False):
+        publish.verify_download("https://downloads.example", "runtime.zip", self.expected, full=full)
+
+    def test_transient_failures_retry_then_succeed(self):
+        errors = [
+            urllib.error.URLError(ConnectionResetError(54, "Connection reset by peer")),
+            ConnectionResetError("reset"),
+            TimeoutError("timed out"),
+            *[urllib.error.HTTPError(self.url, status, "temporary", {}, None)
+              for status in (404, 408, 429, 500, 502, 503, 504)],
+        ]
+        for error in errors:
+            with self.subTest(error=error), redirect_stdout(io.StringIO()) as log, \
+                    patch.object(publish.urllib.request, "urlopen",
+                                 side_effect=[error, self.response()]) as open_url, \
+                    patch.object(publish.time, "sleep") as sleep:
+                self.verify()
+                self.assertEqual(open_url.call_count, 2)
+                sleep.assert_called_once_with(5)
+                self.assertIn(self.url, log.getvalue())
+                self.assertIn("retrying", log.getvalue())
+
+    def test_retry_budget_is_bounded(self):
+        with redirect_stdout(io.StringIO()), \
+                patch.object(publish.urllib.request, "urlopen",
+                             side_effect=TimeoutError("timed out")) as open_url, \
+                patch.object(publish.time, "sleep") as sleep:
+            with self.assertRaises(TimeoutError):
+                self.verify()
+            self.assertEqual(open_url.call_count, 6)
+            self.assertEqual(sleep.call_count, 5)
+
+    def test_interrupted_get_restarts_hash_and_closes_response(self):
+        for error in (ConnectionResetError("reset"), TimeoutError("timed out"),
+                      publish.IncompleteRead(b"i", 1)):
+            interrupted = self.response()
+            interrupted.read.side_effect = [b"z", error]
+            with self.subTest(error=error), redirect_stdout(io.StringIO()), \
+                    patch.object(publish.urllib.request, "urlopen",
+                                 side_effect=[interrupted, self.response()]) as open_url, \
+                    patch.object(publish.time, "sleep"):
+                self.verify(full=True)
+                self.assertEqual(open_url.call_count, 2)
+                interrupted.__exit__.assert_called_once()
+
+    def test_permanent_errors_fail_without_retry(self):
+        errors = [
+            urllib.error.HTTPError(self.url, status, "permanent", {}, None)
+            for status in (400, 401, 403)
+        ] + [urllib.error.URLError(ssl.SSLCertVerificationError("bad certificate"))]
+        for error in errors:
+            with self.subTest(error=error), redirect_stdout(io.StringIO()), \
+                    patch.object(publish.urllib.request, "urlopen", side_effect=error) as open_url, \
+                    patch.object(publish.time, "sleep") as sleep:
+                with self.assertRaises(type(error)):
+                    self.verify()
+                open_url.assert_called_once()
+                sleep.assert_not_called()
+
+    def test_integrity_mismatches_fail_without_retry(self):
+        for size, content in (("4", b"zip"), ("3", b"bad")):
+            response = self.response()
+            response.headers["Content-Length"] = size
+            response.read.side_effect = [content, b""]
+            with self.subTest(size=size, content=content), redirect_stdout(io.StringIO()), \
+                    patch.object(publish.urllib.request, "urlopen", return_value=response) as open_url, \
+                    patch.object(publish.time, "sleep") as sleep:
+                with self.assertRaisesRegex(ValueError, "differs"):
+                    self.verify(full=True)
+                open_url.assert_called_once()
+                sleep.assert_not_called()
 
 
 class PublicationTest(unittest.TestCase):

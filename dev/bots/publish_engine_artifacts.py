@@ -8,6 +8,7 @@ anonymous download verification. No remote deletion or automatic repair.
 
 import argparse
 import hashlib
+from http.client import IncompleteRead
 import json
 from pathlib import Path
 import re
@@ -93,6 +94,7 @@ def verify_download(base: str, relative: str, expected: dict, *, full: bool) -> 
     # and JARs. Reused binaries need only HEAD; reused POM/JSON metadata is hashed.
     full = full or relative.endswith((".pom", ".json"))
     request = urllib.request.Request(object_url(base, relative), method="GET" if full else "HEAD")
+    print(f"Verify download ({request.method}): {request.full_url}", flush=True)
     for attempt in range(6):
         try:
             with urllib.request.urlopen(request, timeout=120) as response:
@@ -112,10 +114,18 @@ def verify_download(base: str, relative: str, expected: dict, *, full: bool) -> 
                         raise ValueError(f"Published artifact SHA-256 differs: {relative}; "
                                          f"expected size={expected['size']}; received={received}; {details}")
             return
-        except urllib.error.HTTPError as error:
-            error.close()
-            if error.code != 404 or attempt == 5:
+        except (urllib.error.URLError, ConnectionError, TimeoutError, IncompleteRead) as error:
+            if isinstance(error, urllib.error.HTTPError):
+                error.close()
+                retryable = error.code in (404, 408, 429, 500, 502, 503, 504)
+            else:
+                reason = error.reason if isinstance(error, urllib.error.URLError) else error
+                retryable = isinstance(reason, (ConnectionError, TimeoutError, IncompleteRead))
+            # Do not mask authentication, TLS configuration or integrity errors.
+            if not retryable or attempt == 5:
                 raise
+            print(f"Download verification attempt {attempt + 1}/6 failed: {error}; "
+                  f"retrying in 5s: {request.full_url}", flush=True)
             time.sleep(5)
 
 
