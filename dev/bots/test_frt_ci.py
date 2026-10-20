@@ -150,10 +150,11 @@ class FrtCiTest(unittest.TestCase):
             return subprocess.CompletedProcess(command, 0)
 
         with patch.object(frt_ci.subprocess, "check_output", return_value="b" * 40), \
-                patch.object(frt_ci.subprocess, "run", side_effect=fake_run), \
+                patch.object(frt_ci, "run_logged", side_effect=fake_run), \
                 patch.object(frt_ci, "web_browser", return_value=self.root / "edge.exe"), \
-                patch.object(frt_ci, "download_baseline"), redirect_stdout(io.StringIO()):
+                patch.object(frt_ci, "download_baseline"), redirect_stdout(io.StringIO()) as console:
             self.assertEqual(frt_ci.run_comparison(args), 0)
+        self.assertIn('FRT windows result: {"status": "passed", "exit_code": 0}', console.getvalue())
         self.assertTrue((output / "identity.json").is_file())
         self.assertTrue((output / "jenkins-result.json").is_file())
         self.assertFalse(list(self.root.glob("frt-input-*")))
@@ -193,14 +194,16 @@ class FrtCiTest(unittest.TestCase):
 
         with patch.dict(os.environ, {"GRADLE_USER_HOME": str(shared)}), \
                 patch.object(frt_ci.subprocess, "check_output", return_value="b" * 40), \
-                patch.object(frt_ci.subprocess, "run", side_effect=run), \
-                patch.object(frt_ci, "download_baseline"), redirect_stdout(io.StringIO()):
+                patch.object(frt_ci, "run_logged", side_effect=run), \
+                patch.object(frt_ci, "download_baseline"), redirect_stdout(io.StringIO()) as console:
             for index in range(2):
                 failure[0] = bool(index)
                 args = argparse.Namespace(plan=plan_path, host="macos", frt=self.root / "frt",
                     revision="b" * 40, output=self.root / f"evidence-{index}", sdk_directory=sdk)
                 self.assertEqual(frt_ci.run_comparison(args), 2 if failure[0] else 1)
                 self.assertFalse(homes[-1].exists())
+        self.assertIn('FRT macos result: {"status": "failed", "exit_code": 1}', console.getvalue())
+        self.assertIn('"error": "client could not start"', console.getvalue())
         self.assertNotEqual(homes[0], homes[1])
         self.assertEqual((shared / "keep.jar").read_bytes(), b"agent cache")
         self.assertFalse(list(self.root.glob("frt-input-*")))
@@ -213,6 +216,55 @@ class FrtCiTest(unittest.TestCase):
         ]
         with patch("sys.argv", command), redirect_stdout(io.StringIO()):
             self.assertEqual(frt_ci.main(), 2)
+
+    def test_logged_child_streams_stdout_stderr_and_preserves_exit_codes(self):
+        # Real tiny child processes: no uv, SDKs or network required.
+        script = (
+            "import os, sys; "
+            "print('stdout caf\\u00e9'); "
+            "print('stderr', file=sys.stderr); "
+            "print(os.environ['FRT_TEST_VALUE']); "
+            "sys.stdout.buffer.write(b'tail\\xff'); "
+            "sys.exit(2)"
+        )
+        for check in (False, True):
+            with self.subTest(check=check), (self.root / "runner.log").open(
+                    "w+", encoding="utf-8") as log, redirect_stdout(io.StringIO()) as console:
+                command = [sys.executable, "-c", script]
+                with patch.dict(os.environ, {"FRT_TEST_VALUE": "environment preserved"}):
+                    if check:
+                        with self.assertRaises(subprocess.CalledProcessError) as error:
+                            frt_ci.run_logged(command, cwd=self.root, log=log, host="windows", check=True)
+                        self.assertEqual(error.exception.returncode, 2)
+                    else:
+                        result = frt_ci.run_logged(command, cwd=self.root, log=log, host="windows")
+                        self.assertEqual(result.returncode, 2)
+                log.seek(0)
+                self.assertEqual(log.read(), "stdout caf\u00e9\nstderr\nenvironment preserved\ntail\ufffd")
+                self.assertEqual(console.getvalue(),
+                    "[FRT windows] stdout caf\u00e9\n[FRT windows] stderr\n"
+                    "[FRT windows] environment preserved\n[FRT windows] tail\ufffd")
+
+    def test_logged_output_is_forwarded_before_child_finishes(self):
+        log = io.StringIO()
+        console = io.StringIO()
+
+        def lines():
+            yield "progress\n"
+            self.assertEqual(log.getvalue(), "progress\n")
+            self.assertEqual(console.getvalue(), "[FRT macos] progress\n")
+            yield "done\n"
+
+        with patch.object(frt_ci.subprocess, "Popen") as popen, redirect_stdout(console):
+            process = popen.return_value.__enter__.return_value
+            process.stdout = lines()
+            process.wait.return_value = 0
+            result = frt_ci.run_logged(["test"], cwd=self.root, log=log, host="macos",
+                                      env={"FRT_TEST_VALUE": "custom"})
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(popen.call_args.kwargs["env"], {
+                "FRT_TEST_VALUE": "custom", "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8",
+            })
 
     def report_args(self, hosts=("windows", "macos")):
         plan = self.root / "plan.json"

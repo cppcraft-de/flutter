@@ -27,6 +27,24 @@ def write_json(path: Path, value: dict) -> None:
     path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
 
 
+def run_logged(command, *, cwd, log, host, env=None, check=False):
+    """Stream merged child output to retained evidence and the emailed console."""
+    environment = dict(os.environ if env is None else env)
+    environment.update(PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8")
+    with subprocess.Popen(
+        command, cwd=cwd, env=environment, stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
+    ) as process:
+        for line in process.stdout:
+            log.write(line)
+            log.flush()
+            print(f"[FRT {host}] {line}", end="", flush=True)
+        result = subprocess.CompletedProcess(command, process.wait())
+    if check:
+        result.check_returncode()
+    return result
+
+
 def public_url(value: str) -> None:
     parsed = urlsplit(value)
     if (parsed.scheme not in ("http", "https") or not parsed.hostname
@@ -140,7 +158,8 @@ def run_comparison(args) -> int:
         })
         print(f"FRT {args.host}: preparing pinned tools and verified baseline SDK", flush=True)
         with (output / "runner.log").open("w", encoding="utf-8") as log:
-            subprocess.run([sys.executable, "-m", "uv", "sync", "--locked"], cwd=frt, stdout=log, stderr=subprocess.STDOUT, check=True)
+            run_logged([sys.executable, "-m", "uv", "sync", "--locked"],
+                       cwd=frt, log=log, host=args.host, check=True)
             # Only this owned temporary input directory is removed. Engine
             # workspaces, candidate ZIPs and result bundles are never cleaned.
             with tempfile.TemporaryDirectory(prefix="frt-input-", dir=output.parent) as temporary:
@@ -169,19 +188,21 @@ def run_comparison(args) -> int:
                 ]
                 if "web" in HOST_TARGETS[args.host]:
                     command.extend(["--browser", str(web_browser())])
-                print(f"FRT {args.host}: building/capturing both clients; details in runner.log", flush=True)
-                completed = subprocess.run(command, cwd=frt, env=environment, stdout=log, stderr=subprocess.STDOUT)
+                print(f"FRT {args.host}: building/capturing both clients; output also retained in runner.log", flush=True)
+                completed = run_logged(command, cwd=frt, env=environment, log=log, host=args.host)
         # FRT compare owns dependency compatibility; FRT report owns result
         # validation. Do not duplicate either policy in this Jenkins adapter.
         code = completed.returncode if completed.returncode in (0, 1, 2) else 2
         result = {"status": {0: "passed", 1: "failed", 2: "error"}[code], "exit_code": code}
         write_json(output / "jenkins-result.json", result)
+        print(f"FRT {args.host} result: {json.dumps(result)}", flush=True)
         return code
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
         # Summarize the cause in emailed console logs; retain full build logs
         # privately. No credential values are supplied to this adapter.
-        write_json(output / "jenkins-result.json", {"status": "error", "exit_code": 2, "error": str(error)})
-        print(f"FRT failed: {error}; see private jenkins-result.json and runner.log", flush=True)
+        result = {"status": "error", "exit_code": 2, "error": str(error)}
+        write_json(output / "jenkins-result.json", result)
+        print(f"FRT {args.host} result: {json.dumps(result)}", flush=True)
         return 2
 
 
@@ -217,6 +238,9 @@ def aggregate_reports(args) -> int:
 
 
 def main() -> int:
+    # Jenkins consumes UTF-8, including child diagnostics on Windows.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     plan = commands.add_parser("plan")

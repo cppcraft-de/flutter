@@ -170,6 +170,14 @@ stashes only result JSON and comparison JSON/HTML with their relative structure.
 No SDKs, client bundles or databases are transferred. Each capture requires a
 fresh results directory; previous attempts are never silently reused.
 
+Tool setup and comparison stdout/stderr stream to the Jenkins console with an
+`[FRT <host>]` prefix and are also retained in `runner.log`. The adapter prints
+its final `jenkins-result.json` status/error summary to the console. Existing
+compressed-console emails therefore include these diagnostics without extra
+attachments; Python child output is unbuffered. Output buffered internally by
+other tools may still arrive in batches. Comparison HTML and other report files
+remain private Jenkins artifacts, not email attachments or public SDK payloads.
+
 Global `post` aggregates these reports on `flutter_win`, even after a host fails.
 It uses the same resolved FRT commit and `python -m uv sync --locked`, but needs no running
 FRT server, desktop, SDK or emulator for reporting. The expected target list
