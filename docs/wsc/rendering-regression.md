@@ -86,7 +86,7 @@ Windows and Web captures run sequentially on the Windows packaging agent;
 macOS capture runs on the Mac. Android and iOS are not captured.
 Persistent engine paths, Ninja outputs and dependency-sync policy are unchanged.
 The helper verifies the baseline checksum, records candidate/fixture checksums,
-runs `uv sync --locked`, then calls `uv run --locked font-rendering-regression
+runs `python -m uv sync --locked`, then calls `python -m uv run --locked font-rendering-regression
 compare`. FRT extracts the ZIPs, builds isolated clients, creates a fresh database,
 imports the fixture, captures both runs and compares their explicit IDs.
 
@@ -108,10 +108,14 @@ targets are Windows/macOS/Web, **not Android**, so they do not exercise Android
 Maven resolution; this isolation takes effect for Android when that target is
 enabled. Fresh-cache Android app acceptance remains a separate release check.
 
-Agents need `uv` on their actual process PATH, Python 3.14+ available to uv, the
-native app-build toolchain and a working graphical desktop session. The Jenkins
-wrapper uses the existing `WINDOWS_PYTHON` or `python3`; FRT's environment is
-managed by uv. A 1280 x 1024 desktop is the intended commissioning environment,
+Agents need the `uv` Python package installed for the interpreter running the
+adapter (`WINDOWS_PYTHON` on Windows, `python3` on macOS). Install once as the
+agent account using that interpreter's `-m pip install uv`, then verify
+`-m uv --version` from a Jenkins job. The adapter invokes `sys.executable -m uv`;
+no standalone `uv` executable on PATH or manual venv activation is required.
+FRT's project environment remains managed by uv. Python 3.14+ must be available
+to uv, along with the native app-build toolchain and a working graphical desktop
+session. A 1280 x 1024 desktop is the intended commissioning environment,
 but capture at that resolution still needs runtime validation. `dpi: 192` sets
 capture resolution, not display scale or available window size. Keep display
 settings and rendering flags consistent for both clients. Serialize GUI tests
@@ -167,7 +171,7 @@ No SDKs, client bundles or databases are transferred. Each capture requires a
 fresh results directory; previous attempts are never silently reused.
 
 Global `post` aggregates these reports on `flutter_win`, even after a host fails.
-It uses the same resolved FRT commit and `uv sync --locked`, but needs no running
+It uses the same resolved FRT commit and `python -m uv sync --locked`, but needs no running
 FRT server, desktop, SDK or emulator for reporting. The expected target list
 comes from the resolved plan, never from the subset of successful captures.
 Missing stashes, unexpected exit codes or missing ZIP/XML are failures. Operator

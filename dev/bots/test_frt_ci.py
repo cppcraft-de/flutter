@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -130,6 +131,7 @@ class FrtCiTest(unittest.TestCase):
                                   revision="b" * 40, output=output, sdk_directory=sdk)
 
         def fake_run(command, **kwargs):
+            self.assertEqual(command[:3], [sys.executable, "-m", "uv"])
             if "compare" in command:
                 gradle = Path(kwargs["env"]["GRADLE_USER_HOME"])
                 self.assertTrue(gradle.is_dir())
@@ -177,6 +179,7 @@ class FrtCiTest(unittest.TestCase):
         failure = [False]
 
         def run(command, **kwargs):
+            self.assertEqual(command[:3], [sys.executable, "-m", "uv"])
             if "compare" in command:
                 home = Path(kwargs["env"]["GRADLE_USER_HOME"])
                 homes.append(home)
@@ -220,6 +223,7 @@ class FrtCiTest(unittest.TestCase):
 
     def fake_report(self, args, code=0, xml=True):
         def run(command, **kwargs):
+            self.assertEqual(command[:3], [sys.executable, "-m", "uv"])
             if "report" in command:
                 self.assertIn("--locked", command)
                 self.assertIn("--format", command)

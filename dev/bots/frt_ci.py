@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from urllib.parse import urlsplit
 from urllib.request import urlopen
@@ -139,7 +140,7 @@ def run_comparison(args) -> int:
         })
         print(f"FRT {args.host}: preparing pinned tools and verified baseline SDK", flush=True)
         with (output / "runner.log").open("w", encoding="utf-8") as log:
-            subprocess.run(["uv", "sync", "--locked"], cwd=frt, stdout=log, stderr=subprocess.STDOUT, check=True)
+            subprocess.run([sys.executable, "-m", "uv", "sync", "--locked"], cwd=frt, stdout=log, stderr=subprocess.STDOUT, check=True)
             # Only this owned temporary input directory is removed. Engine
             # workspaces, candidate ZIPs and result bundles are never cleaned.
             with tempfile.TemporaryDirectory(prefix="frt-input-", dir=output.parent) as temporary:
@@ -160,7 +161,7 @@ def run_comparison(args) -> int:
                 baseline_zip = Path(temporary) / "baseline.zip"
                 download_baseline(baseline["url"], baseline["sha256"], baseline_zip)
                 command = [
-                    "uv", "run", "--locked", "font-rendering-regression", "compare",
+                    sys.executable, "-m", "uv", "run", "--locked", "font-rendering-regression", "compare",
                     "--baseline-sdk", str(baseline_zip), "--specimen-sdk", str(candidate),
                     "--targets", *HOST_TARGETS[args.host], "--fixture", str(fixture),
                     "--build-mode", plan["build_mode"], "--dpi", str(plan["dpi"]),
@@ -194,8 +195,8 @@ def aggregate_reports(args) -> int:
     output = args.output.resolve()
     # Never accept a ZIP/XML left by an earlier attempt.
     output.mkdir(parents=True, exist_ok=False)
-    subprocess.run(["uv", "sync", "--locked"], cwd=frt, check=True)
-    command = ["uv", "run", "--locked", "font-rendering-regression", "report", "--format", "zip"]
+    subprocess.run([sys.executable, "-m", "uv", "sync", "--locked"], cwd=frt, check=True)
+    command = [sys.executable, "-m", "uv", "run", "--locked", "font-rendering-regression", "report", "--format", "zip"]
     codes = []
     for host in hosts:
         source = args.inputs.resolve() / host
