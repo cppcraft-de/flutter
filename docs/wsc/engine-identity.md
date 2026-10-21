@@ -6,6 +6,13 @@ For the commands used to prepare a release, see
 [engine pin maintenance](releases.md#engine-identity). For server paths and
 packaging details, see [artifacts and SDK packaging](artifacts.md).
 
+- [Work on the engine locally](#local-engine-development).
+- [Prepare a distributable candidate](#preparing-a-distributable-candidate).
+- [Look up the version fields](#where-the-ids-are-stored).
+- [Diagnose an identity or download failure](#checks-and-troubleshooting).
+
+The historical Maven failure and CI branch-name explanation are at the end.
+
 ## Start with the two things we distribute
 
 A Flutter application uses both the **framework** (Dart libraries and tools) and
@@ -81,6 +88,71 @@ of the download ID. Developers normally leave it unset. Setting it to make a
 missing download disappear can select a different engine and hide a packaging
 mistake. Editing generated cache stamps is likewise not a durable repair: the
 launcher can regenerate them.
+
+## Local engine development
+
+A source checkout uses the published engine selected by the tracked
+`bin/internal/engine.version` to bootstrap its Dart SDK and tooling. Keep that
+pin at a published, compatible version while making local commits. The launcher
+uses the tracked pin rather than recalculating it from each local commit.
+
+Build the modified engine locally and select its outputs with `--local-engine`
+and `--local-engine-host`, optionally supplying `--local-engine-src-path`.
+See [using the Flutter tool with a local engine](../tool/README.md).
+These local builds do not need to be uploaded to the mirror before using the
+IDE or running an app with the local engine.
+
+The bootstrap happens before the Flutter tool processes `--local-engine`.
+Changing the pin to an unpublished ID can therefore prevent tool and IDE startup
+even when local engine outputs exist. Changes to Dart itself or exposed
+`dart:ui` APIs may also require a matching local SDK and generated API files;
+keeping the bootstrap pin does not guarantee compatibility with arbitrary changes.
+
+## Preparing a distributable candidate
+
+The following steps apply when preparing engine artifacts and an SDK for
+publication, including untagged Jenkins candidates. They are not required for
+each local development commit.
+
+1. Commit engine, dependency, and patch-file changes first. The hash is based on
+   committed inputs; saving a source edit without committing it is insufficient.
+2. Follow [engine pin maintenance](releases.md#engine-identity) to calculate and
+   commit the new pin. A framework-only change normally needs no pin change.
+3. Build a new candidate SDK with Jenkins. A stale pin now fails preflight even
+   for an untagged incremental build. Do not bypass that check with a guessed ID.
+4. Test an application using the extracted SDK. Android acceptance should use
+   an isolated Gradle dependency cache so previously downloaded libraries cannot
+   hide missing server files. See the [SDK acceptance steps](../../DEPLOYMENT.MD#5-accept-the-sdks-before-distribution).
+5. Run the required rendering comparison separately. Successful publication and
+   compilation do not establish font-rendering equivalence.
+
+Existing SDKs and accepted artifacts retain their original IDs and paths. This
+transition requires a new SDK and its matching published artifact tree; editing
+an old SDK's pin alone cannot supply the missing artifacts.
+
+## Checks and troubleshooting
+
+| Failure | Meaning and next step |
+| --- | --- |
+| Preflight says the pin differs from the content hash | Derive the pin again after committing engine inputs. Check the selected source before publishing. |
+| Collector rejects `args.gn` revision or hash | Build output does not describe the selected source/context. Inspect the checkout and build invocation; do not relabel stale files. |
+| Maven 404 | Compare the exact requested hash, directory, filename, and POM version. Confirm the Android stage published that mode/ABI to the SDK's download root. |
+| Gradle rejects an HTTP repository | Transport configuration, separate from version identity. Use HTTPS or the documented local-testing opt-in. |
+| SDK metadata check fails | The packaged pin, downloaded engine record, or generated version metadata disagree. Inspect packaging inputs and caches instead of hand-editing the stamps. |
+
+The pipeline checks source identity, generated outputs, POM coordinates, and
+packaged metadata. Publication hashes new downloads through the anonymous
+endpoint; reused artifacts are checked against the receipt rather than new
+local bytes. These checks establish publication
+consistency; they do not replace an extracted-SDK app build or device testing.
+
+Implementation and regression tests live in `dev/bots/engine_identity.py`,
+`collect_engine_artifacts.py`, `verify_maven_artifacts.py`, and
+`validate_sdk_identity.py`, with corresponding `test_*.py` files and
+`test_engine_identity.groovy`. Upstream's
+[artifact documentation](../tool/Engine-artifacts.md) and
+[Android build definitions](../../engine/src/flutter/shell/platform/android/BUILD.gn)
+explain the underlying conventions.
 
 ## What went wrong, and why the fix follows upstream
 
@@ -169,68 +241,3 @@ it adds `-c core.multiPackIndex=false` to the `git ls-tree` command when Git
 identifies itself as Apple Git. This handles an older Xcode Git reading an index
 written by newer Git; it changes neither repository nor machine configuration.
 See [upstream issue 184376](https://github.com/flutter/flutter/issues/184376).
-
-## Local engine development
-
-A source checkout uses the published engine selected by the tracked
-`bin/internal/engine.version` to bootstrap its Dart SDK and tooling. Keep that
-pin at a published, compatible version while making local commits. The launcher
-uses the tracked pin rather than recalculating it from each local commit.
-
-Build the modified engine locally and select its outputs with `--local-engine`
-and `--local-engine-host`, optionally supplying `--local-engine-src-path`.
-See [using the Flutter tool with a local engine](../tool/README.md).
-These local builds do not need to be uploaded to the mirror before using the
-IDE or running an app with the local engine.
-
-The bootstrap happens before the Flutter tool processes `--local-engine`.
-Changing the pin to an unpublished ID can therefore prevent tool and IDE startup
-even when local engine outputs exist. Changes to Dart itself or exposed
-`dart:ui` APIs may also require a matching local SDK and generated API files;
-keeping the bootstrap pin does not guarantee compatibility with arbitrary changes.
-
-## Preparing a distributable candidate
-
-The following steps apply when preparing engine artifacts and an SDK for
-publication, including untagged Jenkins candidates. They are not required for
-each local development commit.
-
-1. Commit engine, dependency, and patch-file changes first. The hash is based on
-   committed inputs; saving a source edit without committing it is insufficient.
-2. Follow [engine pin maintenance](releases.md#engine-identity) to calculate and
-   commit the new pin. A framework-only change normally needs no pin change.
-3. Build a new candidate SDK with Jenkins. A stale pin now fails preflight even
-   for an untagged incremental build. Do not bypass that check with a guessed ID.
-4. Test an application using the extracted SDK. Android acceptance should use
-   an isolated Gradle dependency cache so previously downloaded libraries cannot
-   hide missing server files. See the [SDK acceptance steps](../../DEPLOYMENT.MD#5-accept-the-sdks-before-distribution).
-5. Run the required rendering comparison separately. Successful publication and
-   compilation do not establish font-rendering equivalence.
-
-Existing SDKs and accepted artifacts retain their original IDs and paths. This
-transition requires a new SDK and its matching published artifact tree; editing
-an old SDK's pin alone cannot supply the missing artifacts.
-
-## Checks and troubleshooting
-
-| Failure | Meaning and next step |
-| --- | --- |
-| Preflight says the pin differs from the content hash | Derive the pin again after committing engine inputs. Check the selected source before publishing. |
-| Collector rejects `args.gn` revision or hash | Build output does not describe the selected source/context. Inspect the checkout and build invocation; do not relabel stale files. |
-| Maven 404 | Compare the exact requested hash, directory, filename, and POM version. Confirm the Android stage published that mode/ABI to the SDK's download root. |
-| Gradle rejects an HTTP repository | Transport configuration, separate from version identity. Use HTTPS or the documented local-testing opt-in. |
-| SDK metadata check fails | The packaged pin, downloaded engine record, or generated version metadata disagree. Inspect packaging inputs and caches instead of hand-editing the stamps. |
-
-The pipeline checks source identity, generated outputs, POM coordinates, and
-packaged metadata. Publication hashes new downloads through the anonymous
-endpoint; reused artifacts are checked against the receipt rather than new
-local bytes. These checks establish publication
-consistency; they do not replace an extracted-SDK app build or device testing.
-
-Implementation and regression tests live in `dev/bots/engine_identity.py`,
-`collect_engine_artifacts.py`, `verify_maven_artifacts.py`, and
-`validate_sdk_identity.py`, with corresponding `test_*.py` files and
-`test_engine_identity.groovy`. Upstream's
-[artifact documentation](../tool/Engine-artifacts.md) and
-[Android build definitions](../../engine/src/flutter/shell/platform/android/BUILD.gn)
-explain the underlying conventions.

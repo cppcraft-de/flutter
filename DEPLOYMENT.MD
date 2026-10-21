@@ -1,27 +1,22 @@
 # WSC Flutter deployment
 
-This is the client runbook for building and distributing this fork. Developers
-extract a host SDK archive, add `flutter/bin` to `PATH`, and use ordinary Flutter
-commands without `--local-engine`.
+Use this runbook to configure Jenkins, build candidate SDKs, and check them
+before distribution. For other tasks, start with the
+[WSC maintenance guide](docs/wsc/README.md).
 
 ## Documentation map
 
-New to Flutter engine packaging? Start with
-[Understanding engine versions and artifact downloads](docs/wsc/engine-identity.md)
-for the meaning of the IDs, the Maven failure, and the rationale for the fix.
+- First setup: [prepare agents](#1-prepare-the-agents),
+  [configure Jenkins](#2-configure-jenkins-and-credentials), then
+  [set folder properties](#3-set-folder-properties).
+- Existing setup: [run an integration build](#4-run-the-integration-build),
+  then [check the SDKs](#5-accept-the-sdks-before-distribution).
+- New upstream version: [update the fork](docs/wsc/updating.md) first.
+- Release an accepted candidate: follow the
+  [release procedure](docs/wsc/releases.md#release-procedure).
 
-- **This file:** Jenkins setup, configuration, iteration, and acceptance.
-- [Artifacts and SDK packaging](docs/wsc/artifacts.md): storage layout, warm
-  caches, upload/download contracts, and why a mirror is required.
-- [Release identity and maintenance](docs/wsc/releases.md): versions, tags,
-  upstream updates, dependency patches, and release gates.
-- [Updating the fork](docs/wsc/updating.md): one human/agent procedure, supported
-  by safe candidate-preparation and source-check helpers.
-- [SDK rendering regression](docs/wsc/rendering-regression.md): FRT configuration,
-  approved baselines, private evidence and planned mobile test hosts.
-- [Local testing](docs/wsc/local-testing.md): installation-specific overrides
-  and the temporary workspace-reuse exception. Not required on client CI.
-- [Agent entry point](AGENTS.md): navigation and repository safety constraints.
+[Artifact storage and packaging](docs/wsc/artifacts.md) and
+[FRT integration settings](docs/wsc/rendering-regression.md) have separate references.
 
 ## Current behavior
 

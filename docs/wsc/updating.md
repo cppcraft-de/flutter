@@ -1,184 +1,219 @@
 # Updating the WSC fork
 
-One procedure for humans and coding agents. Scripts handle mechanical checks;
-Git holds the replay state. There is no separate AI release process or custom
-rebase-state manifest. Use this for patch releases, minor releases, or a chosen
-upstream development commit. You need not visit every intermediate release.
+Use this guide to move the WSC changes onto a new upstream **stable**, **beta**,
+or **main** base. You can skip intermediate releases.
 
-This guide prepares **candidates**, not automatically approved releases. See
-[release identity and policy](releases.md) and the [CI runbook](../../DEPLOYMENT.MD)
-for packaging, release tags, Jenkins settings, and developer acceptance.
+The helper creates a new branch and worktree, then replays the WSC commits with
+`git cherry-pick`. Your original branch and build outputs stay in place.
+After the replay, check dependency patches, build SDKs, and review the results
+before releasing anything.
 
-## Boundaries and prerequisites
+1. [Choose the source and new base](#1-choose-the-source-and-new-base).
+2. [Preview and replay the WSC changes](#2-preview-and-replay-the-wsc-changes).
+3. [Check Skia and FreeType patches](#3-check-skia-and-freetype-patches).
+4. [Commit the changes and update the engine pin](#4-commit-the-changes-and-update-the-engine-pin).
+5. [Run source checks](#5-run-source-checks).
+6. [Build and review the candidate](#6-build-and-review-the-candidate).
+7. [Release the accepted candidate](#7-release-the-accepted-candidate).
 
-- Start from the latest intended WSC source line, including diagnostics and CI
-  changes. A forward-port branch is not necessarily the most current patch set.
-- Finish and commit the changes to replay first. The helper refuses dirty or
-  shallow source checkouts and unfinished Git operations; it never stashes work.
-- Use Python 3.10+ and Git. Tests also use the normal platform tools
-  (PowerShell on Windows, Bash elsewhere). Run only trusted fork
-  code: verification executes its scripts/tests and imports its patch inventory.
-  The upstream hash-helper regression test uses a process-scoped PowerShell
-  execution-policy override on Windows; it does not change persistent settings.
-- Choose a **new sibling worktree** on a volume with sufficient space. Source
-  preparation does not download dependencies or compile engines. Dependency sync
-  and CI builds later need much more space. Do not repurpose, move, or clean
-  accepted-version Jenkins workspaces to make this procedure work.
-- Obtain human approval for the selected source range/new base, semantic conflict
-  resolutions or changed test expectations, and release publication. Agents can
-  execute the same commands within those approvals. Never weaken tests or update
-  rendering references merely to make a candidate pass.
+## Before you start
 
-The rebase helper never fetches, pushes, tags, moves channel refs, starts Jenkins, or
-cleans workspaces. `prepare --apply` creates a local branch/worktree and commits
-the replay. `verify` checks sources; its exit code is **not release approval**.
+You need Git, Python 3.10+, full repository history, and a clean source checkout,
+including untracked files. Finish any pending Git operation first. Use `python3`
+instead of `python` where needed. Tests also need PowerShell on Windows or Bash
+on other hosts.
 
-## 1. Choose and review the inputs
+Choose a new sibling directory for the candidate. Replaying source needs no
+engine dependencies, but a later dependency sync or build needs substantial disk
+space. Keep existing engine workspaces and unrelated nested edits intact.
 
-To refresh the upstream history stored in the client's fork, first use the
-separate [upstream synchronization helper](upstream-sync.md). It copies branches
-under `upstream/*` and preserves original tags; it never updates WSC channel refs.
+Agree on the source line, new upstream base, and rendering baseline with the
+release reviewer. Review changes to rendering behavior or test expectations;
+do not change baselines just to make a candidate pass. Agents use this same
+procedure within the approvals given to them.
 
-Check the upstream URL, then fetch branches/tags without forcing tag updates.
-In the maintained source checkout:
+## 1. Choose the source and new base
+
+Run these commands in the WSC source checkout. `origin` should point to the
+client's fork; `upstream` should point to `https://github.com/flutter/flutter.git`.
+If `upstream` is missing, add it with
+`git remote add upstream https://github.com/flutter/flutter.git`.
 
 ```sh
 git remote -v
+git fetch origin --tags
 git fetch upstream --tags
 ```
 
-Select three explicit inputs:
+These fetches refresh your local history. To also copy vanilla upstream history
+into the client's remote fork, use [Synchronizing upstream Git history](upstream-sync.md).
+That is a separate task; it does not replay WSC patches.
 
-| Input | Meaning |
+The similar branch names mean different things:
+
+| Local ref | What it represents |
 | --- | --- |
-| `OLD_BASE` | Exact upstream commit/tag on which the WSC source line was based |
-| `WSC_TIP` | Committed WSC source to carry forward, including its latest fixes |
-| `NEW_BASE` | Exact upstream tag/commit to port onto |
+| `upstream/stable` | Stable fetched directly from official Flutter |
+| `origin/upstream/stable` | The fork's copy of vanilla upstream stable, after synchronization and a fetch |
+| `origin/stable` | The fork's WSC stable branch; check its acceptance record before using it |
 
-Use full SHAs in the final invocation so a moving branch cannot change the plan.
-Resolve tags/refs with `git rev-parse REF^{commit}` (quote the revision expression
-in PowerShell). Record the three SHAs and chosen baseline in the review/PR.
-This is review evidence, not another SDK version authority.
+The same naming applies to beta and main.
 
-The helper checks that `OLD_BASE..WSC_TIP` is a nonempty linear tail with no merge
-commits. **It cannot prove these are all WSC changes.** A base chosen too far back
-can include upstream commits even in a linear range. Review the printed list and
-its diff. If the range is not suitable, stop and clarify the base/stack; do not
-silently squash published history or select a guessed merge base.
+Choose three inputs:
 
-Example, from the source checkout; replace all uppercase placeholders. Commands
-are single lines so they work without shell-specific continuation characters:
+| Input | How to choose it |
+| --- | --- |
+| `OLD_BASE` | Read the exact upstream base from the source line's last update PR or release record. |
+| `WSC_TIP` | Choose the committed WSC branch/tag containing the fixes you intend to carry forward. Include later fixes if the last release tag is no longer the desired source. |
+| `NEW_BASE` | Choose an upstream release tag or a fixed main commit, as below. |
 
-```sh
-python dev/bots/wsc_rebase.py prepare --old-base OLD_BASE --tip WSC_TIP --new-base NEW_BASE --branch wsc-candidate-NEW_VERSION --worktree ../wsc-candidate-NEW_VERSION
+For an update within one channel, start from that channel's maintained WSC line.
+For a first port to another channel, agree which maintained line supplies the
+patches. An old forward-port branch may be missing newer fixes. If the previous
+base was not recorded, establish it from the history with the maintainer before
+continuing; do not assume a merge-base identifies the intended patch range.
+
+| Task | Select `NEW_BASE` from | Later Jenkins setting |
+| --- | --- | --- |
+| Update stable | The chosen upstream release tag, for example `3.44.4` | `RELEASE_BRANCH=stable` |
+| Update beta | The chosen upstream prerelease tag, for example `3.45.0-0.1.pre` | `RELEASE_BRANCH=beta` |
+| Port to main | A reviewed commit on `upstream/main` | `RELEASE_BRANCH=main` |
+
+The versions above illustrate the tag format; they are not a recommendation to
+use those releases. Resolve each selected ref to a full commit SHA. This fixes
+the inputs even if a branch moves during the update.
+
+### Example: prepare a stable update
+
+This PowerShell example assumes the previous base was `3.44.3`, the desired WSC
+source is tagged `wsc-3.44.3-r1`, and the new base is `3.44.4`. Replace those refs
+with your reviewed inputs. The candidate branch and directory must be new.
+Stop if any command fails to resolve a ref.
+
+```powershell
+$oldBase = git rev-parse 'refs/tags/3.44.3^{commit}'
+$wscTip = git rev-parse 'refs/tags/wsc-3.44.3-r1^{commit}'
+$newBase = git rev-parse 'refs/tags/3.44.4^{commit}'
+$candidate = 'wsc-candidate-3.44.4'
+$candidatePath = '../wsc-candidate-3.44.4'
+git log --reverse --oneline "$oldBase..$wscTip"
+git diff --stat "$oldBase..$wscTip"
+git diff "$oldBase..$wscTip"
 ```
 
-This only previews. Once the source range, disk location, and candidate name are
-approved, repeat the same command with `--apply`:
+For beta, resolve the selected beta tag instead. For main, use
+`$newBase = git rev-parse 'refs/remotes/upstream/main^{commit}'` and choose a
+candidate name that includes the date or short commit SHA. Keep `OLD_BASE` tied
+to the WSC source you are replaying, regardless of the destination channel.
+
+In Bash, assign refs with `oldBase=$(git rev-parse 'REF^{commit}')`, and likewise
+for the other inputs. Assign names with `candidate='NAME'` and
+`candidatePath='../NAME'`. The Git and Python commands below use the same variables.
+
+Read the commit list and diff. The range must be a nonempty, linear sequence of
+WSC changes directly after `OLD_BASE`. The helper rejects merges, but it cannot
+tell whether you accidentally included upstream changes. Resolve an unsuitable
+range before continuing; do not squash published history to bypass the check.
+Record the three full SHAs in the update PR.
+
+## 2. Preview and replay the WSC changes
+
+From the source checkout, preview the example's selected range:
 
 ```sh
-python dev/bots/wsc_rebase.py prepare --old-base OLD_BASE --tip WSC_TIP --new-base NEW_BASE --branch wsc-candidate-NEW_VERSION --worktree ../wsc-candidate-NEW_VERSION --apply
+python dev/bots/wsc_rebase.py prepare --old-base "$oldBase" --tip "$wscTip" --new-base "$newBase" --branch "$candidate" --worktree "$candidatePath"
 ```
 
-Use `python3` if that is the working Python command on your host. No existing
-destination/branch is overwritten. The original source checkout stays on its
-original branch, and its build outputs are not touched.
+Check the printed commits, branch, and destination. Once the plan is approved,
+run it with `--apply`, then enter the candidate:
 
-## 2. Resolve replay stops and review the result
+```sh
+python dev/bots/wsc_rebase.py prepare --old-base "$oldBase" --tip "$wscTip" --new-base "$newBase" --branch "$candidate" --worktree "$candidatePath" --apply
+cd "$candidatePath"
+```
 
-Work inside the **new candidate** from this point onward. If replay stops:
+If replay stops, stay in the candidate and inspect the conflict:
 
 ```sh
 git status
 git diff
-# Edit and review the conflicting files, then stage only those files:
+git show CHERRY_PICK_HEAD
+```
+
+Resolve and review the conflicting files. Stage only those files, then continue:
+
+```sh
 git add PATH_TO_RESOLVED_FILE
 git cherry-pick --continue
 ```
 
-An empty commit can mean upstream already provides the change. Inspect it before
-explicitly choosing `git cherry-pick --skip`; never skip automatically. To abandon
-the replay use `git cherry-pick --abort` **in the candidate**. Its directory/branch
-remain, and the original accepted line is unchanged. A fresh attempt needs a new
-candidate name/path unless you explicitly arrange cleanup yourself.
+If a commit is empty because upstream already supplies the change, inspect it
+before using `git cherry-pick --skip`. To abandon the replay, run
+`git cherry-pick --abort` in the candidate. Its directory and branch remain;
+a fresh attempt needs a new name/path. Do not rerun `prepare` over a stopped replay.
 
-After replay, inspect both the patch correspondence and resulting source delta:
+After replay, review the result:
 
 ```sh
-git range-diff OLD_BASE..WSC_TIP NEW_BASE..HEAD
-git diff --stat NEW_BASE..HEAD
-git diff NEW_BASE..HEAD
+git range-diff "$oldBase..$wscTip" "$newBase..HEAD"
+git diff --stat "$newBase..HEAD"
+git diff "$newBase..HEAD"
 ```
 
-Pay particular attention to upstream replacements for our workarounds, builder
-configuration changes, version/package scripts, and patch hooks. A clean replay
-is not proof that a workaround remains necessary or correct. An unexpected engine
-pin conflict is not a reason to reuse the old pin: resolve the file conflict as
-part of replay, then derive the final pin again in step 4.
+Look for workarounds upstream has replaced and changes to builder configuration,
+bootstrap scripts, packaging, and patch hooks. A clean replay does not prove
+that the changes still behave correctly. Resolve engine-pin conflicts during
+replay, then derive the final pin in step 4.
 
-## 3. Port and check nested dependency patches
+## 3. Check Skia and FreeType patches
 
-Outer Git replay only moves the **patch files**. It does not establish that they
-still apply to the new Skia/FreeType revisions.
+Replaying the outer repository copies patch files. It does not prove they apply
+to the new dependency revisions.
 
-1. Review the candidate's `DEPS` dependency revisions against
-   `EXPECTED_REVISIONS` in `apply_patches.py`. Adapt the patches to the actual new
-   dependency sources before updating those expected revisions. Do not copy the
-   old dependency pins over upstream changes just to make a check pass.
-2. Use the candidate's isolated dependency checkout or separately prepared
-   dependency repositories at those exact revisions. Do not sync/reset a dirty
-   existing workspace. Follow the
-   [nested patch rules](releases.md#nested-skia-and-freetype-patches).
-3. After committing the adaptations and pin (next step), the optional
-   `--skia-dir`/`--freetype-dir` verification checks ordered patch application on
-   **pristine Git objects**. The supplied repositories provide objects; their
-   dirty working files are neither trusted nor changed. No dependency downloads
-   or full temporary dependency checkouts are needed for this check.
-4. Still verify a real dependency sync/apply and a second already-applied hook
-   invocation in the isolated candidate/build workspace. The object-only check
-   does not test hooks, current working files, DEPS resolution, or rendering.
+Follow [Port dependency patches](dependency-patches.md) to compare the candidate's
+`DEPS` pins, prepare isolated dependency checkouts, fix failed patches, and test
+the sync hooks. Commit the patch files and expected revisions in the candidate.
 
-If dependencies are not prepared yet, source verification can run without those
-arguments, but it reports dependency validation as **PENDING**. Do not treat that
-as a completed port. CI's default `SYNC_ENGINE_DEPS=auto` synchronizes changed
-dependency/patch inputs and reuses unchanged ones. Use `true` for a forced repair
-or the documented production build; do not use explicit `false` to bypass the
-first synchronization of a changed dependency/patch set. See the runbook's
-[incremental behavior](../../DEPLOYMENT.MD#incremental-behavior) for tracking and
-the first-run migration from the old checkbox.
+If dependencies are not ready, you can run the source checks below without them,
+but dependency validation remains pending. Do not use `SYNC_ENGINE_DEPS=false`
+to bypass synchronization after changing dependency or patch inputs.
 
-## 4. Commit source changes and derive the engine pin
+## 4. Commit the changes and update the engine pin
 
-After all engine/DEPS/patch changes are committed, run
-`python dev/bots/engine_identity.py` to compute the upstream content hash of
-committed HEAD inputs, and put its output in `bin/internal/engine.version`, as
-described
-under [engine identity](releases.md#engine-identity). Commit only that pin change
-and verify it again. Use `git add -f bin/internal/engine.version` if the new base
-ignores an as-yet-untracked pin. Do not hand-copy the previous release's engine ID.
+Commit all engine, dependency, and patch-file changes first. Then follow
+[engine pin maintenance](releases.md#engine-identity): compute the hash with
+`python dev/bots/engine_identity.py`, put it in `bin/internal/engine.version`,
+commit the pin, and validate the full candidate SHA.
 
-The helper checks the committed pin but deliberately does not stage files or
-create a pin commit. Any later change to the hashed engine inputs means repeating
-this step.
-Framework-only changes and the pin commit itself do not change this hash.
+If the new upstream base ignores an untracked pin, stage it with
+`git add -f bin/internal/engine.version`. Later engine-input changes require a
+new pin check. Framework-only changes and the pin commit itself do not change
+the engine hash.
+
+This step prepares a distributable candidate. For ordinary local engine work,
+keep the published bootstrap pin as described in
+[local engine development](engine-identity.md#local-engine-development).
 
 ## 5. Run source checks
 
-From the clean candidate checkout:
+From the clean candidate checkout, using the same `$newBase` value:
 
 ```sh
-python dev/bots/wsc_rebase.py verify --new-base NEW_BASE
-# With prepared dependency repositories (both arguments are required together):
-python dev/bots/wsc_rebase.py verify --new-base NEW_BASE --skia-dir PATH_TO_SKIA --freetype-dir PATH_TO_FREETYPE
+python dev/bots/wsc_rebase.py verify --new-base "$newBase"
 ```
 
-This checks linear ancestry, diff whitespace, the tracked engine pin, source tag
-identity, and the focused Python identity/publishing/workflow tests. Missing test
-files or failed checks stop verification. Optional patch checks use the candidate's
-existing patch order/inventory, not a second maintained list.
+With prepared dependency repositories, supply both paths:
 
-Run the Dart/Flutter checks with the candidate's supported SDK and resolved
-package configuration too; the Python helper does not bootstrap these toolchains:
+```sh
+python dev/bots/wsc_rebase.py verify --new-base "$newBase" --skia-dir PATH_TO_SKIA --freetype-dir PATH_TO_FREETYPE
+```
+
+The helper checks ancestry, whitespace, the engine pin, source identity, and
+focused Python tests. The optional dependency check applies patches to pristine
+Git objects without changing the supplied working trees. Success ends with
+`SOURCE CHECKS PASSED, NOT RELEASE APPROVAL` and lists remaining checks.
+
+Run the Dart/Flutter checks with a compatible SDK and resolved packages:
 
 ```sh
 dart pub get --directory dev/bots
@@ -188,53 +223,58 @@ flutter test test/general.shard/version_test.dart
 cd ../..
 ```
 
-Use an already available compatible SDK for source tests where possible. If
-bootstrap requires not-yet-published candidate engine artifacts, record these
-checks as pending and complete them after the CI build in step 6. Do not revert
-the engine pin or accept missing tests to bypass a bootstrap failure.
+If the candidate cannot bootstrap until its engine artifacts are published,
+use an available compatible SDK for source tests or record the checks as pending
+until after the CI build. Do not revert the candidate pin to bypass that failure.
+Also run tests for the rendering or diagnostic code you changed and work through
+the [rebase audit checklist](releases.md#rebase-audit-checklist).
 
-Run the tests for touched rendering/diagnostic code as well. A changed upstream
-test layout/toolchain may require updating these commands; do not turn missing
-tests into skips. Consult the [rebase audit checklist](releases.md#rebase-audit-checklist)
-for bootstrap, artifact manifests, pinned downloads, and toolchain review.
+## 6. Build and review the candidate
 
-## 6. Build and accept the candidate
+Before pushing, run the [source identity check](releases.md#engine-identity) on
+the final committed candidate and review Jenkins polling/indexing settings.
+A push may start a build. Obtain approval to push and build, then follow
+[Run the integration build](../../DEPLOYMENT.MD#4-run-the-integration-build).
 
-After reviewing the source result, obtain approval to push the candidate and run
-the existing `Jenkinsfile.testing` pipeline. Verify indexing/polling behavior
-before pushing: a new branch may cause a build depending on Jenkins settings.
-Use the [CI runbook](../../DEPLOYMENT.MD), not a second maintenance pipeline.
+Select the **candidate branch job** as the source and set `RELEASE_BRANCH` for
+the intended channel. For example, building `wsc-candidate-3.44.4` with
+`RELEASE_BRANCH=stable` packages that candidate as stable; the parameter does
+not select upstream stable or move the fork's stable branch. The named channel
+branch must already exist in the fork for packaging to clone it.
 
-- Use a separate persistent workspace for the new upstream line. Keep the prior
-  accepted line intact. Budget for an initial build; incremental cannot promise
-  reuse across changed source/toolchain versions or different absolute paths.
-- Build/package the supported target/host matrix. Exercise the **extracted SDKs**
-  and a cache miss against the mirror, not only the source checkout.
-- Check diagnostics-disabled overhead as well as diagnostics-enabled behavior.
-- **Rendering gate: PENDING IMPLEMENTATION.** No placeholder script returns a
-  successful rendering verdict. Until the automatic checker is integrated,
-  require recorded human rendering review against the explicitly chosen accepted
-  WSC baseline. Without that review, this remains a CI candidate, not a release.
+Use a separate persistent workspace for the new line. Keep the previous line's
+outputs intact. Build the supported SDK matrix and run the
+[extracted-SDK acceptance checks](../../DEPLOYMENT.MD#5-accept-the-sdks-before-distribution).
 
-Review evidence should identify old/new upstream SHAs, WSC source SHA, engine ID,
-source/patch test results, CI runs/SDKs, rendering baseline/result, and approvals.
-A PR description or CI record is enough; no extra runtime metadata file is needed.
+Jenkins has FRT comparisons for Windows, macOS, and Web. Review their results;
+disabled or failed comparisons leave rendering acceptance incomplete. Android
+and iOS are not covered by those stages. See
+[rendering acceptance](rendering-regression.md#outcomes-evidence-and-acceptance)
+for CI evidence and remaining agent acceptance work. To run FRT yourself, use
+the [FRT README](https://bitbucket.org/schoolcraftteam/font_rendering_tester/src/master/README.md).
+When porting diagnostics, also check enabled behavior and disabled overhead.
 
-## 7. Release only after human sign-off
+Record the source and engine IDs, old/new bases, test results, CI build and SDK
+links, rendering baseline/results, and reviewer approval in the update PR.
+Keep compilation, packaging, publication, and runtime results distinct.
 
-Follow the existing [release procedure](releases.md#release-procedure): immutable
-WSC tag, appropriate release build/identity validation, retained artifacts, then
-advertise the SDK and update the intended channel ref with explicit approval.
-The old release and its artifact namespace remain available for rollback. An AI
-assistant must not infer publication approval from a green source-check command.
+## 7. Release the accepted candidate
 
-## Helper tests and scope
+Follow the [release procedure](releases.md#release-procedure) to tag the accepted
+source, build and check the release SDKs, and hand over the approved downloads.
+Follow [Update a WSC channel](releases.md#update-a-wsc-channel) for the branch
+handoff. Neither the rebase helper nor a green CI build promotes a channel.
+
+## Helper tests and limits
+
+To check the helper itself:
 
 ```sh
 python -B -m unittest discover -s dev/bots -p test_wsc_rebase.py
 ```
 
-These offline tests create disposable tiny Git repositories: preview, replay,
-conflicts/continue/abort, empty commits, invalid inputs, and dependency-patch
-checks without changing dependency working files/indexes/objects. They do not
-certify a real upstream Flutter port, engine build, or rendering equivalence.
+These tests use disposable repositories. They cover replay, conflict recovery,
+input checks, and dependency-patch checking, not a real Flutter build or rendering
+acceptance. Verification executes the candidate's scripts and tests, so use
+trusted source. On Windows, the hash-helper test uses a process-only PowerShell
+execution-policy override; it does not change machine settings.

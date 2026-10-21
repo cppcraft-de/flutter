@@ -207,7 +207,7 @@ def verify(args):
     require_clean(repo)
     print("SOURCE CHECKS PASSED, NOT RELEASE APPROVAL.")
     print("PENDING Dart/Flutter tests, dependency sync/hook checks, engine/SDK builds and extracted-SDK smoke tests.")
-    print("PENDING rendering equivalence: automated gate not integrated; requires recorded human review.")
+    print("PENDING rendering equivalence: review FRT results from Jenkins or a developer run; see docs/wsc/rendering-regression.md.")
     print("PENDING diagnostics-disabled overhead and release approval. See docs/wsc/updating.md.")
 
 

@@ -4,6 +4,13 @@ For setup and current build defaults, use [DEPLOYMENT.MD](../../DEPLOYMENT.MD).
 This reference explains the artifact contract rather than duplicating the
 Jenkins configuration checklist.
 
+- [Find an SDK or engine artifact](#storage-layout).
+- [Check the upload and download endpoints](#upload-and-read-contract).
+- [Handle an existing or interrupted publication](#publish-once-policy-and-recovery).
+- [Understand packaging and mirror selection](#packaging-and-mirror-selection).
+- [Check supported targets](#supported-targets-and-reductions).
+- [Plan artifact retention](#environments-and-retention).
+
 ## Why SDK archives and an HTTP mirror
 
 The distributed product is one SDK archive per supported host, plus an HTTP(S)

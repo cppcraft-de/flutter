@@ -1,5 +1,6 @@
 # WSC fork: agent entry point
 
+Start with the [WSC maintenance guide](docs/wsc/README.md).
 Read [DEPLOYMENT.MD](DEPLOYMENT.MD) for current CI behavior and configuration.
 Use [release maintenance](docs/wsc/releases.md) for versioning/rebases and the
 implementation map; use [artifact contracts](docs/wsc/artifacts.md) for storage

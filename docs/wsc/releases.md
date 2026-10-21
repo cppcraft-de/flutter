@@ -1,8 +1,145 @@
 # Release identity and maintenance
 
-Use [DEPLOYMENT.MD](../../DEPLOYMENT.MD) for Jenkins setup and SDK acceptance.
-This document separates implemented identity behavior from release governance
-that operators must still enforce.
+Use this reference to release an accepted candidate and maintain its version
+identity. To move to a new upstream version, start with
+[Updating the WSC fork](updating.md). Jenkins setup belongs in the
+[CI runbook](../../DEPLOYMENT.MD).
+
+- [Release an accepted candidate](#release-procedure).
+- [Update a WSC channel](#update-a-wsc-channel).
+- [Understand versions and tags](#version-and-channel-identity).
+- [Update the engine pin](#engine-identity).
+- [Review an upstream port](#rebase-audit-checklist).
+- [Find the implementation](#implementation-map).
+
+## Release procedure
+
+1. Build an **untagged candidate** with the complete SDK matrix on staging.
+   Incremental workspaces are appropriate during iteration. Check the resulting
+   WSC development identity and perform the runbook's extracted-SDK acceptance
+   tests, including rendering validation and HTTP/Maven cache misses.
+2. Finish engine changes and verify the engine pin. Tag the exact accepted
+   source commit with one immutable [WSC release tag](#tags-and-generated-metadata).
+   Keep the upstream tag
+   untouched. If source changes afterward, test again and use the next WSC
+   revision; do not move published tags.
+3. Build the tagged source with `REQUIRE_RELEASE_TAG=true`,
+   `BUILD_POLICY=full_rebuild`, `SYNC_ENGINE_DEPS=true`, the complete matrix, and
+   the intended release artifact root. The source checkout must actually select
+   the tagged commit; `RELEASE_BRANCH` is not a tag-selection parameter.
+4. Verify both SDKs again and retain ZIPs/checksums, source SHA, engine ID,
+   upstream base, and agent/toolchain versions. Record the accepted SDK links
+   and rendering results in the release PR or build record. Only then advertise
+   the release and follow the channel handoff below.
+
+This is an **operator procedure**, not an implemented tag-only production job
+or automatic promotion. Use the same pipeline source; do not create another
+Jenkinsfile during commissioning. `REQUIRE_RELEASE_TAG` validates identity but
+does not enforce clean policy, select storage, or approve a release.
+
+For release source validation, `full_rebuild` clears engine `out`, not every
+dependency or machine setting. It does **not** replace an already published
+engine: packaging reuses that content hash's recorded artifacts. New IDs get
+their first publication. Leave `DANGEROUSLY_OVERWRITE_BUILD_ARTIFACTS=false`;
+see [publication policy and recovery](artifacts.md#publish-once-policy-and-recovery).
+Thus a clean compilation is not proof that its new bytes are the shipped bytes;
+acceptance tests must exercise the packaged/downloaded SDK. A controlled
+environment and runtime acceptance are still required. Repeat the same tag
+after a transient infrastructure failure only when preserving its intended
+inputs; do not silently replace already accepted binaries after toolchain
+changes. Production uploads are not transactional—see
+[publication and retention](artifacts.md#environments-and-retention).
+
+Tagging alone changes no source and needs no engine rebuild for an incremental
+identity check. It **does** require fresh SDK packaging to regenerate version
+metadata: adding a tag does not invalidate an already-created archive/cache.
+The clean production build above is release policy, not a consequence of Git
+tagging. Rollback uses the retained previous SDK and its matching artifact tree.
+
+### Tag the accepted source
+
+Run this from the candidate checkout at the accepted commit. Replace
+`ACCEPTED_SHA` with its full SHA and `WSC_TAG` with the agreed release tag,
+for example `wsc-3.44.4-r1`:
+
+```sh
+python dev/bots/validate_sdk_identity.py --revision ACCEPTED_SHA
+git tag -a WSC_TAG ACCEPTED_SHA -m "WSC release WSC_TAG"
+python dev/bots/validate_sdk_identity.py --revision ACCEPTED_SHA --require-release-tag
+```
+
+After approval to publish the tag, push that tag only:
+
+```sh
+git push origin refs/tags/WSC_TAG
+```
+
+Run the release build from the candidate branch at that exact commit. Do not
+advance the branch while selecting the build. The pipeline must fetch the tag;
+`REQUIRE_RELEASE_TAG=true` checks it during preflight. A tag push by itself is
+not an automatic release build or approval.
+
+### Update a WSC channel
+
+The fork's `main`, `beta`, and `stable` branches are intended to point to accepted
+WSC versions of those upstream lines. Updating these refs is a separate,
+reviewed action. Neither `sync_upstream.py`, `wsc_rebase.py`, nor Jenkins does it.
+
+Before updating a channel, record:
+
+- The channel, its current full SHA, and the accepted candidate's full SHA.
+- The previous accepted tag or commit and SDK links for rollback.
+- The approving maintainer and the release build/results being approved.
+
+From the candidate checkout, fetch and inspect the channel. Replace `CHANNEL`
+with `main`, `beta`, or `stable`, and `ACCEPTED_SHA` with the reviewed commit:
+
+```sh
+git fetch origin
+git rev-parse refs/remotes/origin/CHANNEL
+git log --oneline ACCEPTED_SHA..refs/remotes/origin/CHANNEL
+git merge-base --is-ancestor refs/remotes/origin/CHANNEL ACCEPTED_SHA
+```
+
+The last command exits 0 if the update can fast-forward, or 1 if it cannot.
+After patch replay, a non-fast-forward update is expected in many cases. Review
+the commits that would leave the channel; they may contain fixes added since
+you started the port. Do not merge the old channel into the candidate just to
+make the push succeed: that changes the reviewed source and breaks the linear
+patch sequence used by the update helper.
+
+**The repository does not define the client's branch-protection or approval
+rules.** Before the first promotion, agree who may update each channel and
+whether reviewed non-fast-forward updates are allowed. For an approved rewrite,
+use an explicit lease against the reviewed old SHA, never an unrestricted force
+push. If branch protection rejects it, stop and resolve the release policy;
+do not disable protection as part of a routine update.
+
+Recheck source identity and Jenkins trigger settings before publishing the ref.
+For an approved fast-forward update:
+
+```sh
+git push origin ACCEPTED_SHA:refs/heads/CHANNEL
+```
+
+If a non-fast-forward update has been explicitly approved and branch protection
+allows it, use the recorded old SHA as the lease:
+
+```sh
+git push --force-with-lease=refs/heads/CHANNEL:OLD_CHANNEL_SHA origin ACCEPTED_SHA:refs/heads/CHANNEL
+```
+
+A failed lease means the remote changed. Fetch and review the new tip before
+trying again. After a successful push, read the remote ref back:
+
+```sh
+git ls-remote origin refs/heads/CHANNEL
+```
+
+Confirm it matches the accepted commit. Share the approved SDK links with
+developers. Keep the previous SDKs
+and artifact tree for rollback; moving a Git ref does not replace an installed
+SDK. There is no automatic binary promotion or private channel-update service.
 
 ## Version and channel identity
 
@@ -70,8 +207,7 @@ checkouts can display `[user-branch]`; packaging supplies the desired channel.
 
 ### Engine identity
 
-For the plain-language explanation, the Android failure that motivated this
-procedure, and the reasons for following upstream, read
+For an explanation of the source commit, engine hash, and download paths, read
 [Understanding engine versions and artifact downloads](engine-identity.md).
 
 The pin-update procedure below prepares a distributable SDK candidate, including
@@ -123,47 +259,6 @@ The content-hash migration applies to new SDKs and artifact paths. Retain
 existing SDKs and their matching artifacts; validate a new candidate instead
 of rewriting previously accepted artifacts under an old ID.
 
-## Release procedure
-
-1. Build an **untagged candidate** with the complete SDK matrix on staging.
-   Incremental workspaces are appropriate during iteration. Check the resulting
-   WSC development identity and perform the runbook's extracted-SDK acceptance
-   tests, including rendering validation and HTTP/Maven cache misses.
-2. Finish engine changes and verify the engine pin. Tag the exact accepted
-   source commit with one immutable WSC release tag. Keep the upstream tag
-   untouched. If source changes afterward, test again and use the next WSC
-   revision; do not move published tags.
-3. Build the tagged source with `REQUIRE_RELEASE_TAG=true`,
-   `BUILD_POLICY=full_rebuild`, `SYNC_ENGINE_DEPS=true`, the complete matrix, and
-   the intended release artifact root. The source checkout must actually select
-   the tagged commit; `RELEASE_BRANCH` is not a tag-selection parameter.
-4. Verify both SDKs again and retain ZIPs/checksums, source SHA, engine ID,
-   upstream base, and agent/toolchain versions. Only then advertise the release.
-
-This is an **operator procedure**, not an implemented tag-only production job
-or automatic promotion. Use the same pipeline source; do not create another
-Jenkinsfile during commissioning. `REQUIRE_RELEASE_TAG` validates identity but
-does not enforce clean policy, select storage, or approve a release.
-
-For release source validation, `full_rebuild` clears engine `out`, not every
-dependency or machine setting. It does **not** replace an already published
-engine: packaging reuses that content hash's recorded artifacts. New IDs get
-their first publication. Leave `DANGEROUSLY_OVERWRITE_BUILD_ARTIFACTS=false`;
-see [publication policy and recovery](artifacts.md#publish-once-policy-and-recovery).
-Thus a clean compilation is not proof that its new bytes are the shipped bytes;
-acceptance tests must exercise the packaged/downloaded SDK. A controlled
-environment and runtime acceptance are still required. Repeat the same tag
-after a transient infrastructure failure only when preserving its intended
-inputs; do not silently replace already accepted binaries after toolchain
-changes. Production uploads are not transactional—see
-[publication and retention](artifacts.md#environments-and-retention).
-
-Tagging alone changes no source and needs no engine rebuild for an incremental
-identity check. It **does** require fresh SDK packaging to regenerate version
-metadata: adding a tag does not invalidate an already-created archive/cache.
-The clean production build above is release policy, not a consequence of Git
-tagging. Rollback uses the retained previous SDK and its matching artifact tree.
-
 ## Upstream updates and patch replay
 
 Follow [Updating the WSC fork](updating.md), the shared human/agent procedure
@@ -186,30 +281,15 @@ support is optional; there is no need to visit every intermediate release.
 
 ### Nested Skia and FreeType patches
 
-The source of truth is
-[wsc_font_rendering_patches](../../engine/src/flutter/tools/wsc_font_rendering_patches/)
-and the DEPS revisions, not ad hoc edits in nested workspaces.
+Follow [Port Skia and FreeType patches](dependency-patches.md) for the editing,
+sync, and verification steps. Commit nested changes as patch inputs in the outer
+repository. Do not rely on untracked edits in an existing dependency checkout.
 
-1. Use an isolated candidate checkout. Inspect and preserve unrelated nested
-   changes before syncing. Outer `git status` does not report all nested changes.
-2. `gclient sync` runs the WSC pre-dependency reset hook and subsequent patch
-   application. Record the resulting Skia/FreeType HEADs. Resetting patch-owned
-   files can alter mtimes and cause rebuilds; there is no mtime-restoration layer.
-3. If patches fail, port their intent to the new pristine dependency revision
-   and regenerate the patch files in the declared order. Do not guess rendering
-   conflict resolutions or blindly update the expected revisions.
-4. Review `EXPECTED_SKIA_REVISION`, `EXPECTED_FREETYPE_REVISION`, and
-   `GROUP_MARKERS` in `apply_patches.py` when their targets change. Verify a clean
-   sync/apply and an already-applied invocation. Markers are not a substitute
-   for testing an evolved patch stack.
-5. Run layout/rendering tests on supported backends before accepting the port.
-   Historical diagnostic instrumentation may remain in ignored nested trees;
-   do not mistake it for the checked-in release stack or discard it blindly.
-
-Runtime-gated diagnostics with negligible disabled overhead remain a design
-direction, not a release guarantee. Do not instruct maintainers to add/remove a
-diagnostic branch as a required CI step unless that workflow is explicitly
-implemented and validated.
+Startup-gated diagnostics are implemented. The Dart API
+`configureFontRenderingDiagnostics` selects collection before the first paragraph;
+native startup also supports `WSC_FONT_DIAGNOSTICS`. Collection is off by default.
+After a port, check enabled behavior and disabled overhead on the affected
+backends. The presence of the API does not establish those runtime results.
 
 ### Rebase audit checklist
 

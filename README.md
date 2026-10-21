@@ -24,8 +24,9 @@ open source.
 ## WSC fork
 
 This repository contains the WSC Flutter patches and SDK build pipeline.
-For client CI setup, artifact hosting, SDK distribution, and links to release
-maintenance, start with [WSC deployment](DEPLOYMENT.MD).
+Start with the [WSC maintenance guide](docs/wsc/README.md).
+To move to a new stable, beta, or main base, follow
+[Updating the WSC fork](docs/wsc/updating.md).
 Automation agents should also read [AGENTS.md](AGENTS.md).
 The documentation and badges below are the upstream Flutter project overview.
 
