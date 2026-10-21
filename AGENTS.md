@@ -25,6 +25,11 @@ It delegates read-only diagnosis; applying fixes needs separate authorization.
   logs, or packaged SDK files. Folder properties are not secret storage.
 - Preserve upstream tags and existing release artifacts. Keep WSC identity in
   the existing tag/version machinery rather than adding another source of truth.
+- Before declaring a CI candidate ready, pushing it, or starting its build, run
+  `python dev/bots/validate_sdk_identity.py --revision <full HEAD SHA>` against
+  the integrated branch, even for docs/CI-only edits. Resolve stale pins using
+  the [engine-pin procedure](docs/wsc/releases.md#engine-identity); local-only
+  engine development should retain its published bootstrap pin.
 - For docs changes, verify defaults against the pipeline and scripts. Update
   the owning reference and link to it; do not replicate setup tables in README.
 - Report source tests, actual compilation, packaging, upload, and runtime
