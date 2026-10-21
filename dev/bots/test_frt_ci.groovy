@@ -94,8 +94,10 @@ assert source.contains('results/*/comparison/comparison.html')
 println 'FRT aggregation, missing inputs, publication, status precedence and abort wiring passed.'
 
 // Execute capture failure paths and check which files the real archive patterns select.
-def captureFailure = { boolean missingStash, boolean aborted ->
+def captureFailure = { boolean missingStash, boolean aborted, int status = 2, boolean unreadable = false ->
     def archived = []
+    def console = []
+    def mails = []
     def output = 'build/frt-results/windows-123'
     def files = [
         "${output}/runner.log",
@@ -104,24 +106,49 @@ def captureFailure = { boolean missingStash, boolean aborted ->
         "${output}/results/windows/comparison/baseline-client.log",
         "${output}/results/web/comparison/specimen-client.log",
         "${output}/results/web/comparison/server.log",
+        "${output}/identity.json",
+        "${output}/inputs.json",
+        "${output}/jenkins-result.json",
+        "${output}/capture-exit.txt",
         "${output}/results/web/comparison/regression.sqlite3",
         "${output}/results/windows/specimen-client/app.exe",
         "${output}/results/windows/specimen-client/nested-build.log",
     ].collect { it.toString() }
+    def selectFiles = { String patterns -> files.findAll { path -> patterns.split(',').any { pattern ->
+        org.apache.tools.ant.types.selectors.SelectorUtils.matchPath(
+            pattern.replace('/', File.separator), path.replace('/', File.separator))
+    } } }
+    def expectedDiagnostics = files.take(10).drop(1)
     def binding = new Binding([
-        env: [WSC_FRT_PLAN: 'plan', WSC_FRT_REVISION: 'a' * 40, BUILD_NUMBER: '123'],
+        env: [WSC_FRT_PLAN: 'plan', WSC_FRT_REVISION: 'a' * 40, BUILD_NUMBER: '123',
+              BUILD_LOG_MAIL_RECIPIENT: 'test@example.invalid'],
         params: [WINDOWS_PYTHON: 'python'],
         scm: [userRemoteConfigs: [[credentialsId: 'test-id']]],
         readJSON: { Map args -> args.text == 'plan'
             ? [enabled: true, repository: 'https://example.invalid/frt.git']
-            : [exit_code: 2, status: 'error'] },
+            : [exit_code: status, status: ['passed', 'failed', 'error'][status]] },
         isUnix: { false },
         timeout: { Map args, Closure body -> body() },
         dir: { String path, Closure body -> body() },
         checkout: { Map args -> },
         writeFile: { Map args -> },
-        bat: { Map args -> if (aborted) { throw new TestAbort() }; 2 },
-        readFile: { String path -> 'result' },
+        bat: { Map args -> if (aborted) { throw new TestAbort() }; status },
+        readFile: { args ->
+            if (args instanceof Map) {
+                assert args.encoding == 'UTF-8'
+                if (unreadable) { throw new IOException('Cannot read diagnostic') }
+                return "contents of ${args.file}"
+            }
+            'result'
+        },
+        findFiles: { Map args -> selectFiles(args.glob.toString()).collect { [path: it] } },
+        echo: { String text -> console << text },
+        unstable: { String text -> },
+        emailext: { Map args ->
+            assert args.attachLog && args.compressLog
+            assert expectedDiagnostics.every { path -> console.any { it.contains("contents of ${path}") } }
+            mails << args
+        },
         fileExists: { String path -> true },
         error: { String message -> throw new IllegalArgumentException(message) },
         catchError: { Map args, Closure body ->
@@ -132,25 +159,30 @@ def captureFailure = { boolean missingStash, boolean aborted ->
         },
         stash: { Map args -> if (missingStash) { throw new IOException('Missing report') } },
         archiveArtifacts: { Map args ->
-            def patterns = args.artifacts.split(',')
-            archived.addAll(files.findAll { path -> patterns.any { pattern ->
-                // DirectoryScanner normalizes separators before matching.
-                org.apache.tools.ant.types.selectors.SelectorUtils.matchPath(
-                    pattern.replace('/', File.separator), path.replace('/', File.separator))
-            } })
+            archived.addAll(selectFiles(args.artifacts))
         },
     ])
     try {
         new GroovyShell(binding).parse(source).runFrt('windows')
-        assert false: 'Capture failure must still fail'
+        assert status <= 1 && !aborted: 'Capture failure must still fail'
     } catch (TestAbort expected) {
         assert aborted
     } catch (IllegalArgumentException expected) {
-        assert !aborted
+        assert !aborted && status == 2
     }
-    assert archived == files.take(6)
+    assert archived == files.take(10)
+    if (!unreadable) {
+        assert expectedDiagnostics.every { path -> console.any { it.contains("contents of ${path}") } }
+    }
+    assert !console.any { it.contains('contents of ' + output + '/runner.log') }
+    assert files.drop(10).every { path -> !console.any { it.contains(path) } }
+    assert mails.size() == (status == 1 ? 1 : 0)
 }
 captureFailure(false, false)
 captureFailure(true, false)
 captureFailure(true, true)
+captureFailure(false, false, 0)
+captureFailure(false, false, 1)
+captureFailure(false, false, 2, true)
 println 'FRT partial build/client/server logs survive capture errors, missing reports and cancellation; bundles stay excluded.'
+println 'FRT diagnostics reach the compressed console attachment before mismatch mail; read failures still archive files.'

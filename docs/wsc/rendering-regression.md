@@ -49,6 +49,14 @@ are at that level; `*-client.log` and `server.log` are in `comparison/`.
 The same paths exist in the capture agent's SDK-stage workspace. The archived
 `runner.log` contains progress and errors, not all subprocess output.
 
+At the end of each FRT cell, Jenkins also prints these nested logs and the
+input/identity/status metadata as named console sections before sending its
+failure or mismatch email. They are therefore included in the existing
+compressed `build.log` attachment, not a second ZIP. Early emails contain only
+the evidence available so far; the final email includes all completed cells.
+Original files remain archived separately in Jenkins. Client bundles, databases,
+screenshots and document files are not added to these console sections.
+
 Reports are archived in Jenkins, not included in the public SDK payload or
 attached to email. `archiveArtifacts` does not make them private: configure
 Jenkins access control to restrict the job and its artifacts. Failure/mismatch

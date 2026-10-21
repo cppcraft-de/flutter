@@ -117,6 +117,23 @@ def resolveFrt(Set<String> hosts) {
     env.WSC_FRT_REPORT_READY = 'true'
 }
 
+def frtDiagnosticPatterns(String output) {
+    // Explicit paths only: never include client bundles, databases or document data.
+    return ['inputs.json', 'identity.json', 'jenkins-result.json', 'capture-exit.txt',
+            'results/*/*-build.log', 'results/*/comparison/*-client.log',
+            'results/*/comparison/server.log'].collect { "${output}/${it}" }
+}
+
+def printFrtDiagnostics(String output) {
+    // These sections become part of Email Extension's existing compressed console
+    // attachment, including global post with agent none. runner.log is already teed.
+    for (pattern in frtDiagnosticPatterns(output)) {
+        for (file in findFiles(glob: pattern)) {
+            echo "FRT diagnostic file: ${file.path}\n${readFile(file: file.path, encoding: 'UTF-8')}\nEnd FRT diagnostic file: ${file.path}"
+        }
+    }
+}
+
 def runFrt(String host) {
     def plan = parseFrtPlan(env.WSC_FRT_PLAN)
     if (!plan.enabled) {
@@ -145,7 +162,6 @@ def runFrt(String host) {
             captureStatus = status
             if (status == 1) {
                 unstable("${host} FRT rendering mismatch; candidate is not release-approved.")
-                mailBuildLog("${host} FRT regression", 'UNSTABLE')
             } else if (status != 0) {
                 error("${host} FRT failed (exit ${status}); see private regression evidence.")
             }
@@ -164,10 +180,17 @@ def runFrt(String host) {
         }
         // Keep partial subprocess logs even if collecting the report stash fails.
         catchError(buildResult: 'FAILURE', stageResult: 'FAILURE', catchInterruptions: false) {
-            archiveArtifacts artifacts:
-                "${output}/inputs.json,${output}/identity.json,${output}/jenkins-result.json,${output}/runner.log,${output}/capture-exit.txt," +
-                "${output}/results/*/*-build.log,${output}/results/*/comparison/*-client.log,${output}/results/*/comparison/server.log",
-                allowEmptyArchive: false
+            try {
+                printFrtDiagnostics(output)
+            } finally {
+                archiveArtifacts artifacts: (frtDiagnosticPatterns(output) + "${output}/runner.log").join(','),
+                    allowEmptyArchive: false
+            }
+        }
+        // Stage-failure mail is sent by post; mismatch mail must also wait until
+        // the nested logs have reached the console attachment.
+        if (captureStatus == 1) {
+            mailBuildLog("${host} FRT regression", 'UNSTABLE')
         }
     }
 }
@@ -246,6 +269,7 @@ Host SDKs: ${params.HOST_SDKS ?: 'none'}
 Build: ${env.BUILD_URL ?: 'unavailable'}
 
 The compressed attachment contains the overall console log at notification time.
+It includes available FRT build/client/server diagnostics from completed FRT cells.
 An early failure notification does not mean the other parallel targets have stopped.
 """,
             attachLog: true,
