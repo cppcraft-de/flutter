@@ -92,3 +92,65 @@ assert source.contains('script { aggregateFrt() }')
 assert source.contains('results/comparison/comparison.html')
 assert source.contains('results/*/comparison/comparison.html')
 println 'FRT aggregation, missing inputs, publication, status precedence and abort wiring passed.'
+
+// Execute capture failure paths and check which files the real archive patterns select.
+def captureFailure = { boolean missingStash, boolean aborted ->
+    def archived = []
+    def output = 'build/frt-results/windows-123'
+    def files = [
+        "${output}/runner.log",
+        "${output}/results/windows/baseline-build.log",
+        "${output}/results/web/specimen-build.log",
+        "${output}/results/windows/comparison/baseline-client.log",
+        "${output}/results/web/comparison/specimen-client.log",
+        "${output}/results/web/comparison/server.log",
+        "${output}/results/web/comparison/regression.sqlite3",
+        "${output}/results/windows/specimen-client/app.exe",
+        "${output}/results/windows/specimen-client/nested-build.log",
+    ].collect { it.toString() }
+    def binding = new Binding([
+        env: [WSC_FRT_PLAN: 'plan', WSC_FRT_REVISION: 'a' * 40, BUILD_NUMBER: '123'],
+        params: [WINDOWS_PYTHON: 'python'],
+        scm: [userRemoteConfigs: [[credentialsId: 'test-id']]],
+        readJSON: { Map args -> args.text == 'plan'
+            ? [enabled: true, repository: 'https://example.invalid/frt.git']
+            : [exit_code: 2, status: 'error'] },
+        isUnix: { false },
+        timeout: { Map args, Closure body -> body() },
+        dir: { String path, Closure body -> body() },
+        checkout: { Map args -> },
+        writeFile: { Map args -> },
+        bat: { Map args -> if (aborted) { throw new TestAbort() }; 2 },
+        readFile: { String path -> 'result' },
+        fileExists: { String path -> true },
+        error: { String message -> throw new IllegalArgumentException(message) },
+        catchError: { Map args, Closure body ->
+            assert !args.catchInterruptions
+            try { body() }
+            catch (TestAbort e) { throw e }
+            catch (Exception expected) { }
+        },
+        stash: { Map args -> if (missingStash) { throw new IOException('Missing report') } },
+        archiveArtifacts: { Map args ->
+            def patterns = args.artifacts.split(',')
+            archived.addAll(files.findAll { path -> patterns.any { pattern ->
+                // DirectoryScanner normalizes separators before matching.
+                org.apache.tools.ant.types.selectors.SelectorUtils.matchPath(
+                    pattern.replace('/', File.separator), path.replace('/', File.separator))
+            } })
+        },
+    ])
+    try {
+        new GroovyShell(binding).parse(source).runFrt('windows')
+        assert false: 'Capture failure must still fail'
+    } catch (TestAbort expected) {
+        assert aborted
+    } catch (IllegalArgumentException expected) {
+        assert !aborted
+    }
+    assert archived == files.take(6)
+}
+captureFailure(false, false)
+captureFailure(true, false)
+captureFailure(true, true)
+println 'FRT partial build/client/server logs survive capture errors, missing reports and cancellation; bundles stay excluded.'

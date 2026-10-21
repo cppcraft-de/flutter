@@ -40,6 +40,16 @@ class PublishingTest(unittest.TestCase):
 
             def do_GET(self):
                 owner.requests.append(("GET", self.path, dict(self.headers), b""))
+                if self.path.startswith("/origin/"):
+                    status = owner.statuses.get(self.path, 200 if self.path in owner.objects else 404)
+                    data = owner.objects.get(self.path, b"")
+                    self.send_response(status)
+                    if status == 307:
+                        self.send_header("Location", owner.url + "/redirect-destination")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
                 data = owner.objects.get(self.path, b"fixture contents")
                 self.send_response(200)
                 self.send_header("Content-Length", str(len(data)))
@@ -169,16 +179,67 @@ class PublishingTest(unittest.TestCase):
                 self.assertFalse((self.root / (relative + ".partial")).exists())
 
     def test_only_missing_seeds_are_staged_then_verified(self):
+        self.objects["/origin/already-present"] = b"keep"
         self.objects["/already-present"] = b"keep"
         output = self.root / "seeds"
         with patch.object(seed, "seed_paths", return_value=["already-present", "missing"]), \
                 patch.object(seed, "UPSTREAM", self.url), redirect_stdout(io.StringIO()):
-            seed.prepare(self.root, {"windows"}, self.url, output)
+            seed.prepare(self.root, {"windows"}, self.url, output,
+                         upload_base_url=self.url + "/origin")
             self.assertFalse((output / "already-present").exists())
             upload.upload_file(output / "missing", self.url + "/missing")
             seed.prepare(self.root, {"windows"}, self.url, output, verify_only=True)
         self.assertEqual(self.objects["/already-present"], b"keep")
-        self.assertEqual([r[1] for r in self.requests if r[0] == "GET"], ["/missing"])
+        self.assertEqual([r[1] for r in self.requests if r[0] == "GET"],
+                         ["/origin/already-present", "/origin/missing", "/missing"])
+        for method, path, headers, body in self.requests:
+            if path.startswith("/origin/"):
+                self.assertEqual(headers["Accesskey"], "dummy-test-key")
+            elif method != "PUT":
+                self.assertNotIn("Accesskey", headers)
+
+    def test_stale_cdn_404_preserves_existing_origin_seeds_including_empty_files(self):
+        self.objects["/origin/coverage"] = b"original snapshot"
+        self.objects["/origin/empty"] = b""
+        with patch.object(seed, "seed_paths", return_value=["coverage", "empty"]), \
+                patch.object(seed, "UPSTREAM", self.url), redirect_stdout(io.StringIO()):
+            seed.prepare(self.root, {"windows"}, self.url, self.root / "seeds",
+                         upload_base_url=self.url + "/origin")
+        self.assertEqual(list((self.root / "seeds").iterdir()), [])
+        self.assertEqual([(r[0], r[1]) for r in self.requests],
+                         [("GET", "/origin/coverage"), ("GET", "/origin/empty")])
+
+    def test_origin_errors_and_redirects_never_stage_or_forward_credentials(self):
+        with patch.object(seed, "seed_paths", return_value=["seed"]):
+            for status in (401, 403, 500, 307):
+                with self.subTest(status=status):
+                    self.requests.clear()
+                    self.statuses["/origin/seed"] = status
+                    with self.assertRaises(urllib.error.HTTPError):
+                        seed.prepare(self.root, {"windows"}, self.url, self.root / "seeds",
+                                     upload_base_url=self.url + "/origin")
+                    self.assertEqual([(r[0], r[1]) for r in self.requests], [("GET", "/origin/seed")])
+                    self.assertEqual(list((self.root / "seeds").iterdir()), [])
+
+    def test_later_seed_run_preserves_first_upload_despite_stale_cdn(self):
+        with patch.object(seed, "seed_paths", return_value=["seed"]), \
+                patch.object(seed, "UPSTREAM", self.url), redirect_stdout(io.StringIO()):
+            first = self.root / "first"
+            seed.prepare(self.root, {"windows"}, self.url, first,
+                         upload_base_url=self.url + "/origin")
+            upload.upload_file(first / "seed", self.url + "/origin/seed")
+            self.objects["/seed"] = b"changed upstream"
+            self.statuses["/seed"] = 404
+            seed.prepare(self.root, {"windows"}, self.url, self.root / "second",
+                         upload_base_url=self.url + "/origin")
+        self.assertEqual(list((self.root / "second").iterdir()), [])
+        self.assertEqual(self.objects["/origin/seed"], b"fixture contents")
+        self.assertEqual(len([r for r in self.requests if r[0] == "PUT"]), 1)
+
+    def test_staging_requires_origin_before_any_request(self):
+        with self.assertRaisesRegex(ValueError, "--upload-base-url"):
+            seed.prepare(self.root, {"windows"}, self.url, self.root / "seeds")
+        self.assertEqual(self.requests, [])
 
     def test_verification_waits_but_does_not_download_or_upload(self):
         with patch.object(seed, "seed_paths", return_value=["absent"]), \

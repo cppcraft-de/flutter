@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Stage missing upstream-owned SDK inputs; never substitute engine artifacts.
 
-HEAD/GET requests are anonymous. The pipeline publishes the staged tree using
-upload_artifact_tree.py, then calls --verify-only before packaging an SDK.
+Probe the authenticated storage origin before staging. The caller must hold the
+publication lock through staging and upload_artifact_tree.py publication.
+--verify-only checks anonymous CDN visibility before packaging an SDK.
 """
 
 from __future__ import annotations
@@ -15,6 +16,8 @@ import re
 import time
 import urllib.error
 import urllib.request
+
+from publish_engine_artifacts import origin_get
 
 
 UPSTREAM = "https://storage.googleapis.com"
@@ -97,19 +100,26 @@ def download(relative: str, destination: Path) -> None:
 
 
 def prepare(checkout: Path, hosts: set[str], base_url: str, output: Path,
-            verify_only: bool = False) -> None:
+            verify_only: bool = False, *, upload_base_url: str | None = None) -> None:
     if not verify_only:
+        if not upload_base_url:
+            raise ValueError("--upload-base-url is required when staging seeds")
         output.mkdir(parents=True, exist_ok=True)
     for relative in seed_paths(checkout, hosts):
         url = f"{base_url.rstrip('/')}/{relative}"
+        if not verify_only:
+            # A stale CDN 404 must never cause an existing origin file to be
+            # replaced. GET supports origins without HEAD; read only one byte.
+            if origin_get(upload_base_url, relative, 1) is not None:
+                print(f"Preserve existing origin seed: {relative}")
+            else:
+                print(f"Missing at origin: {relative}")
+                download(relative, output / relative)
+            continue
         # Allow bounded CDN propagation time after a successful upload.
-        for attempt in range(6 if verify_only else 1):
+        for attempt in range(6):
             if exists(url):
                 print(f"Available: {url}")
-                break
-            if not verify_only:
-                print(f"Missing: {url}")
-                download(relative, output / relative)
                 break
             if attempt == 5:
                 raise RuntimeError(f"Seed is still unavailable through the download endpoint: {url}")
@@ -121,13 +131,17 @@ def main() -> None:
     parser.add_argument("--checkout", type=Path, default=Path("."))
     parser.add_argument("--hosts", required=True)
     parser.add_argument("--base-url", required=True)
+    parser.add_argument("--upload-base-url")
     parser.add_argument("--output", type=Path, default=Path("build/seed-payload"))
     parser.add_argument("--verify-only", action="store_true")
     args = parser.parse_args()
     hosts = set(args.hosts.split(","))
     if not hosts or hosts - {"windows", "macos"}:
         parser.error("--hosts must select windows and/or macos")
-    prepare(args.checkout, hosts, args.base_url, args.output, args.verify_only)
+    if not args.verify_only and not args.upload_base_url:
+        parser.error("--upload-base-url is required when staging seeds")
+    prepare(args.checkout, hosts, args.base_url, args.output, args.verify_only,
+            upload_base_url=args.upload_base_url)
 
 
 if __name__ == "__main__":

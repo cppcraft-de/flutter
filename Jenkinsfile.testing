@@ -161,8 +161,12 @@ def runFrt(String host) {
                     'results/comparison/comparison.json,results/comparison/comparison.html,' +
                     'results/*/comparison/comparison.json,results/*/comparison/comparison.html'
             }
+        }
+        // Keep partial subprocess logs even if collecting the report stash fails.
+        catchError(buildResult: 'FAILURE', stageResult: 'FAILURE', catchInterruptions: false) {
             archiveArtifacts artifacts:
-                "${output}/inputs.json,${output}/identity.json,${output}/jenkins-result.json,${output}/runner.log,${output}/capture-exit.txt",
+                "${output}/inputs.json,${output}/identity.json,${output}/jenkins-result.json,${output}/runner.log,${output}/capture-exit.txt," +
+                "${output}/results/*/*-build.log,${output}/results/*/comparison/*-client.log,${output}/results/*/comparison/server.log",
                 allowEmptyArchive: false
         }
     }
@@ -257,18 +261,27 @@ An early failure notification does not mean the other parallel targets have stop
 }
 
 def seedArtifactMirror(Set<String> hosts) {
-    // This is only the small seed staging tree, never an engine workspace.
-    dir('build/seed-payload') { deleteDir() }
-    def arguments = "--hosts ${hosts.sort().join(',')} --base-url \"${artifactBaseUrl()}\""
-    bat "${params.WINDOWS_PYTHON} dev/bots/seed_artifact_mirror.py ${arguments}"
-    def hasSeeds = powershell(
-        returnStdout: true,
-        script: "if (Get-ChildItem -LiteralPath 'build/seed-payload' -File -Recurse | Select-Object -First 1) { 'yes' }",
-    ).trim() == 'yes'
-    if (hasSeeds) {
-        publishArtifactTree('build/seed-payload')
+    if (params.UPLOAD_TRANSPORT != 'http_put') {
+        error('Guarded mirror seeding requires HTTP PUT plus direct authenticated storage GET.')
     }
-    bat "${params.WINDOWS_PYTHON} dev/bots/seed_artifact_mirror.py ${arguments} --verify-only"
+    // Keep origin checks and uploads together across branch jobs. Other
+    // controllers must use separate storage roots, as for engine publication.
+    lock(resource: 'wsc-engine-artifact-publication') {
+        // This is only the small seed staging tree, never an engine workspace.
+        dir('build/seed-payload') { deleteDir() }
+        def arguments = "--hosts ${hosts.sort().join(',')} --base-url \"${artifactBaseUrl()}\""
+        withCredentials([string(credentialsId: uploadCredentialsId(), variable: 'HTTP_UPLOAD_KEY')]) {
+            bat "${params.WINDOWS_PYTHON} dev/bots/seed_artifact_mirror.py ${arguments} --upload-base-url \"${uploadBaseUrl()}\""
+        }
+        def hasSeeds = powershell(
+            returnStdout: true,
+            script: "if (Get-ChildItem -LiteralPath 'build/seed-payload' -File -Recurse | Select-Object -First 1) { 'yes' }",
+        ).trim() == 'yes'
+        if (hasSeeds) {
+            publishArtifactTree('build/seed-payload')
+        }
+        bat "${params.WINDOWS_PYTHON} dev/bots/seed_artifact_mirror.py ${arguments} --verify-only"
+    }
 }
 
 def bootstrapEngineDependenciesWindows() {

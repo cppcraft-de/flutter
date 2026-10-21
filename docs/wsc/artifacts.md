@@ -265,8 +265,8 @@ This rare case is deliberately not automated with extra versioning machinery.
 ## What seeding does
 
 Before engine builds, when host SDK packaging is selected,
-[seed_artifact_mirror.py](../../dev/bots/seed_artifact_mirror.py) HEAD-checks the
-download root and stages only missing upstream-owned inputs:
+[seed_artifact_mirror.py](../../dev/bots/seed_artifact_mirror.py) checks the
+authenticated storage origin and stages only missing upstream-owned inputs:
 
 - Material icon fonts and Gradle wrapper, pinned by the corresponding
   `bin/internal/*.version` files. These are not FreeType/font-rendering patches.
@@ -277,13 +277,15 @@ download root and stages only missing upstream-owned inputs:
 
 Only 404 means missing. Downloads come from upstream Google storage, preserve
 their paths, verify the supplied MD5 hash, and log SHA256. The normal uploader
-publishes the staged files with unconditional PUTs; a second bounded HEAD check
-waits for visibility. A `200` skips a file without auditing its integrity.
-Preservation depends on an accurate CDN HEAD view and serialized seed writers:
-a stale `404` or concurrent seeder can cause replacement. Seeding has no
-authoritative origin absence check and is outside the engine publication lock
-and receipt. Authentication, network, or server errors fail the step instead
-of being treated as absence.
+publishes the staged files; a bounded anonymous CDN HEAD check then waits for
+visibility. An origin `200` preserves a file without auditing its integrity,
+even when the CDN still returns `404`.
+
+Jenkins holds the shared publication lock across the origin checks and uploads,
+serializing seed writers on that controller. Other controllers must use separate
+storage roots. Seeding requires HTTP PUT and authenticated origin GET; it does
+not use engine publication receipts. Authentication, network, or server errors
+fail the step instead of being treated as absence.
 
 This is **CI seeding**, not an SDK fallback and not engine-build reuse. Engine
 artifacts must come from this fork's builds. Keep the unversioned coverage

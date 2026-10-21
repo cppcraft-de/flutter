@@ -42,12 +42,12 @@ If a report is missing, check the console's `[FRT <host>]` output and archived
 before reports exist. Jenkins aggregates available results after a cell fails;
 missing expected results remain failures. Cancellation skips aggregation.
 
-Detailed compiler, client, and server logs are not archived by the current
-pipeline. On the capture agent, inspect
-`build/frt-results/<host>-<BUILD_NUMBER>/results/<target>/`: build logs are at
-that level; client logs and `server.log` are in `comparison/`. These paths are
-relative to the SDK-stage workspace. The archived `runner.log` contains progress
-and errors, not all subprocess output.
+Jenkins also archives available compiler, client, and server logs, including
+partial logs when a build or capture fails. Find them under
+`build/frt-results/<host>-<BUILD_NUMBER>/results/<target>/`: `*-build.log` files
+are at that level; `*-client.log` and `server.log` are in `comparison/`.
+The same paths exist in the capture agent's SDK-stage workspace. The archived
+`runner.log` contains progress and errors, not all subprocess output.
 
 Reports are archived in Jenkins, not included in the public SDK payload or
 attached to email. `archiveArtifacts` does not make them private: configure
