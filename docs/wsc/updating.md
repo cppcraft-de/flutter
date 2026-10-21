@@ -125,10 +125,21 @@ python dev/bots/wsc_rebase.py prepare --old-base "$oldBase" --tip "$wscTip" --ne
 ```
 
 Check the printed commits, branch, and destination. Once the plan is approved,
-run it with `--apply`, then enter the candidate:
+run it with `--apply`:
 
 ```sh
 python dev/bots/wsc_rebase.py prepare --old-base "$oldBase" --tip "$wscTip" --new-base "$newBase" --branch "$candidate" --worktree "$candidatePath" --apply
+```
+
+Read the result before changing directory. If it reports `Replay completed`,
+enter the candidate and review the result below. If it reports `Replay stopped.
+Candidate preserved at ...`, enter that directory to inspect the stopped replay,
+even though the command exited nonzero. If preparation failed before creating
+the worktree, stay in the source checkout and fix the reported error.
+
+After confirming the candidate was created:
+
+```sh
 cd "$candidatePath"
 ```
 
@@ -212,6 +223,12 @@ The helper checks ancestry, whitespace, the engine pin, source identity, and
 focused Python tests. The optional dependency check applies patches to pristine
 Git objects without changing the supplied working trees. Success ends with
 `SOURCE CHECKS PASSED, NOT RELEASE APPROVAL` and lists remaining checks.
+
+Before using the source checkout's Dart/Flutter commands, select a mirror that
+contains its pinned artifacts; see [mirror selection](artifacts.md#packaging-and-mirror-selection).
+The tracked source default and Jenkins' `ci-v2` default differ. After publication,
+select the build's download root before retrying bootstrap; publication alone
+does not change the source checkout's mirror.
 
 Run the Dart/Flutter checks with a compatible SDK and resolved packages:
 

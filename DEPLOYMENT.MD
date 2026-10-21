@@ -50,11 +50,13 @@ packaging, authentication, or developer-installation acceptance.
 
 Use persistent agent work directories with sufficient room for dependencies,
 per-target engine outputs, temporary packaging clones, SDK caches, and archives.
+Packaging creates its clone and Pub cache on the agent's system temporary
+volume; reserve space there as well as on the workspace volume.
 Changing paths can invalidate Ninja outputs containing absolute paths. Do not
 enable workspace-wipe/cleanup steps for the persistent engine workspaces.
 
-- **All agents:** compatible Jenkins agent Java, Git, Python 3, depot_tools with
-  `gclient`, and the native build prerequisites for the pinned Flutter source.
+- **All agents:** compatible Jenkins agent Java, Git, Python 3.10 or newer,
+  depot_tools with `gclient`, and the native build prerequisites for the pinned Flutter source.
   Verify commands in the actual agent process environment, not only your shell.
 - **Windows:** VS2022 and Windows SDK components for the built architectures,
   including ARM64 libraries and matching debugging tools/`dbghelp.dll`; `7za`
@@ -87,11 +89,16 @@ platform prerequisites; WSC packaging requirements above are additional.
 1. Create a multibranch job with script path **`Jenkinsfile.testing`**. Do not
    add a root `Jenkinsfile` during commissioning: another Jenkins installation
    could discover it and start builds. Keep one shared pipeline implementation.
+   Folder/job names must form a relative path using only letters, digits,
+   `_`, `.`, `-`, and `/`, with no empty, `.` or `..` components. Preflight
+   rejects spaces and `%`; slash-containing branch names encoded as `%2F` by
+   multibranch jobs therefore fail the workspace-key check. Use branch names
+   such as `wsc-main-3.44.4`.
 2. Install the required plugins: Declarative Pipeline, Git with
    `gitUsernamePassword`, Credentials Binding, Folder Properties with
    build-start exposure, Pipeline Utility Steps (`readJSON`), Lockable Resources
-   (`lock`), and Email Extension. Publication uses an automatically created
-   controller-wide lock; no manually configured lock resource is needed.
+   (`lock`), Timestamper (`timestamps`), and Email Extension. Publication uses an
+   automatically created controller-wide lock; no manually configured lock resource is needed.
    Enabled FRT reporting also requires the JUnit plugin (`junit`).
    Pipeline Utility Steps is required even when FRT is disabled: preflight reads
    its configuration. No custom JSON-parser script approval is needed.
@@ -148,9 +155,13 @@ parameters for URLs/credential ID override these properties. Leave those
 parameters empty to inherit; saved values on an existing job may override new
 defaults. Only the download URL is written into the SDK.
 
-The fixed `ci-v2` testing prefix starts guarded publication without overwriting
-legacy test artifacts. With these defaults, the first run needs neither the
-dangerous overwrite flag nor a CDN purge. Keep the prefix fixed across builds;
+The fixed `ci-v2` testing prefix separates guarded publication from legacy test
+artifacts. If that prefix is empty at both origin and CDN, the first run needs
+neither the dangerous overwrite flag nor a CDN purge. Completed, verified
+publications can be reused normally. Unrecorded objects, pending receipts, or
+inconsistent CDN responses need the
+[adoption/recovery review](docs/wsc/artifacts.md#explicit-overwrite-and-first-adoption).
+Keep the prefix fixed across builds;
 normal publish-once reuse is compatible with CDN caching. Source-checkout
 bootstrap and approved FRT baseline URLs do not automatically follow CI URL
 changes; baseline pins are reviewed separately. Local Jenkins URL overrides
@@ -186,6 +197,13 @@ a build, validate the current committed source and `bin/internal/engine.version`
 using the [engine-pin procedure](docs/wsc/releases.md#engine-identity). Check
 every candidate; update and commit the pin when engine inputs changed. Local-only
 engine development should retain its published bootstrap pin.
+
+Before the first host SDK build, complete the default-on
+[FRT prerequisites](docs/wsc/rendering-regression.md#execution-and-prerequisites),
+including agent capture setup and read access to the separate FRT repository.
+Its checkout credential defaults to the Flutter SCM credential; access to the
+Flutter fork alone is insufficient. FRT configuration and temporary disabling
+are covered in the [FRT reference](docs/wsc/rendering-regression.md#configure-once-then-version-the-defaults).
 
 These are the current script defaults (verify saved job parameters):
 
@@ -298,6 +316,11 @@ Check `flutter --version --machine`: WSC identity, framework revision, channel,
 and engine revision must match the intended build. See
 [release identity](docs/wsc/releases.md#version-and-channel-identity).
 
+For Android acceptance, set `GRADLE_USER_HOME` in the test shell to a newly
+created disposable directory before running the commands below. This forces
+fresh Maven downloads independently of the extracted SDK's Flutter cache;
+neither clearing Flutter's cache nor `flutter clean` clears Gradle's cache.
+
 With the application's normal platform toolchains installed:
 
 ```sh
@@ -314,10 +337,12 @@ flutter build ios --no-codesign
 ```
 
 Also exercise debug/profile workflows and the actual WSC rendering tests on
-the supported devices. After checking the warm-cache path, remove a selected
-non-bootstrap component in this **disposable extracted SDK cache** and confirm
-Flutter restores it from the configured mirror. Observe the HTTP requests;
-fork engine/Maven downloads must not silently switch to public storage.
+the supported devices. After checking the warm-cache path, remove a whole
+non-bootstrap platform artifact directory in this **disposable extracted SDK
+cache**, such as `bin/cache/artifacts/engine/android-arm64-release`, and rebuild
+that target to confirm Flutter restores it from the configured mirror. Removing
+one file may not invalidate Flutter's directory-based cache check. Observe the
+HTTP requests; fork engine/Maven downloads must not silently switch to public storage.
 Pub/Gradle/toolchain downloads are separate and may still use public services.
 
 Keep failed/partial runs as candidates, not releases. One host's SDK may have

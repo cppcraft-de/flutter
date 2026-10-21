@@ -84,10 +84,12 @@ hash must agree. The reported engine revision must agree with the build record;
 it need not equal the framework revision.
 
 Upstream also supports `FLUTTER_PREBUILT_ENGINE_VERSION` as an explicit override
-of the download ID. Developers normally leave it unset. Setting it to make a
-missing download disappear can select a different engine and hide a packaging
-mistake. Editing generated cache stamps is likewise not a durable repair: the
-launcher can regenerate them.
+of the download ID written to `bin/cache/engine.stamp`. The fork's earlier
+`sky_engine`/`flutter_gpu` bootstrap reads `bin/internal/engine.version` directly
+and does not use this override. Developers normally leave it unset. Setting it
+to make a missing download disappear can select a different engine and hide a
+packaging mistake. Editing generated cache stamps is likewise not a durable
+repair: the launcher can regenerate them.
 
 ## Local engine development
 
@@ -95,8 +97,12 @@ A source checkout uses the published engine selected by the tracked
 `bin/internal/engine.version` to bootstrap its Dart SDK and tooling. Keep that
 pin at a published, compatible version while making local commits. The launcher
 uses the tracked pin rather than recalculating it from each local commit.
+Select a mirror containing that pin's artifacts before starting the tool or IDE;
+see [mirror selection](artifacts.md#packaging-and-mirror-selection).
 
-Build the modified engine locally and select its outputs with `--local-engine`
+Use the source revision's [engine setup guide](../engine/contributing/Setting-up-the-Engine-development-environment.md)
+and [compilation guide](../engine/contributing/Compiling-the-engine.md) to build
+the modified engine locally, then select its outputs with `--local-engine`
 and `--local-engine-host`, optionally supplying `--local-engine-src-path`.
 See [using the Flutter tool with a local engine](../tool/README.md).
 These local builds do not need to be uploaded to the mirror before using the
@@ -113,6 +119,11 @@ keeping the bootstrap pin does not guarantee compatibility with arbitrary change
 The following steps apply when preparing engine artifacts and an SDK for
 publication, including untagged Jenkins candidates. They are not required for
 each local development commit.
+
+Source-checkout bootstrap still uses its selected mirror. After CI publishes
+the candidate, select that build's download root before retrying Dart/Flutter
+commands; the tracked default does not automatically follow Jenkins' `ci-v2`
+root. See [mirror selection](artifacts.md#packaging-and-mirror-selection).
 
 1. Commit engine, dependency, and patch-file changes first. The hash is based on
    committed inputs; saving a source edit without committing it is insufficient.
@@ -137,7 +148,7 @@ an old SDK's pin alone cannot supply the missing artifacts.
 | Preflight says the pin differs from the content hash | Derive the pin again after committing engine inputs. Check the selected source before publishing. |
 | Collector rejects `args.gn` revision or hash | Build output does not describe the selected source/context. Inspect the checkout and build invocation; do not relabel stale files. |
 | Maven 404 | Compare the exact requested hash, directory, filename, and POM version. Confirm the Android stage published that mode/ABI to the SDK's download root. |
-| Gradle rejects an HTTP repository | Transport configuration, separate from version identity. Use HTTPS or the documented local-testing opt-in. |
+| Gradle rejects an HTTP repository | Transport configuration, separate from version identity. Use HTTPS; any temporary HTTP exception needs a separately agreed local setup. |
 | SDK metadata check fails | The packaged pin, downloaded engine record, or generated version metadata disagree. Inspect packaging inputs and caches instead of hand-editing the stamps. |
 
 The pipeline checks source identity, generated outputs, POM coordinates, and

@@ -42,10 +42,18 @@ If a report is missing, check the console's `[FRT <host>]` output and archived
 before reports exist. Jenkins aggregates available results after a cell fails;
 missing expected results remain failures. Cancellation skips aggregation.
 
-Reports stay in private Jenkins artifacts. They are not included in the public
-SDK payload or attached to email. Failure/mismatch emails contain the console
-log and build link. Keep Jenkins artifact access restricted and retain release
-review evidence under the client's retention policy.
+Detailed compiler, client, and server logs are not archived by the current
+pipeline. On the capture agent, inspect
+`build/frt-results/<host>-<BUILD_NUMBER>/results/<target>/`: build logs are at
+that level; client logs and `server.log` are in `comparison/`. These paths are
+relative to the SDK-stage workspace. The archived `runner.log` contains progress
+and errors, not all subprocess output.
+
+Reports are archived in Jenkins, not included in the public SDK payload or
+attached to email. `archiveArtifacts` does not make them private: configure
+Jenkins access control to restrict the job and its artifacts. Failure/mismatch
+emails contain the console log and build link. Retain release review evidence
+under the client's retention policy.
 
 ## Configure once, then version the defaults
 
@@ -91,11 +99,20 @@ Flutter build. Once the setup is accepted, pin an exact FRT commit in the config
 for repeatable comparisons. FRT owns its fixtures, client dependencies, and
 comparison behavior; this repository owns the Jenkins adapter and settings.
 
+The adapter inherits the agent environment. FRT environment settings can
+override the pinned checkout's checker defaults, so a pinned commit alone does
+not fix the comparison policy. Review the effective settings using the FRT
+README when commissioning agents and recording acceptance evidence.
+
 ## Execution and prerequisites
 
 The pipeline packages and uploads each SDK, then compares its local ZIP against
 the approved baseline. It builds two FRT clients per target and uses isolated
 comparison data. It does not run another engine build or use a shared FRT server.
+
+Reporting always needs a `flutter_win` executor, even for a macOS-only SDK run.
+That executor needs Git, FRT repository access, and `WINDOWS_PYTHON -m uv` for
+the report checkout and aggregation.
 
 On each packaging agent:
 
@@ -118,10 +135,13 @@ it does not clear the SDK's warm Flutter cache or bypass CDN caching. Current
 CI targets do not exercise Android Maven downloads, so retain the separate
 [SDK acceptance checks](../../DEPLOYMENT.MD#5-accept-the-sdks-before-distribution).
 
-The adapter removes its temporary inputs on ordinary completion or failure.
-A crashed agent can leave `frt-input-*` directories beside the result directory.
-Inspect abandoned directories before removing them. Do not clean persistent
-engine workspaces to recover an FRT failure.
+The adapter removes its `frt-input-*` directory (baseline download and Gradle
+home) on ordinary completion or failure. FRT also removes its temporary SDK
+extractions and client source/build work directories. The result tree remains,
+including copied client bundles, comparison database, reports, and logs; the
+pipeline does not prune it. A crashed agent can leave temporary directories.
+Inspect abandoned directories and apply the client's result-retention policy
+without cleaning persistent engine workspaces.
 
 ## Commission capture on the actual agents
 

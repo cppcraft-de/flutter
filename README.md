@@ -28,7 +28,7 @@ Start with the [WSC maintenance guide](docs/wsc/README.md).
 To move to a new stable, beta, or main base, follow
 [Updating the WSC fork](docs/wsc/updating.md).
 Automation agents should also read [AGENTS.md](AGENTS.md).
-The documentation and badges below are the upstream Flutter project overview.
+The badges above and the documentation below describe upstream Flutter.
 
 ## Documentation
 

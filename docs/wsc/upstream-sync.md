@@ -16,7 +16,8 @@ transferred, not GitHub PR metadata, dependency checkouts or build artifacts.
 
 ## Running the sync
 
-Requires Python 3.10+ and Git, upstream read access and fork write access.
+Requires Python 3.10+ and Git 2.31+ (`rev-parse --path-format=absolute`).
+Preview needs read access to both remotes; applying changes also needs fork write access.
 Configure `upstream` as the official Flutter repository and `origin` as the
 client's fork. Use normal Git credential helpers or SSH; do not put secrets in
 remote URLs. Repository-local authentication settings are not copied into the
@@ -57,6 +58,8 @@ server policy/authentication issue and rerun; equal refs are skipped safely.
 this is the repository containing the script, regardless of your working
 directory. `--source NAME` and `--destination NAME` select alternative **named
 remotes**. The destination's push URL is used, and multiple URLs are rejected.
+That URL must support `ls-remote` for preview and verification, object fetching
+for apply's lease checks, and pushes; a write-only endpoint is insufficient.
 
 The fixed `upstream/*` destination namespace is owned by synchronization. Applying
 the sync updates it even if upstream rewrote a branch; never develop WSC changes

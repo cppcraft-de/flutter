@@ -25,6 +25,12 @@ just to make the patch check pass.
 
 ## 2. Fix a patch in a separate checkout
 
+If the candidate's dependencies already have WSC patches applied, preserve any
+intentional nested edits before replacing the patch files. Reset the old applied
+stack with the helper's `--reverse` option while its matching old patch inputs
+are still available. If you cannot establish that old state, use a fresh isolated
+candidate for the hook checks below; keep the existing checkout intact.
+
 For each changed dependency, create a scratch checkout outside the candidate.
 Use its repository URL and revision from the candidate's `DEPS`. For example,
 replace `SKIA_URL` and `NEW_SKIA_SHA` below:
@@ -74,6 +80,11 @@ candidate; scratch commits are not release inputs.
 
 ## 3. Check the real dependency hooks
 
+Stage the reviewed patch/helper changes in the outer candidate before syncing.
+Use path-specific `git add` for additions/edits and `git rm` for removed patches.
+An unstaged patch deletion makes the sync helper fail while reading tracked
+inputs, before it reaches `gclient`.
+
 From the candidate root, inspect any existing nested changes before syncing:
 
 ```sh
@@ -104,8 +115,14 @@ in the [agent setup](../../DEPLOYMENT.MD#1-prepare-the-agents).
 
 Check that both HEADs match `DEPS` and the expected revisions. The final helper
 invocation should report that the selected patches are already applied.
-If sync failed at a hook, fix the patch and rerun sync; a partial sync is not a
-completed check.
+Then repeat the same forced sync, keeping `--web` if used, to check that the
+pre-sync hook can reset the applied stack and the post-sync hook can reapply it.
+
+If a hook fails, inspect the nested state before retrying. In particular,
+`Preserving modified patch-created file` can mean the existing file belongs to
+an earlier version of a patch. Repeating sync with the new patch will not fix
+that mismatch. Preserve edits and use the old-stack reset or fresh candidate
+described in step 2. A partial sync is not a completed check.
 
 ## 4. Commit and verify the candidate
 

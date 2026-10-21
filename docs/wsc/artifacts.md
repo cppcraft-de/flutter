@@ -57,9 +57,9 @@ The same server/root serves engine artifacts, Maven artifacts, and SDK ZIPs:
     flutter_patched_sdk.zip
     flutter_patched_sdk_product.zip
     flutter-web-sdk.zip
-    windows-x64/windows-x64-flutter.zip
-    windows-x64-profile/windows-x64-profile-flutter.zip
-    windows-x64-release/windows-x64-release-flutter.zip
+    windows-x64-debug/windows-x64-flutter.zip
+    windows-x64-profile/windows-x64-flutter.zip
+    windows-x64-release/windows-x64-flutter.zip
     android-arm64-release/windows-x64.zip
     ...
   flutter_infra_release/flutter/fonts/<font-version>/fonts.zip
@@ -91,8 +91,9 @@ collected objects fail collection. The publication guard verifies new downloads
 against their SHA-256 and reused downloads against the publication receipt.
 This verifies publication, not application compilation or rendering.
 
-Symbols/PDBs are excluded by default; separate symbol retention is an operator
-policy, not an automatic diagnostic publication feature of this pipeline.
+Standalone `symbols.zip` and `.pdb` outputs are excluded by default. PDBs already
+inside Windows runtime ZIPs remain included; the collector does not rewrite
+those archives. Separate symbol retention is an operator policy.
 
 ### Bootstrap packages versus engine runtimes
 
@@ -117,8 +118,9 @@ only in the [runbook](../../DEPLOYMENT.MD#3-set-folder-properties).
   The publication guard also reads receipts and probes existing files directly
   at this storage origin, with the same credential and without redirects. This
   must be the authoritative, uncached origin, not the public CDN alias.
-- The download root must preserve relative paths and return file bytes on GET,
-  `200` on HEAD for existing files, and `404` for absent files. Login redirects
+- The download root must preserve relative paths and return file bytes and
+  `200` on anonymous GET/HEAD for existing files, with an exact `Content-Length`
+  on both methods, and `404` for absent files. Login redirects
   and HTML error pages masquerading as success are not acceptable.
 - Use TLS trusted by agents and developers. An intranet/VPN can restrict reads;
   the SDK does not inherit Jenkins upload credentials. Noninteractive public
@@ -221,22 +223,33 @@ Use it only after reviewing the affected engine ID/root and existing consumers:
 
 1. Stop other writers/consumers while repairing. On a disposable test root,
    disable/purge CDN caching first; the flag does not call the CDN purge API.
-2. Select the affected target/modes (and usually empty `HOST_SDKS` for targeted
-   repair). If a receipt is pending, the selected payload must contain **all**
-   its pending paths. Repair that target first; unrelated target stages cannot
-   clear its pending state. A malformed receipt needs manual inspection.
+2. Check that the selected target's payload contains **all** pending paths;
+   unrelated target stages cannot clear pending state. A reduced run with empty
+   `HOST_SDKS` can repair payloads that do not require host Android AOT tools.
+   For pending Windows/macOS payloads containing those tools, see the limitation
+   below before starting a recovery run. A malformed receipt needs manual inspection.
 3. Run with the overwrite flag explicitly enabled. A stale CDN response still
    fails verification, even if the old and new payloads have the same length.
 4. Return the flag to `false` for ordinary builds. Re-test extracted SDKs; affected
    consumers may need fresh Gradle and Flutter caches. Never treat the flag as
    permission to silently replace an accepted release's binaries.
 
+**Host Android AOT recovery limitation:** empty `HOST_SDKS` omits the original
+host-specific Android AOT payload. Selecting the host restores that payload
+but requires all modes and that host's standard target set. The pipeline has
+no parameter to run the affected target first; its parallel target stages can
+reach publication while the engine receipt still lists another target's pending
+paths. A controller-wide publication lock serializes writes but does not control
+target order. This case
+requires a separately reviewed recovery procedure; the reduced-run recipe above
+does not cover it.
+
 Existing pre-guard artifact trees have no receipts and will fail as unrecorded.
 The Jenkins defaults instead use a fresh, fixed **`ci-v2`** prefix under the
 existing testing storage/pull zone. It is not a per-build prefix: retain it
-while SDKs depend on it and publish subsequent engines there too. This avoids
-legacy migration and stale CDN objects without changing workspace paths or
-requiring a clean compilation. The first run uploads/seeds the new root;
+while SDKs depend on it and publish subsequent engines there too. An empty origin
+and CDN prefix avoids legacy migration and stale CDN objects without changing
+workspace paths or requiring a clean compilation. The first run uploads/seeds that root;
 normal subsequent publication can use CDN caching. Explicit URL overrides can
 still select an older root, in which case the migration rules below apply.
 
@@ -264,9 +277,13 @@ download root and stages only missing upstream-owned inputs:
 
 Only 404 means missing. Downloads come from upstream Google storage, preserve
 their paths, verify the supplied MD5 hash, and log SHA256. The normal uploader
-publishes the staged files; a second bounded HEAD check waits for visibility.
-Existing files are not replaced or integrity-audited by HEAD. Authentication,
-network, or server errors fail the step instead of being treated as absence.
+publishes the staged files with unconditional PUTs; a second bounded HEAD check
+waits for visibility. A `200` skips a file without auditing its integrity.
+Preservation depends on an accurate CDN HEAD view and serialized seed writers:
+a stale `404` or concurrent seeder can cause replacement. Seeding has no
+authoritative origin absence check and is outside the engine publication lock
+and receipt. Authentication, network, or server errors fail the step instead
+of being treated as absence.
 
 This is **CI seeding**, not an SDK fallback and not engine-build reuse. Engine
 artifacts must come from this fork's builds. Keep the unversioned coverage
@@ -296,7 +313,17 @@ the resolved deployment download root. The Flutter launchers load it only when
 `FLUTTER_STORAGE_BASE_URL` is not explicitly set. Set that environment variable
 to use another mirror for a local checkout without editing the tracked default.
 The selected mirror must contain the artifacts for the checkout's engine pin;
-configuring its URL does not publish them. See [local engine development](engine-identity.md#local-engine-development)
+configuring its URL does not publish them. CI does not change the tracked
+source-checkout root. After publishing a new pin only to CI's root, source users
+must select that populated root before running Flutter. For the CI default,
+set this in the PowerShell session:
+
+```powershell
+$env:FLUTTER_STORAGE_BASE_URL = 'https://fluttertest.b-cdn.net/ci-v2'
+```
+
+If the build used a URL override, use its actual resolved download root instead.
+See [local engine development](engine-identity.md#local-engine-development)
 for working with local commits and engine builds.
 There is no availability fallback from a configured private mirror to public
 storage. The fork bootstrap requires a configured root; bypassing/removing

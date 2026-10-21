@@ -66,11 +66,13 @@ Return a compact human-readable report (no JSON manifest required):
 
 1. **Identity and coverage:** inputs/members, job/build/revision, final result
    if present, complete vs partial evidence and any source-version mismatch.
-2. **Status table:** target/host SDK; sync, compilation, upload, packaging and
-   validation as applicable. Use succeeded/failed/skipped/in-progress-at-log-end/
-   unknown. Do not infer success from silence, uploads, or a source test.
+2. **Status table:** target/host SDK; sync, compilation, upload, packaging,
+   validation and FRT comparison as applicable. Use succeeded/failed/unstable/
+   aborted/skipped/in-progress-at-log-end/unknown. For FRT, follow
+   [rendering outcomes](../../../docs/wsc/rendering-regression.md#outcomes-evidence-and-acceptance).
+   Do not infer success from silence, uploads, or a source test.
 3. **Findings by priority:** root cause vs hypothesis and confidence; affected
-   stages; short redacted evidence with `archive :: member:line` and timestamp;
+   stages; short redacted evidence with `archive :: member:line` and timestamp when present;
    proposed minimal fix, owning file/symbol or client setting, who must act,
    risks (especially rebuilds), and verification command/expected result.
 4. **Remaining unknowns:** precise additional evidence or safe diagnostic commands

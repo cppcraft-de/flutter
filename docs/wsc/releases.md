@@ -71,7 +71,7 @@ python dev/bots/validate_sdk_identity.py --revision ACCEPTED_SHA --require-relea
 After approval to publish the tag, push that tag only:
 
 ```sh
-git push origin refs/tags/WSC_TAG
+git push --no-follow-tags origin refs/tags/WSC_TAG
 ```
 
 Run the release build from the candidate branch at that exact commit. Do not
@@ -119,14 +119,14 @@ Recheck source identity and Jenkins trigger settings before publishing the ref.
 For an approved fast-forward update:
 
 ```sh
-git push origin ACCEPTED_SHA:refs/heads/CHANNEL
+git push --no-follow-tags origin ACCEPTED_SHA:refs/heads/CHANNEL
 ```
 
 If a non-fast-forward update has been explicitly approved and branch protection
 allows it, use the recorded old SHA as the lease:
 
 ```sh
-git push --force-with-lease=refs/heads/CHANNEL:OLD_CHANNEL_SHA origin ACCEPTED_SHA:refs/heads/CHANNEL
+git push --no-follow-tags --force-with-lease=refs/heads/CHANNEL:OLD_CHANNEL_SHA origin ACCEPTED_SHA:refs/heads/CHANNEL
 ```
 
 A failed lease means the remote changed. Fetch and review the new tip before
@@ -309,6 +309,12 @@ backends. The presence of the API does not establish those runtime results.
 - **Verification:** source/patch tests first, then real engine compilation,
   packaging, uploads, fresh SDK/cache-repair tests, and rendering tests. A pass
   at one level does not certify the following levels.
+
+For source-checkout Dart/Flutter commands, first select a mirror containing the
+tracked engine pin's artifacts; see [mirror selection](artifacts.md#packaging-and-mirror-selection).
+Publishing to Jenkins' `ci-v2` root does not change the source checkout's default.
+Use a compatible available SDK or leave these checks pending until publication
+if the candidate's artifacts are not yet available.
 
 Useful focused tests (with a compatible configured Dart/Python environment):
 
