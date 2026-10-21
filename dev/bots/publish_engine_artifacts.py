@@ -6,6 +6,8 @@ pending receipt is written before payload PUTs; a completed receipt only after
 anonymous download verification. No remote deletion or automatic repair.
 """
 
+from __future__ import annotations
+
 import argparse
 import hashlib
 from http.client import IncompleteRead
