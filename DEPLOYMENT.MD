@@ -30,7 +30,7 @@ Jenkinsfile. It builds engine artifacts, uploads them directly from their agents
 then packages and uploads Windows and macOS SDKs using those artifacts. Large
 engine payloads do not pass through Jenkins stashes.
 FRT comparison follows each host's SDK packaging: Windows and Web on Windows,
-macOS on macOS. It is enabled by default with client build #19's Windows/macOS
+macOS on macOS. It is enabled by default with client build #24's Windows/macOS
 SDKs pinned as commissioning baselines; Web uses Edge. Missing baseline
 configuration fails preflight. Real-agent FRT execution still needs acceptance;
 a packaging-only green build does not certify rendering.

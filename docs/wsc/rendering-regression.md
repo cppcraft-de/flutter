@@ -24,7 +24,10 @@ for those commands. This pipeline continues to use isolated per-cell instances.
 
 [frt_ci.json](../../dev/bots/frt_ci.json) owns the configuration. Testing is
 enabled by default for Windows, macOS and Web. Both host baseline SDKs are pinned
-to client build #19 by URL and published SHA-256; Web reuses the Windows SDK.
+to client build #24 by URL and published SHA-256; Web reuses the Windows SDK.
+Build #24 replaces #19 with user approval because the current FRT client needs
+the newer indexed line-layout diagnostic APIs. This establishes a new comparison
+baseline; it does not demonstrate rendering equivalence to #19.
 These are commissioning baselines, not independent proof of rendering
 correctness. Their first real-agent comparisons still need acceptance.
 Do not automatically select a moving latest build.

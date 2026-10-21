@@ -53,7 +53,7 @@ class FrtCiTest(unittest.TestCase):
         self.assertEqual(plan["ref"], "master")
         self.assertTrue(plan["enabled"])
         for host in ("windows", "macos"):
-            self.assertIn(f"/19/{host}/", plan["baselines"][host]["url"])
+            self.assertIn(f"/24/{host}/", plan["baselines"][host]["url"])
             self.assertRegex(plan["baselines"][host]["sha256"], r"^[0-9a-f]{64}$")
         self.assertFalse(frt_ci.load_plan(self.config, plan["hosts"], {"WSC_FRT_ENABLED": "0"})["enabled"])
         self.assertEqual(frt_ci.load_plan(self.config, [], {})["targets"], [])
