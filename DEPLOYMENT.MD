@@ -186,6 +186,12 @@ Enabled FRT comparisons also notify early on rendering mismatches (unstable).
 
 ## 4. Run the integration build
 
+Before pushing a CI candidate (including polling-triggered builds) or starting
+a build, validate the current committed source and `bin/internal/engine.version`
+using the [engine-pin procedure](docs/wsc/releases.md#engine-identity). Check
+every candidate; update and commit the pin when engine inputs changed. Local-only
+engine development should retain its published bootstrap pin.
+
 These are the current script defaults (verify saved job parameters):
 
 ```ini
