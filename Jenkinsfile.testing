@@ -1,0 +1,958 @@
+def csvValues(String value) {
+    return value
+        .split(',')
+        .collect { it.trim().toLowerCase() }
+        .findAll { !it.isEmpty() }
+        .toSet()
+}
+
+def csvHas(String value, String item) {
+    return csvValues(value).contains(item)
+}
+
+def scmPollingScheduleFor(String disabled) {
+    // Folder properties are strings: Groovy would treat even "false" as true.
+    return ['1', 'true', 'yes', 'on'].contains(disabled?.trim()?.toLowerCase())
+        ? ''
+        : 'H/5 * * * *'
+}
+
+def validateCsvParameter(String name, String value, Set<String> allowed) {
+    def values = csvValues(value)
+    def unknown = values - allowed
+    if (!unknown.isEmpty()) {
+        error("${name} contains unsupported values: ${unknown.sort().join(', ')}")
+    }
+    return values
+}
+
+def engineDepsSyncMode(Object value) {
+    // A queued/timer run can still carry the OLD BooleanParameterValue when
+    // this Jenkinsfile first replaces the checkbox with a choice. Migrate old
+    // false to auto immediately; retain old true as an explicit forced sync.
+    if (value instanceof Boolean) {
+        return value ? 'true' : 'auto'
+    }
+    def mode = value == null ? 'auto' : value.toString().trim().toLowerCase()
+    if (!(mode in ['auto', 'true', 'false'])) {
+        error("Invalid SYNC_ENGINE_DEPS mode: ${mode}")
+    }
+    return mode
+}
+
+def bootstrapEngineDependenciesUnix(boolean includeWeb) {
+    def mode = engineDepsSyncMode(params.SYNC_ENGINE_DEPS)
+    sh "python3 dev/bots/sync_engine_deps.py --mode ${mode}${includeWeb ? ' --web' : ''}"
+}
+
+// Explicit build parameters win over Jenkins installation settings.
+def artifactBaseUrl() {
+    return params.ARTIFACT_BASE_URL?.trim() ?: env.WSC_ARTIFACT_BASE_URL?.trim() ?: 'https://fluttertest.b-cdn.net/ci-v2'
+}
+
+def uploadBaseUrl() {
+    return params.HTTP_UPLOAD_BASE_URL?.trim() ?: env.WSC_HTTP_UPLOAD_BASE_URL?.trim() ?: 'https://storage.bunnycdn.com/fluttertest/ci-v2'
+}
+
+def uploadCredentialsId() {
+    return params.UPLOAD_CREDENTIALS_ID?.trim() ?: env.WSC_UPLOAD_CREDENTIALS_ID?.trim() ?: 'HTTP_UPLOAD_KEY'
+}
+
+def engineWorkspaceKey() {
+    def key = env.WSC_ENGINE_WORKSPACE_KEY?.trim()
+    def job = env.WSC_ENGINE_WORKSPACE_JOB?.trim()
+    if ((key && !job) || (job && !key)) {
+        error('Set both WSC_ENGINE_WORKSPACE_JOB (exact JOB_NAME) and WSC_ENGINE_WORKSPACE_KEY, or neither.')
+    }
+    // Folder properties are inherited by every branch. Only the named job may
+    // reuse an old workspace; all other jobs retain their own persistent paths.
+    return key && job == env.JOB_NAME ? key : env.JOB_NAME
+}
+
+def sdkOutputDirectory(String host) {
+    return "build/sdk-payload/sdk/${env.FRAMEWORK_REVISION}/${env.BUILD_NUMBER}/${host}"
+}
+
+def mailBuildLog(String scope, String result) {
+    def recipient = env.BUILD_LOG_MAIL_RECIPIENT?.trim()
+    if (!recipient) {
+        return
+    }
+    // Console attachments work without a workspace, including global post with
+    // agent none. Early notifications contain the whole run's log so far.
+    try {
+        emailext(
+            to: recipient,
+            subject: "Jenkins - WSC Flutter - ${env.JOB_NAME} #${env.BUILD_NUMBER} - ${scope} - ${result}",
+            body: """WSC Flutter build notification
+
+Scope: ${scope}
+Result: ${result}
+Node: ${env.NODE_NAME ?: 'not allocated'}
+Framework: ${env.FRAMEWORK_REVISION ?: 'unresolved'}
+Engine: ${env.ENGINE_ID ?: 'unresolved'}
+Targets: ${params.TARGETS ?: 'unresolved'}
+Modes: ${params.MODES ?: 'unresolved'}
+Host SDKs: ${params.HOST_SDKS ?: 'none'}
+Build: ${env.BUILD_URL ?: 'unavailable'}
+
+The compressed attachment contains the overall console log at notification time.
+An early failure notification does not mean the other parallel targets have stopped.
+""",
+            attachLog: true,
+            compressLog: true,
+        )
+    } catch (InterruptedException interrupted) {
+        // Do not turn cancellation into a successful notification step.
+        throw interrupted
+    } catch (Exception failure) {
+        // Notification trouble must not obscure the build's original result.
+        echo "WARNING: Could not send build log email for ${scope}; check Email Extension/SMTP configuration and its console messages."
+    }
+}
+
+def seedArtifactMirror(Set<String> hosts) {
+    if (params.UPLOAD_TRANSPORT != 'http_put') {
+        error('Guarded mirror seeding requires HTTP PUT plus direct authenticated storage GET.')
+    }
+    // Keep origin checks and uploads together across branch jobs. Other
+    // controllers must use separate storage roots, as for engine publication.
+    lock(resource: 'wsc-engine-artifact-publication') {
+        // This is only the small seed staging tree, never an engine workspace.
+        dir('build/seed-payload') { deleteDir() }
+        def arguments = "--hosts ${hosts.sort().join(',')} --base-url \"${artifactBaseUrl()}\""
+        withCredentials([string(credentialsId: uploadCredentialsId(), variable: 'HTTP_UPLOAD_KEY')]) {
+            bat "${params.WINDOWS_PYTHON} dev/bots/seed_artifact_mirror.py ${arguments} --upload-base-url \"${uploadBaseUrl()}\""
+        }
+        def hasSeeds = powershell(
+            returnStdout: true,
+            script: "if (Get-ChildItem -LiteralPath 'build/seed-payload' -File -Recurse | Select-Object -First 1) { 'yes' }",
+        ).trim() == 'yes'
+        if (hasSeeds) {
+            publishArtifactTree('build/seed-payload')
+        }
+        bat "${params.WINDOWS_PYTHON} dev/bots/seed_artifact_mirror.py ${arguments} --verify-only"
+    }
+}
+
+def bootstrapEngineDependenciesWindows() {
+    def mode = engineDepsSyncMode(params.SYNC_ENGINE_DEPS)
+    // Apply long-path support to every Git process spawned by gclient. A local
+    // setting on the framework checkout does not propagate into its child
+    // dependency repositories.
+    withEnv([
+        'GIT_CONFIG_COUNT=1',
+        'GIT_CONFIG_KEY_0=core.longpaths',
+        'GIT_CONFIG_VALUE_0=true',
+    ]) {
+        bat "${params.WINDOWS_PYTHON} dev/bots/sync_engine_deps.py --mode ${mode}"
+    }
+}
+
+def runEngineBuildUnix(String builder, String buildName) {
+    dir('engine/src/flutter/tools/pkg/engine_build_configs') {
+        sh """
+            set -eu
+            case "\$(uname -s)" in
+              Linux) host_os=linux ;;
+              Darwin) host_os=macos ;;
+              *) echo 'Unsupported Unix host' >&2; exit 1 ;;
+            esac
+            case "\$(uname -m)" in
+              x86_64) host_cpu=x64 ;;
+              arm64|aarch64) host_cpu=arm64 ;;
+              *) echo 'Unsupported Unix CPU' >&2; exit 1 ;;
+            esac
+            dart="../../../prebuilts/\${host_os}-\${host_cpu}/dart-sdk/bin/dart"
+            "\${dart}" bin/run.dart '${builder}' '${buildName}'
+        """
+    }
+}
+
+def runEngineBuildWindows(String builder, String buildName) {
+    dir('engine/src/flutter/tools/pkg/engine_build_configs') {
+        bat "\"%WORKSPACE%\\engine\\src\\flutter\\prebuilts\\windows-x64\\dart-sdk\\bin\\dart.exe\" bin\\run.dart ${builder} \"${buildName}\""
+    }
+}
+
+def collectArtifactsUnix(String builder, List<String> buildNames, boolean includeGlobal = false, boolean allowMissing = false) {
+    def builds = buildNames.collect { "--build '${it}'" }.join(' ')
+    def globalArgument = includeGlobal ? '--include-global' : ''
+    def missingArgument = allowMissing ? '--allow-missing' : ''
+    sh """
+        python3 dev/bots/collect_engine_artifacts.py \
+          --engine-src engine/src \
+          --engine-id '${env.ENGINE_ID}' \
+          --output build/artifact-payload \
+          --builder '${builder}' \
+          ${builds} ${globalArgument} ${missingArgument}
+    """
+}
+
+def collectArtifactsWindows(String builder, List<String> buildNames, boolean includeGlobal = false) {
+    def builds = buildNames.collect { "--build \"${it}\"" }.join(' ')
+    def globalArgument = includeGlobal ? '--include-global' : ''
+    bat "${params.WINDOWS_PYTHON} dev\\bots\\collect_engine_artifacts.py --engine-src engine\\src --engine-id ${env.ENGINE_ID} --output build\\artifact-payload --builder ${builder} ${builds} ${globalArgument}"
+}
+
+def publishEngineArtifacts() {
+    if (params.UPLOAD_TRANSPORT != 'http_put') {
+        error('Guarded engine publication requires HTTP PUT plus direct authenticated storage GET. FTP/SFTP is not supported by this guard.')
+    }
+    // One controller-wide lock covers shared files and receipt updates across
+    // targets AND branch jobs. Other controllers must use separate storage roots.
+    lock(resource: 'wsc-engine-artifact-publication') {
+        withCredentials([string(credentialsId: uploadCredentialsId(), variable: 'HTTP_UPLOAD_KEY')]) {
+            def overwrite = params.DANGEROUSLY_OVERWRITE_BUILD_ARTIFACTS ? '--dangerously-overwrite' : ''
+            def arguments = "--root build/artifact-payload --upload-base-url \"${uploadBaseUrl()}\" --base-url \"${artifactBaseUrl()}\" --engine-id ${env.ENGINE_ID} ${overwrite}"
+            if (isUnix()) {
+                sh "python3 dev/bots/publish_engine_artifacts.py ${arguments}"
+            } else {
+                bat "${params.WINDOWS_PYTHON} dev/bots/publish_engine_artifacts.py ${arguments}"
+            }
+        }
+    }
+}
+
+def publishArtifactTree(String root) {
+    if (params.UPLOAD_TRANSPORT == 'http_put') {
+        def destination = uploadBaseUrl()
+        withCredentials([string(credentialsId: uploadCredentialsId(), variable: 'HTTP_UPLOAD_KEY')]) {
+            if (isUnix()) {
+                sh "python3 dev/bots/upload_artifact_tree.py --root '${root}' --base-url '${destination}'"
+            } else {
+                bat "${params.WINDOWS_PYTHON} dev\\bots\\upload_artifact_tree.py --root \"${root}\" --base-url \"${destination}\""
+            }
+        }
+    } else if (params.UPLOAD_TRANSPORT == 'ftp') {
+        ftpPublisher(
+            alwaysPublishFromMaster: false,
+            continueOnError: false,
+            failOnError: true,
+            publishers: [[
+                configName: params.TRANSFER_CONFIG_NAME,
+                transfers: [[
+                    asciiMode: false,
+                    cleanRemote: false,
+                    excludes: '',
+                    flatten: false,
+                    makeEmptyDirs: true,
+                    noDefaultExcludes: true,
+                    patternSeparator: '[, ]+',
+                    remoteDirectory: params.TRANSFER_REMOTE_DIRECTORY,
+                    remoteDirectorySDF: false,
+                    removePrefix: root,
+                    sourceFiles: "${root}/**",
+                ]],
+                usePromotionTimestamp: false,
+                useWorkspaceInPromotion: false,
+                verbose: true,
+            ]],
+        )
+    } else {
+        sshPublisher(
+            alwaysPublishFromMaster: false,
+            continueOnError: false,
+            failOnError: true,
+            publishers: [[
+                configName: params.TRANSFER_CONFIG_NAME,
+                transfers: [[
+                    cleanRemote: false,
+                    excludes: '',
+                    execCommand: '',
+                    execTimeout: 120000,
+                    flatten: false,
+                    makeEmptyDirs: true,
+                    noDefaultExcludes: true,
+                    patternSeparator: '[, ]+',
+                    remoteDirectory: params.TRANSFER_REMOTE_DIRECTORY,
+                    remoteDirectorySDF: false,
+                    removePrefix: root,
+                    sourceFiles: "${root}/**",
+                ]],
+                usePromotionTimestamp: false,
+                useWorkspaceInPromotion: false,
+                verbose: true,
+            ]],
+        )
+    }
+}
+
+def runMacGenerators(Set<String> modes, boolean buildMacOS, boolean buildIOS) {
+    dir('engine/src') {
+        if (buildMacOS) {
+            if (modes.contains('debug')) {
+                sh '''
+                    python3 flutter/sky/tools/create_embedder_framework.py --dst out/debug/framework --arm64-out-dir out/ci/mac_debug_framework_arm64 --x64-out-dir out/ci/host_debug_framework --zip
+                    python3 flutter/sky/tools/create_macos_framework.py --dst out/debug/framework --arm64-out-dir out/ci/mac_debug_framework_arm64 --x64-out-dir out/ci/host_debug_framework --zip
+                    python3 flutter/sky/tools/create_macos_gen_snapshots.py --dst out/debug/snapshot --arm64-path out/ci/mac_debug_gen_snapshot_arm64/universal/gen_snapshot_arm64 --x64-path out/ci/host_debug_gen_snapshot/universal/gen_snapshot_x64 --zip
+                '''
+            }
+            if (modes.contains('profile')) {
+                sh '''
+                    python3 flutter/sky/tools/create_macos_framework.py --dst out/profile/framework --arm64-out-dir out/ci/mac_profile_framework_arm64 --x64-out-dir out/ci/host_profile_framework --zip
+                    python3 flutter/sky/tools/create_macos_gen_snapshots.py --dst out/profile/snapshot --arm64-path out/ci/mac_profile_gen_snapshot_arm64/universal/gen_snapshot_arm64 --x64-path out/ci/host_profile_gen_snapshot/universal/gen_snapshot_x64 --zip
+                '''
+            }
+            if (modes.contains('release')) {
+                sh '''
+                    python3 flutter/sky/tools/create_macos_framework.py --dst out/release/framework --arm64-out-dir out/ci/mac_release_framework_arm64 --x64-out-dir out/ci/host_release_framework --dsym --strip --zip
+                    python3 flutter/sky/tools/create_macos_gen_snapshots.py --dst out/release/snapshot --arm64-path out/ci/mac_release_gen_snapshot_arm64/universal/gen_snapshot_arm64 --x64-path out/ci/host_release_gen_snapshot/universal/gen_snapshot_x64 --zip
+                '''
+            }
+        }
+
+        if (buildIOS) {
+            if (modes.contains('debug')) {
+                sh 'python3 flutter/sky/tools/create_ios_framework.py --dst out/debug --arm64-out-dir out/ci/ios_debug --simulator-x64-out-dir out/ci/ios_debug_sim --simulator-arm64-out-dir out/ci/ios_debug_sim_arm64'
+            }
+            if (modes.contains('profile')) {
+                sh 'python3 flutter/sky/tools/create_ios_framework.py --dst out/profile --arm64-out-dir out/ci/ios_profile --simulator-x64-out-dir out/ci/ios_debug_sim --simulator-arm64-out-dir out/ci/ios_debug_sim_arm64'
+            }
+            if (modes.contains('release')) {
+                sh 'python3 flutter/sky/tools/create_ios_framework.py --dst out/release --arm64-out-dir out/ci/ios_release --simulator-x64-out-dir out/ci/ios_debug_sim --simulator-arm64-out-dir out/ci/ios_debug_sim_arm64 --dsym --strip'
+            }
+        }
+    }
+}
+
+def shouldCollectEnginePayload() {
+    return params.PUBLISH_ENGINE_ARTIFACTS
+}
+
+def buildWindowsTarget() {
+    def targets = csvValues(params.TARGETS)
+    def modes = csvValues(params.MODES)
+    def hosts = csvValues(params.HOST_SDKS)
+    def windowsBuilds = ['ci\\host_debug']
+    if (modes.contains('profile')) {
+        windowsBuilds << 'ci\\host_profile'
+    }
+    if (modes.contains('release')) {
+        windowsBuilds << 'ci\\host_release'
+    }
+    windowsBuilds.each { runEngineBuildWindows('windows_host_engine', it) }
+
+    // Android AOT snapshots are host-specific. A Windows SDK needs these in
+    // addition to the Android engine artifacts built on flutter_linux.
+    def androidBuilds = []
+    if (targets.contains('android') && hosts.contains('windows') && modes.contains('profile')) {
+        androidBuilds.addAll(['ci\\android_profile', 'ci\\android_profile_arm64', 'ci\\android_profile_x64'])
+    }
+    if (targets.contains('android') && hosts.contains('windows') && modes.contains('release')) {
+        androidBuilds.addAll(['ci\\android_release', 'ci\\android_release_arm64', 'ci\\android_release_x64'])
+    }
+    androidBuilds.each { runEngineBuildWindows('windows_android_aot_engine', it) }
+
+    if (shouldCollectEnginePayload()) {
+        collectArtifactsWindows('windows_host_engine', windowsBuilds)
+        if (!androidBuilds.isEmpty()) {
+            collectArtifactsWindows('windows_android_aot_engine', androidBuilds)
+        }
+    }
+}
+
+def buildMacosTarget() {
+    def targets = csvValues(params.TARGETS)
+    def modes = csvValues(params.MODES)
+    def hosts = csvValues(params.HOST_SDKS)
+    def builds = ['ci/host_debug', 'ci/mac_debug_arm64']
+    if (modes.contains('debug')) {
+        builds.addAll(['ci/host_debug_framework', 'ci/host_debug_gen_snapshot', 'ci/mac_debug_framework_arm64', 'ci/mac_debug_gen_snapshot_arm64'])
+    }
+    if (modes.contains('profile')) {
+        builds.addAll(['ci/host_profile', 'ci/host_profile_framework', 'ci/host_profile_gen_snapshot', 'ci/mac_profile_arm64', 'ci/mac_profile_framework_arm64', 'ci/mac_profile_gen_snapshot_arm64'])
+    }
+    if (modes.contains('release')) {
+        builds.addAll(['ci/host_release', 'ci/host_release_framework', 'ci/host_release_gen_snapshot', 'ci/mac_release_arm64', 'ci/mac_release_framework_arm64', 'ci/mac_release_gen_snapshot_arm64'])
+    }
+    builds.each { runEngineBuildUnix('mac_host_engine', it) }
+    runMacGenerators(modes, true, false)
+    if (shouldCollectEnginePayload()) {
+        collectArtifactsUnix('mac_host_engine', builds, true)
+    }
+
+    // Android AOT snapshots are host-specific. A macOS SDK needs these in
+    // addition to the Android engine artifacts built on flutter_linux.
+    def androidBuilds = []
+    if (targets.contains('android') && hosts.contains('macos') && modes.contains('profile')) {
+        androidBuilds.addAll(['ci/android_profile', 'ci/android_profile_arm64', 'ci/android_profile_x64'])
+    }
+    if (targets.contains('android') && hosts.contains('macos') && modes.contains('release')) {
+        androidBuilds.addAll(['ci/android_release', 'ci/android_release_arm64', 'ci/android_release_x64'])
+    }
+    androidBuilds.each { runEngineBuildUnix('mac_android_aot_engine', it) }
+    if (shouldCollectEnginePayload() && !androidBuilds.isEmpty()) {
+        collectArtifactsUnix('mac_android_aot_engine', androidBuilds)
+    }
+}
+
+def buildIosTarget() {
+    def modes = csvValues(params.MODES)
+    def builds = [
+        'ci/ios_debug_sim',
+        'ci/ios_debug_sim_arm64',
+        'ci/ios_debug_sim_extension_safe',
+        'ci/ios_debug_sim_arm64_extension_safe',
+    ]
+    if (modes.contains('debug')) {
+        builds.addAll(['ci/ios_debug', 'ci/ios_debug_extension_safe'])
+    }
+    if (modes.contains('profile')) {
+        builds.addAll(['ci/ios_profile', 'ci/ios_profile_extension_safe'])
+    }
+    if (modes.contains('release')) {
+        builds.addAll(['ci/ios_release', 'ci/ios_release_extension_safe'])
+    }
+    builds.each { runEngineBuildUnix('mac_ios_engine', it) }
+    runMacGenerators(modes, false, true)
+    if (shouldCollectEnginePayload()) {
+        collectArtifactsUnix('mac_ios_engine', builds, true)
+    }
+}
+
+def buildCommonArtifactsOnUnix() {
+    def modes = csvValues(params.MODES)
+    def builds = ['ci/host_debug']
+    if (modes.contains('release')) {
+        builds << 'ci/host_release'
+    }
+    dir('engine/src') {
+        sh '''
+            set -eu
+            flutter/tools/gn --target-dir ci/host_debug --runtime-mode debug --prebuilt-dart-sdk --no-lto --no-rbe --no-goma
+            ../../third_party/ninja/ninja -C out/ci/host_debug flutter/build/archives:flutter_patched_sdk
+        '''
+        if (modes.contains('release')) {
+            sh '''
+                set -eu
+                flutter/tools/gn --target-dir ci/host_release --runtime-mode release --prebuilt-dart-sdk --no-lto --no-rbe --no-goma
+                ../../third_party/ninja/ninja -C out/ci/host_release flutter/build/archives:flutter_patched_sdk
+            '''
+        }
+    }
+    // The stamp identifies the fork commit that produced the binaries. The
+    // mirror path intentionally remains keyed by bin/internal/engine.version.
+    sh 'engine/src/flutter/bin/et stamp'
+    if (shouldCollectEnginePayload()) {
+        // Only the host-neutral patched SDK archives are built here. Ignore
+        // the remaining outputs declared by the full Linux host builder.
+        collectArtifactsUnix('linux_host_engine', builds, true, true)
+    }
+}
+
+def buildAndroidTarget() {
+    def modes = csvValues(params.MODES)
+    buildCommonArtifactsOnUnix()
+
+    def debugBuilds = []
+    if (modes.contains('debug')) {
+        debugBuilds.addAll(['ci/android_debug', 'ci/android_debug_arm64', 'ci/android_debug_x86', 'ci/android_debug_x64'])
+        debugBuilds.each { runEngineBuildUnix('linux_android_debug_engine', it) }
+    }
+    def aotBuilds = []
+    if (modes.contains('profile')) {
+        aotBuilds.addAll(['ci/android_profile', 'ci/android_profile_arm64', 'ci/android_profile_x64'])
+    }
+    if (modes.contains('release')) {
+        aotBuilds.addAll(['ci/android_release', 'ci/android_release_arm64', 'ci/android_release_x64'])
+    }
+    aotBuilds.each { runEngineBuildUnix('linux_android_aot_engine', it) }
+
+    if (shouldCollectEnginePayload()) {
+        if (!debugBuilds.isEmpty()) {
+            collectArtifactsUnix('linux_android_debug_engine', debugBuilds)
+        }
+        if (!aotBuilds.isEmpty()) {
+            collectArtifactsUnix('linux_android_aot_engine', aotBuilds)
+        }
+    }
+}
+
+def buildWebTarget() {
+    // Android normally contributes the shared patched SDK archives. A Web-only
+    // selection still needs them, so build them in this cell as a fallback.
+    if (!csvHas(params.TARGETS, 'android')) {
+        buildCommonArtifactsOnUnix()
+    }
+    dir('engine/src') {
+        sh '''
+            set -eu
+            flutter/tools/gn --web --runtime-mode release --no-rbe --no-goma
+            ../../third_party/ninja/ninja -C out/wasm_release flutter/web_sdk:flutter_web_sdk_archive
+        '''
+    }
+    if (shouldCollectEnginePayload()) {
+        collectArtifactsUnix('linux_web_engine_build', ['ci/wasm_release'])
+    }
+}
+
+def validateSdkArchive(String host) {
+    def requireTag = params.REQUIRE_RELEASE_TAG ? '--require-release-tag' : ''
+    def arguments = "--directory ${sdkOutputDirectory(host)} --revision ${env.FRAMEWORK_REVISION} --channel ${params.RELEASE_BRANCH} --engine-id ${env.ENGINE_ID} --write-checksums ${requireTag}"
+    if (isUnix()) {
+        sh "python3 dev/bots/validate_sdk_identity.py ${arguments}"
+    } else {
+        bat "${params.WINDOWS_PYTHON} dev/bots/validate_sdk_identity.py ${arguments}"
+    }
+}
+
+def withSdkGitCredentials(Closure body) {
+    def credentialsId = scm.userRemoteConfigs[0].credentialsId
+    if (!credentialsId) {
+        error('SDK packaging requires the SCM username/password credential for its HTTPS source clone.')
+    }
+    // Reuse the job credential and Git installation. Jenkins supplies and removes
+    // the temporary GIT_ASKPASS helper on both Windows and Unix.
+    withCredentials([gitUsernamePassword(
+        credentialsId: credentialsId,
+        gitToolName: scm.gitTool,
+    )]) {
+        // Do not use or populate an agent user's persistent credential store.
+        // These overrides are inherited by the packager's child Git processes,
+        // not written into the SDK's .git/config.
+        withEnv([
+            'GIT_TERMINAL_PROMPT=0',
+            'GCM_INTERACTIVE=Never',
+            // withEnv unsets empty values. Keep the empty helper value inside
+            // Git's quoted parameter string so child Git processes inherit it.
+            "GIT_CONFIG_PARAMETERS='credential.helper='",
+        ]) {
+            body()
+        }
+    }
+}
+
+def createSdkArchiveUnix(String host) {
+    def outputDirectory = sdkOutputDirectory(host)
+    withEnv([
+        "FLUTTER_STORAGE_BASE_URL=${artifactBaseUrl()}",
+        "SDK_OUTPUT_DIRECTORY=${outputDirectory}",
+        "SDK_FRAMEWORK_REVISION=${env.FRAMEWORK_REVISION}",
+        "SDK_RELEASE_BRANCH=${params.RELEASE_BRANCH}",
+    ]) {
+        sh '''
+            set -eu
+            ./bin/flutter --version
+            ./bin/cache/dart-sdk/bin/dart pub get --directory dev/bots
+            mkdir -p "$SDK_OUTPUT_DIRECTORY"
+
+            ./bin/cache/dart-sdk/bin/dart dev/bots/prepare_package.dart \
+              --revision "$SDK_FRAMEWORK_REVISION" \
+              --branch "$SDK_RELEASE_BRANCH" \
+              --dry_run \
+              --output "$SDK_OUTPUT_DIRECTORY"
+        '''
+    }
+    validateSdkArchive(host)
+    archiveArtifacts artifacts: "${outputDirectory}/*", fingerprint: true
+    publishArtifactTree('build/sdk-payload')
+}
+
+def createSdkArchiveWindows() {
+    def outputDirectory = sdkOutputDirectory('windows').replace('/', '\\')
+    withEnv(["FLUTTER_STORAGE_BASE_URL=${artifactBaseUrl()}"]) {
+        bat """
+            call bin\\flutter.bat --version || exit /b 1
+            bin\\cache\\dart-sdk\\bin\\dart.exe pub get --directory dev\\bots || exit /b 1
+            if not exist ${outputDirectory} mkdir ${outputDirectory}
+            bin\\cache\\dart-sdk\\bin\\dart.exe dev\\bots\\prepare_package.dart --revision ${env.FRAMEWORK_REVISION} --branch ${params.RELEASE_BRANCH} --dry_run --output ${outputDirectory} || exit /b 1
+        """
+    }
+    validateSdkArchive('windows')
+    archiveArtifacts artifacts: "${sdkOutputDirectory('windows')}/*", fingerprint: true
+    publishArtifactTree('build/sdk-payload')
+}
+
+def checkoutFullSource(boolean cleanWorkspace, String revision = null) {
+    if (cleanWorkspace) {
+        deleteDir()
+    }
+    checkout([
+        $class: 'GitSCM',
+        branches: revision ? [[name: revision]] : scm.branches,
+        extensions: [
+            [
+                $class: 'CloneOption',
+                depth: 0,
+                noTags: false,
+                shallow: false,
+                timeout: 30,
+            ],
+        ],
+        userRemoteConfigs: scm.userRemoteConfigs,
+    ])
+}
+
+def selectEngineBuildBranch() {
+    // Upstream hashes HEAD on flutter-*-candidate.* branches. Use a local,
+    // CI-owned branch instead of changing the hash scripts or faking LUCI.
+    // GitSCM already selected the source; never move a public/channel ref.
+    if (isUnix()) {
+        sh 'git checkout -B flutter-wsc-candidate.ci HEAD'
+    } else {
+        bat 'git checkout -B flutter-wsc-candidate.ci HEAD'
+    }
+}
+
+def checkoutReleaseSource() {
+    // Release tag resolution requires full history. A full
+    // fetch does not necessarily unshallow an existing repository, so replace
+    // a legacy shallow checkout once and keep reusing the full clone afterward.
+    checkoutFullSource(false)
+    def shallow = bat(
+        script: '@git rev-parse --is-shallow-repository',
+        returnStdout: true,
+    ).trim()
+    if (shallow == 'true') {
+        echo 'Replacing shallow release-metadata checkout with a full-history clone.'
+        checkoutFullSource(true)
+        shallow = bat(
+            script: '@git rev-parse --is-shallow-repository',
+            returnStdout: true,
+        ).trim()
+    }
+    if (shallow != 'false') {
+        error("Unable to obtain full Git history for release resolution: ${shallow}")
+    }
+    selectEngineBuildBranch()
+}
+
+def checkoutSdkSource() {
+    // Keep the build's selected commit even if the source branch advances
+    // while engines are compiling. The packager and validator use this same SHA.
+    if (!(env.FRAMEWORK_REVISION ==~ /[0-9a-f]{40}/)) {
+        error('SDK checkout requires the selected FRAMEWORK_REVISION')
+    }
+    checkoutFullSource(true, env.FRAMEWORK_REVISION)
+}
+
+pipeline {
+    agent none
+
+    environment {
+        // Use locally installed VS2022, not the managed depot_tools toolchain
+        // or automatic detection (which can prefer an older VS installation).
+        DEPOT_TOOLS_WIN_TOOLCHAIN = '0'
+        GYP_MSVS_VERSION = '2022'
+    }
+
+    options {
+        timestamps()
+        skipDefaultCheckout(true)
+        disableConcurrentBuilds()
+        overrideIndexTriggers(false)
+        withFolderProperties()
+    }
+
+    triggers {
+        // Enable "Expose these properties at build start" on the Jenkins folder.
+        // Empty schedule disables periodic polling. Applied on the next run.
+        pollSCM(scmPollingScheduleFor(env.DISABLE_SCM_POLLING))
+    }
+
+    parameters {
+        string(
+            name: 'TARGETS',
+            defaultValue: 'windows,macos,ios,android,web',
+            description: 'Comma-separated engine targets: android, ios, windows, macos, web.',
+        )
+        string(
+            name: 'MODES',
+            defaultValue: 'debug,profile,release',
+            description: 'Comma-separated runtime modes: debug, profile, release. Web is built once and ignores this axis.',
+        )
+        string(
+            name: 'HOST_SDKS',
+            defaultValue: 'windows,macos',
+            description: 'Comma-separated host SDK archives to create: windows, macos. Leave empty to skip SDK archives.',
+        )
+        choice(name: 'BUILD_POLICY', choices: ['incremental', 'full_rebuild'], description: 'incremental always invokes the selected builds and keeps local Ninja outputs; full_rebuild first deletes engine/src/out.')
+        choice(name: 'RELEASE_BRANCH', choices: ['stable', 'main', 'beta', 'master'], description: 'Branch/channel stored in the SDK archive.')
+        booleanParam(name: 'REQUIRE_RELEASE_TAG', defaultValue: false, description: 'Require an exact WSC release tag and matching SDK ZIP metadata. Leave false for development/staging builds; independent of BUILD_POLICY.')
+        string(name: 'ARTIFACT_BASE_URL', defaultValue: '', description: 'Download root override, no trailing slash. Empty uses WSC_ARTIFACT_BASE_URL or https://fluttertest.b-cdn.net/ci-v2.')
+        booleanParam(name: 'PUBLISH_ENGINE_ARTIFACTS', defaultValue: true, description: 'Publish each target artifact tree directly from its build agent.')
+        booleanParam(name: 'DANGEROUSLY_OVERWRITE_BUILD_ARTIFACTS', defaultValue: false, description: 'Replace selected published engine artifacts, including incomplete-publication recovery. Affects existing SDKs; requires CDN/developer cache handling. Does NOT force a local rebuild. Leave false normally, including releases.')
+        choice(name: 'UPLOAD_TRANSPORT', choices: ['http_put', 'ftp', 'sftp'], description: 'Engine publication requires http_put with direct storage GET. Legacy FTP/SFTP helpers do not support the publication guard.')
+        string(name: 'HTTP_UPLOAD_BASE_URL', defaultValue: '', description: 'Upload root override, no trailing slash. Empty uses WSC_HTTP_UPLOAD_BASE_URL or https://storage.bunnycdn.com/fluttertest/ci-v2.')
+        string(name: 'UPLOAD_CREDENTIALS_ID', defaultValue: '', description: 'Secret-text credential for AccessKey. Empty uses WSC_UPLOAD_CREDENTIALS_ID or HTTP_UPLOAD_KEY. Local servers may use a dummy secret.')
+        string(name: 'TRANSFER_CONFIG_NAME', defaultValue: '', description: 'Jenkins Publish Over FTP or Publish Over SSH server configuration name.')
+        string(name: 'TRANSFER_REMOTE_DIRECTORY', defaultValue: '', description: 'Remote directory below the configured FTP/SFTP server root. Empty publishes at its root.')
+        choice(name: 'SYNC_ENGINE_DEPS', choices: ['auto', 'true', 'false'], description: 'auto syncs changed dependency/patch inputs once per workspace; true always syncs; false only bootstraps missing dependencies. Existing workspaces sync once to initialize auto tracking.')
+        string(name: 'WINDOWS_PYTHON', defaultValue: 'python', description: 'Python 3 command on Windows agents.')
+    }
+
+    stages {
+        stage('Resolve release') {
+            agent { label 'flutter_win' }
+            steps {
+                script {
+                    checkoutReleaseSource()
+                    def targets = validateCsvParameter('TARGETS', params.TARGETS, ['android', 'ios', 'windows', 'macos', 'web'] as Set)
+                    def modes = validateCsvParameter('MODES', params.MODES, ['debug', 'profile', 'release'] as Set)
+                    def hosts = validateCsvParameter('HOST_SDKS', params.HOST_SDKS, ['windows', 'macos'] as Set)
+                    if (targets.isEmpty()) {
+                        error('TARGETS must select at least one engine target.')
+                    }
+                    if (modes.isEmpty()) {
+                        error('MODES must select at least one runtime mode.')
+                    }
+                    [artifactBaseUrl(), uploadBaseUrl()].each { url ->
+                        if (!(url ==~ /https?:\/\/[A-Za-z0-9.:-]+(\/[A-Za-z0-9._~-]+)*/)) {
+                            error('Artifact URLs must be HTTP(S) roots without credentials, query strings, whitespace, or a trailing slash.')
+                        }
+                    }
+                    def workspaceKey = engineWorkspaceKey()
+                    if (!(workspaceKey ==~ /[A-Za-z0-9_.\/-]+/) || workspaceKey.split('/').any { it in ['', '.', '..'] } || workspaceKey.startsWith('/')) {
+                        error('The engine workspace key must be a relative job-style path without traversal or special characters.')
+                    }
+                    echo "Download root: ${artifactBaseUrl()}; upload root: ${uploadBaseUrl()}"
+                    echo "Engine workspace key: ${workspaceKey}; policy: ${params.BUILD_POLICY}"
+                    if (!hosts.isEmpty() && modes != (['debug', 'profile', 'release'] as Set)) {
+                        error('Upstream SDK packaging runs an unfiltered precache; select all modes or leave HOST_SDKS empty.')
+                    }
+                    if (!hosts.isEmpty() && !params.PUBLISH_ENGINE_ARTIFACTS) {
+                        error('Host SDK packaging requires PUBLISH_ENGINE_ARTIFACTS=true to publish or verify/reuse its required engine artifacts.')
+                    }
+                    def requiredTargets = [
+                        windows: ['android', 'web', 'windows'] as Set,
+                        macos: ['android', 'ios', 'web', 'macos'] as Set,
+                    ]
+                    hosts.each { host ->
+                        def missing = requiredTargets[host] - targets
+                        if (!missing.isEmpty()) {
+                            error("${host} SDK packaging precaches its standard target set; add ${missing.sort().join(', ')} to TARGETS or omit ${host} from HOST_SDKS.")
+                        }
+                    }
+                    if (params.PUBLISH_ENGINE_ARTIFACTS && params.UPLOAD_TRANSPORT != 'http_put') {
+                        error('Guarded engine publication requires http_put and direct storage GET; FTP/SFTP cannot bypass the publication guard.')
+                    }
+                    if (params.DANGEROUSLY_OVERWRITE_BUILD_ARTIFACTS) {
+                        echo 'DANGER: selected engine artifacts may be overwritten. Existing SDKs and cached downloads can disagree. This does not change BUILD_POLICY.'
+                    }
+
+                    env.FRAMEWORK_REVISION = bat(script: '@git rev-parse HEAD', returnStdout: true).trim()
+                    env.ENGINE_ID = readFile('bin/internal/engine.version').trim()
+                    if (!(env.FRAMEWORK_REVISION ==~ /[0-9a-fA-F]{40}/)) {
+                        error("Invalid framework revision: ${env.FRAMEWORK_REVISION}")
+                    }
+                    if (!(env.ENGINE_ID ==~ /[0-9a-fA-F]{40}/)) {
+                        error("bin/internal/engine.version is not a full artifact ID: ${env.ENGINE_ID}")
+                    }
+                    // Pin is the upstream content hash of the selected fork sources.
+                    // Every build policy rejects stale pins before artifact publication.
+                    def requireTag = params.REQUIRE_RELEASE_TAG ? '--require-release-tag' : ''
+                    bat "${params.WINDOWS_PYTHON} dev/bots/validate_sdk_identity.py --revision ${env.FRAMEWORK_REVISION} --engine-id ${env.ENGINE_ID} ${requireTag}"
+                    currentBuild.description = "${env.FRAMEWORK_REVISION.take(10)} / engine ${env.ENGINE_ID.take(10)} / ${params.BUILD_POLICY}"
+                    if (params.PUBLISH_ENGINE_ARTIFACTS && params.UPLOAD_TRANSPORT == 'http_put') {
+                        // Fail before compilation if the required plugin is absent.
+                        lock(resource: 'wsc-engine-artifact-publication') {
+                            echo 'Guarded engine publication lock is available.'
+                        }
+                        withCredentials([string(credentialsId: uploadCredentialsId(), variable: 'HTTP_UPLOAD_KEY')]) {
+                            if (!env.HTTP_UPLOAD_KEY?.trim()) {
+                                error('HTTP_UPLOAD_KEY must contain a key, or a dummy value for a local server.')
+                            }
+                        }
+                    }
+                    if (!hosts.isEmpty()) {
+                        seedArtifactMirror(hosts)
+                    }
+                }
+            }
+        }
+
+        stage('Build engine artifacts') {
+            matrix {
+                axes {
+                    axis {
+                        name 'BUILD_TARGET'
+                        values 'windows', 'macos', 'ios', 'android', 'web'
+                    }
+                    axis {
+                        name 'BUILD_AGENT'
+                        values 'flutter_win', 'flutter_macos', 'flutter_linux'
+                    }
+                }
+                excludes {
+                    exclude {
+                        axis {
+                            name 'BUILD_TARGET'
+                            values 'windows'
+                        }
+                        axis {
+                            name 'BUILD_AGENT'
+                            values 'flutter_macos', 'flutter_linux'
+                        }
+                    }
+                    exclude {
+                        axis {
+                            name 'BUILD_TARGET'
+                            values 'macos', 'ios'
+                        }
+                        axis {
+                            name 'BUILD_AGENT'
+                            values 'flutter_win', 'flutter_linux'
+                        }
+                    }
+                    exclude {
+                        axis {
+                            name 'BUILD_TARGET'
+                            values 'android', 'web'
+                        }
+                        axis {
+                            name 'BUILD_AGENT'
+                            values 'flutter_win', 'flutter_macos'
+                        }
+                    }
+                }
+                when {
+                    beforeAgent true
+                    expression {
+                        csvHas(params.TARGETS, env.BUILD_TARGET)
+                    }
+                }
+                agent {
+                    node {
+                        label "${BUILD_AGENT}"
+                        // Set the override in Jenkins, not in the shared source tree.
+                        // Never let two jobs share the same engine workspace concurrently.
+                        customWorkspace "engine-workspaces/${engineWorkspaceKey()}/${BUILD_TARGET}"
+                    }
+                }
+                stages {
+                    stage('Prepare target workspace') {
+                        steps {
+                            script {
+                                // Git for Windows disables long paths per repository by
+                                // default. Set it before Jenkins checks out Flutter's
+                                // deeply nested iOS golden filenames.
+                                if (env.BUILD_AGENT == 'flutter_win') {
+                                    bat 'if not exist .git git init .'
+                                    bat 'git config core.longpaths true'
+                                    checkout scm
+                                } else {
+                                    checkout scm
+                                }
+                                selectEngineBuildBranch()
+                                def actualRevision = isUnix()
+                                    ? sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+                                    : bat(script: '@git rev-parse HEAD', returnStdout: true).trim()
+                                if (actualRevision != env.FRAMEWORK_REVISION) {
+                                    error("Target checkout ${actualRevision} differs from selected source ${env.FRAMEWORK_REVISION}")
+                                }
+                                echo "Persistent target workspace: ${pwd()}"
+                                if (params.BUILD_POLICY == 'full_rebuild') {
+                                    dir('engine/src/out') { deleteDir() }
+                                }
+                                dir('build/artifact-payload') { deleteDir() }
+                                if (env.BUILD_AGENT == 'flutter_win') {
+                                    bootstrapEngineDependenciesWindows()
+                                } else {
+                                    bootstrapEngineDependenciesUnix(env.BUILD_TARGET == 'web')
+                                }
+                            }
+                        }
+                    }
+
+                    stage('Build selected modes') {
+                        steps {
+                            script {
+                                switch (env.BUILD_TARGET) {
+                                    case 'windows':
+                                        buildWindowsTarget()
+                                        break
+                                    case 'macos':
+                                        buildMacosTarget()
+                                        break
+                                    case 'ios':
+                                        buildIosTarget()
+                                        break
+                                    case 'android':
+                                        buildAndroidTarget()
+                                        break
+                                    case 'web':
+                                        buildWebTarget()
+                                        break
+                                    default:
+                                        error("Unsupported matrix target: ${env.BUILD_TARGET}")
+                                }
+                            }
+                        }
+                    }
+
+                    stage('Publish target artifacts') {
+                        when { expression { params.PUBLISH_ENGINE_ARTIFACTS } }
+                        steps {
+                            script {
+                                publishEngineArtifacts()
+                            }
+                        }
+                    }
+                }
+                post {
+                    failure {
+                        script {
+                            mailBuildLog("Engine ${env.BUILD_TARGET} on ${env.BUILD_AGENT}", 'FAILURE')
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Create host SDK archives') {
+            when {
+                expression { !csvValues(params.HOST_SDKS).isEmpty() }
+            }
+            parallel {
+                stage('Windows SDK') {
+                    when { expression { csvHas(params.HOST_SDKS, 'windows') } }
+                    agent { label 'flutter_win' }
+                    stages {
+                        stage('Package Windows SDK') {
+                            steps {
+                                script {
+                                    checkoutSdkSource()
+                                    withSdkGitCredentials { createSdkArchiveWindows() }
+                                }
+                            }
+                        }
+                    }
+                    post {
+                        failure {
+                            script { mailBuildLog('Windows SDK', 'FAILURE') }
+                        }
+                    }
+                }
+                stage('macOS SDK') {
+                    when { expression { csvHas(params.HOST_SDKS, 'macos') } }
+                    agent { label 'flutter_macos' }
+                    stages {
+                        stage('Package macOS SDK') {
+                            steps {
+                                script {
+                                    checkoutSdkSource()
+                                    withSdkGitCredentials { createSdkArchiveUnix('macos') }
+                                }
+                            }
+                        }
+                    }
+                    post {
+                        failure {
+                            script { mailBuildLog('macOS SDK', 'FAILURE') }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo "Framework: ${env.FRAMEWORK_REVISION ?: 'unresolved'}; engine: ${env.ENGINE_ID ?: 'unresolved'}"
+        }
+        cleanup {
+            script { mailBuildLog('Final result', currentBuild.currentResult) }
+        }
+    }
+}
