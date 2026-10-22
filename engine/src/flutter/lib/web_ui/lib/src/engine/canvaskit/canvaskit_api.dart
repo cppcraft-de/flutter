@@ -43,6 +43,8 @@ external CanvasKit? get windowFlutterCanvasKit;
 external JSPromise<CanvasKit>? get windowFlutterCanvasKitLoaded;
 
 extension type CanvasKit(JSObject _) implements JSObject {
+  external bool ConfigureFontRenderingDiagnostics(bool enabled);
+  external bool FontRenderingDiagnosticsEnabled();
   external SkBlendModeEnum get BlendMode;
   external SkPaintStyleEnum get PaintStyle;
   external SkStrokeCapEnum get StrokeCap;
@@ -2188,6 +2190,24 @@ extension type SkLineMetrics(JSObject _) implements JSObject {
   external double get left;
   external double get baseline;
   external double get lineNumber;
+  external double get rawAscent;
+  external double get rawDescent;
+  external double get rawLeading;
+  external double get effectiveAscent;
+  external double get effectiveDescent;
+  external double get effectiveLeading;
+  external double get heightInputAscent;
+  external double get heightInputDescent;
+  external double get heightInputLeading;
+  external double get heightInputRawLeading;
+  external double get lineHeightBranch;
+  external double get nextLineBaselinePitch;
+  external double get lineBoxHeight;
+  external double get availableWidth;
+  external double get advanceBeforeJustification;
+  external double get advanceAfterJustification;
+  external bool get isEllipsized;
+  external bool get isTrailingEmptyLine;
 }
 
 extension type SkGlyphClusterInfo(JSObject _) implements JSObject {
@@ -2234,6 +2254,13 @@ extension type SkParagraph(JSObject _) implements JSObject {
   @JS('getLineMetrics')
   external JSArray<JSAny?> _getLineMetrics();
   List<SkLineMetrics> getLineMetrics() => _getLineMetrics().toDart.cast<SkLineMetrics>();
+
+  @JS('getGlyphDiagnostics')
+  external JSArray<JSAny?> _getGlyphDiagnostics();
+  List<Object?> getGlyphDiagnostics() => <Object?>[
+    for (final JSAny? record in _getGlyphDiagnostics().toDart)
+      if (record != null) record.dartify(),
+  ];
 
   external SkLineMetrics? getLineMetricsAt(double index);
   external double getNumberOfLines();

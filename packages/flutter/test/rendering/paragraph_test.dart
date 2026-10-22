@@ -2,7 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'dart:ui' as ui show BoxHeightStyle, BoxWidthStyle, Paragraph, TextBox;
+import 'dart:ui'
+    as ui
+    show
+        BoxHeightStyle,
+        BoxWidthStyle,
+        GlyphInfo,
+        LineMetrics,
+        Paragraph,
+        TextBox,
+        fontRenderingDiagnosticsEnabled;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
@@ -123,6 +132,109 @@ void main() {
 
     final double height5 = paragraph.getFullHeightForCaret(const TextPosition(offset: 5));
     expect(height5, equals(10.0));
+  });
+
+  test('indexed diagnostics preserve consumed ranges and exact paragraph width', () {
+    const text = 'aa  bb cc  \n\u{1f600} dd\n';
+    final paragraph = RenderParagraph(
+      const TextSpan(
+        text: text,
+        style: TextStyle(fontFamily: 'Ahem', fontSize: 14),
+      ),
+      textDirection: TextDirection.ltr,
+      textAlign: TextAlign.justify,
+    );
+    layout(paragraph, constraints: BoxConstraints.tight(const Size(100, 300)));
+    final Size before = paragraph.size;
+    final List<DiagnosticLineLayoutMetrics> lines = paragraph
+        .computeLineLayoutMetricsForDiagnostics();
+    expect(paragraph.size, before);
+    expect(paragraph.debugNeedsLayout, isFalse);
+    if (!ui.fontRenderingDiagnosticsEnabled) {
+      expect(lines, isEmpty);
+      return;
+    }
+    expect(lines.length, paragraph.computeLineMetricsForDiagnostics().length);
+    var consumed = 0;
+    for (final line in lines) {
+      expect(line.startIndex, consumed);
+      expect(line.availableWidth, 100);
+      expect(line.isComplete, isTrue);
+      expect(line.isEllipsized, isFalse);
+      consumed = line.endIncludingNewline;
+    }
+    expect(consumed, text.length);
+    expect(lines.last.startIndex, text.length);
+    expect(lines.first.advanceBeforeJustification, lessThan(lines.first.advanceAfterJustification));
+    expect(lines.first.advanceAfterJustification, 100);
+  });
+
+  test('paint offset relates raw paragraph and render-local coordinates', () {
+    final painter = TextPainter(
+      text: const TextSpan(
+        text: 'AB',
+        style: TextStyle(fontFamily: 'Ahem', fontSize: 14),
+      ),
+      textDirection: TextDirection.ltr,
+      textAlign: TextAlign.right,
+    )..layout(minWidth: 200);
+    addTearDown(painter.dispose);
+    expect(painter.diagnosticPaintOffset.dx, greaterThan(0));
+    expect(painter.computeLineMetrics().single.left, painter.diagnosticPaintOffset.dx);
+  });
+
+  test('read-only paragraph diagnostics expose the painted layout', () {
+    final paragraph = RenderParagraph(
+      const TextSpan(text: 'AB', style: TextStyle(fontSize: 20.0)),
+      textDirection: TextDirection.ltr,
+    );
+    layout(paragraph);
+
+    final List<ui.LineMetrics> lines = paragraph.computeLineMetricsForDiagnostics();
+    final List<DiagnosticLineMetrics> detailedLines = paragraph
+        .computeDetailedLineMetricsForDiagnostics();
+    final List<DiagnosticGlyphMetrics> glyphMetrics = paragraph.computeGlyphMetricsForDiagnostics();
+    final ui.GlyphInfo? glyph = paragraph.getGlyphInfoAtForDiagnostics(0);
+
+    final Size sizeBeforeBoundaryQuery = paragraph.size;
+    expect(
+      paragraph.getLineBoundary(const TextPosition(offset: 0)),
+      const TextRange(start: 0, end: 2),
+    );
+    expect(paragraph.size, sizeBeforeBoundaryQuery);
+    expect(paragraph.debugNeedsLayout, isFalse);
+    expect(lines, hasLength(1));
+    expect(paragraph.size.height, greaterThanOrEqualTo(lines.single.height));
+    if (!ui.fontRenderingDiagnosticsEnabled) {
+      expect(detailedLines, isEmpty);
+      expect(glyphMetrics, isEmpty);
+      expect(glyph, isNotNull);
+      return;
+    }
+    expect(detailedLines, hasLength(1));
+    expect(detailedLines.single.lineMetrics.lineNumber, lines.single.lineNumber);
+    expect(detailedLines.single.rawAscent, greaterThan(0.0));
+    expect(detailedLines.single.rawDescent, greaterThanOrEqualTo(0.0));
+    expect(detailedLines.single.heightInputAscent, lessThan(0.0));
+    expect(detailedLines.single.heightInputDescent, greaterThanOrEqualTo(0.0));
+    expect(detailedLines.single.lineHeightBranch, 2);
+    expect(detailedLines.single.nextLineBaselinePitch, detailedLines.single.lineBoxHeight);
+    expect(lines.single.height, greaterThan(0.0));
+    expect(glyphMetrics, hasLength(2));
+    expect(glyphMetrics.first.lineNumber, 0);
+    expect(glyphMetrics.first.fontFamily, isNotEmpty);
+    expect(glyphMetrics.first.fontMetricsAscent, lessThan(0.0));
+    expect(glyphMetrics.first.fontMetricsDescent, greaterThanOrEqualTo(0.0));
+    expect(glyphMetrics.first.glyphId, greaterThan(0));
+    expect(glyphMetrics.first.advance.dx, greaterThan(0.0));
+    expect(
+      glyphMetrics.first.inkBounds,
+      glyphMetrics.first.bounds.shift(glyphMetrics.first.finalOrigin),
+    );
+    expect(lines.single.baseline, greaterThan(0.0));
+    expect(glyph, isNotNull);
+    expect(glyph!.graphemeClusterCodeUnitRange, const TextRange(start: 0, end: 1));
+    expect(glyph.graphemeClusterLayoutBounds.width, greaterThan(0.0));
   });
 
   test('getPositionForOffset control test', () {

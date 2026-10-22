@@ -13,57 +13,60 @@ import sys
 EXPECTED_SKIA_REVISION = 'e9ed4fc9f1544c58d8a9347c1fc9471d8dd7c465'
 EXPECTED_FREETYPE_REVISION = 'be4bcb57914154fc1b9e2900bf8e4b516057e2b8'
 
-PATCH_GROUP_ORDER = ('text_layout', 'pdf')
+PATCH_GROUP_ORDER = (
+    'text_layout',
+    'diagnostics',
+    'pdf',
+)
 
-GROUP_DEPENDENCIES = {}
+GROUP_DEPENDENCIES = {
+    'diagnostics': ('text_layout',),
+}
 
-GROUP_MARKERS = {'text_layout': {('skia', 'modules/skparagraph/src/Run.cpp'): '[SCHOOLCRAFT] '
-                                                              'WSC uses '
-                                                              'integer glyph '
-                                                              'advances.',
-                 ('skia', 'modules/skparagraph/src/Run.h'): '[SCHOOLCRAFT] WSC '
-                                                            'advances '
-                                                            'baselines',
-                 ('skia', 'modules/skparagraph/src/TextLine.cpp'): '[SCHOOLCRAFT] '
-                                                                   'Expose the '
-                                                                   'same '
-                                                                   'integer '
-                                                                   'ascent/descent '
-                                                                   'used by '
-                                                                   'WSC '
-                                                                   'layout.',
-                 ('skia', 'modules/skparagraph/include/TextStyle.h'): '[SCHOOLCRAFT] '
-                                                                      'Match '
-                                                                      'WSC on '
-                                                                      'every '
-                                                                      'SkParagraph '
-                                                                      'target',
-                 ('skia', 'modules/canvaskit/paragraph.js'): 'registerTypeface '
-                                                             '= '
-                                                             'function(typeface, '
-                                                             'family)',
-                 ('skia', 'modules/skparagraph/include/FontCollection.h'): 'clearFontLookupCaches',
-                 ('skia', 'src/ports/SkFontHost_FreeType.cpp'): '[SCHOOLCRAFT] '
-                                                                'WSC obtains '
-                                                                'line metrics',
-                 ('freetype', 'include/freetype-flutter-config/ftoption.h'): '[SCHOOLCRAFT] '
-                                                                             'Match '
-                                                                             'the '
-                                                                             'FreeType '
-                                                                             'configuration '
-                                                                             'used '
-                                                                             'by '
-                                                                             'WSC.',
-                 ('freetype', 'src/base/ftobjs.c'): '[SCHOOLCRAFT]: we '
-                                                    'reverted a FreeType fix '
-                                                    'here',
-                 ('freetype', 'src/sfnt/sfobjs.c'): 'For Worksheet Crafter it '
-                                                    'is essential that the '
-                                                    'ascender'},
- 'pdf': {('skia', 'modules/canvaskit/canvaskit_bindings.cpp'): 'MakePdf(JSArray '
-                                                               'pictures',
-         ('skia', 'modules/canvaskit/compile.sh'): 'skia_enable_pdf=true',
-         ('skia', 'modules/canvaskit/BUILD.gn'): 'SK_SUPPORT_PDF'}}
+GROUP_MARKERS = {
+    'text_layout': {
+        ('skia', 'modules/skparagraph/src/Run.cpp'):
+            '[SCHOOLCRAFT] WSC uses integer glyph advances.',
+        ('skia', 'modules/skparagraph/src/Run.h'):
+            '[SCHOOLCRAFT] WSC advances baselines',
+        ('skia', 'modules/skparagraph/src/TextLine.cpp'):
+            'fNextLineBaselinePitch',
+        ('skia', 'modules/skparagraph/include/TextStyle.h'):
+            '[SCHOOLCRAFT] Match WSC on every SkParagraph target',
+        ('skia', 'modules/canvaskit/paragraph.js'):
+            'registerTypeface = function(typeface, family)',
+        ('skia', 'modules/skparagraph/include/FontCollection.h'):
+            'clearFontLookupCaches',
+        ('skia', 'src/ports/SkFontHost_FreeType.cpp'):
+            '[SCHOOLCRAFT] WSC obtains line metrics',
+        ('freetype', 'include/freetype-flutter-config/ftoption.h'):
+            '[SCHOOLCRAFT] Match the FreeType configuration used by WSC.',
+        ('freetype', 'src/base/ftobjs.c'):
+            '[SCHOOLCRAFT]: we reverted a FreeType fix here',
+        ('freetype', 'src/sfnt/sfobjs.c'):
+            'For Worksheet Crafter it is essential that the ascender',
+    },
+    'diagnostics': {
+        ('skia', 'modules/skparagraph/src/TextLine.h'):
+            'fAdvanceBeforeJustification',
+        ('skia', 'modules/skparagraph/src/ParagraphImpl.cpp'): ('getParagraphBottomCorrection'),
+        ('skia', 'modules/skparagraph/include/Paragraph.h'):
+            'fRawShapePosition',
+        ('skia', 'modules/skparagraph/include/FontDiagnostics.h'):
+            'FreezeFontDiagnostics',
+        ('skia', 'modules/skparagraph/src/Run.h'):
+            'std::vector<SkPoint> rawPositions',
+        ('skia', 'modules/skparagraph/src/Run.cpp'):
+            'FontDiagnosticsEnabled() && fRawPositions.empty()',
+        ('skia', 'modules/canvaskit/paragraph_bindings.cpp'):
+            'ConfigureFontRenderingDiagnostics',
+    },
+    'pdf': {
+        ('skia', 'modules/canvaskit/canvaskit_bindings.cpp'): 'MakePdf(JSArray pictures',
+        ('skia', 'modules/canvaskit/compile.sh'): 'skia_enable_pdf=true',
+        ('skia', 'modules/canvaskit/BUILD.gn'): 'SK_SUPPORT_PDF',
+    },
+}
 
 PATCH_SUBDIRS = {
     'skia': '{group}',
@@ -336,7 +339,8 @@ def main(argv):
       default=['all'],
       metavar='GROUP',
       help=(
-          'Patch groups to apply: all, text_layout, pdf.'
+          'Patch groups to apply: all, text_layout, diagnostics, pdf. '
+          'Diagnostics includes text_layout.'
       ),
   )
   args = parser.parse_args(argv[1:])

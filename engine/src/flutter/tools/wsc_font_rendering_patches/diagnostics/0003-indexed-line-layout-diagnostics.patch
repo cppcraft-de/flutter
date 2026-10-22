@@ -1,0 +1,91 @@
+diff --git a/modules/skparagraph/include/Metrics.h b/modules/skparagraph/include/Metrics.h
+--- a/modules/skparagraph/include/Metrics.h
++++ b/modules/skparagraph/include/Metrics.h
+@@ -103,6 +103,12 @@
+     double fNextLineBaselinePitch = 0.0;
+     // The occupied line height, tracked separately from baseline pitch.
+     double fLineBoxHeight = 0.0;
++    // Exact final-line diagnostics; widths exclude ghost spaces and ellipsis.
++    double fAvailableWidth = 0.0;
++    double fAdvanceBeforeJustification = 0.0;
++    double fAdvanceAfterJustification = 0.0;
++    bool fIsEllipsized = false;
++    bool fIsTrailingEmptyLine = false;
+ 
+     // Mapping between text index ranges and the FontMetrics associated with
+     // them. The first run will be keyed under start_index. The metrics here
+diff --git a/modules/skparagraph/src/TextLine.h b/modules/skparagraph/src/TextLine.h
+--- a/modules/skparagraph/src/TextLine.h
++++ b/modules/skparagraph/src/TextLine.h
+@@ -103,6 +103,7 @@
+                                              const ClustersVisitor& visitor) const;
+ 
+     void format(TextAlign align, SkScalar maxWidth);
++    void markTrailingEmptyLine() { fIsTrailingEmptyLine = true; }
+     void paint(ParagraphPainter* painter, SkScalar x, SkScalar y);
+     void visit(SkScalar x, SkScalar y);
+     void ensureTextBlobCachePopulated();
+@@ -178,6 +179,9 @@
+     // Avoid the malloc/free in the common case of one run per line
+     skia_private::STArray<1, size_t, true> fRunsInVisualOrder;
+     SkVector fAdvance;                  // Text size
++    SkScalar fAdvanceBeforeJustification = 0; // Captured before format mutates advances.
++    bool fIsTrailingEmptyLine = false;
++    bool fCapturedAdvanceBeforeJustification = false;
+     SkVector fOffset;                   // Text position
+     SkScalar fShift;                    // Let right
+     SkScalar fWidthWithSpaces;
+diff --git a/modules/skparagraph/src/TextLine.cpp b/modules/skparagraph/src/TextLine.cpp
+--- a/modules/skparagraph/src/TextLine.cpp
++++ b/modules/skparagraph/src/TextLine.cpp
+@@ -295,6 +295,10 @@
+ }
+ 
+ void TextLine::format(TextAlign align, SkScalar maxWidth) {
++    if (FontDiagnosticsEnabled() && !fCapturedAdvanceBeforeJustification) {
++        fAdvanceBeforeJustification = fAdvance.fX;
++        fCapturedAdvanceBeforeJustification = true;
++    }
+     SkScalar delta = maxWidth - this->width();
+     if (delta <= 0) {
+         return;
+@@ -1149,6 +1153,13 @@
+     result.fLineHeightBranch = this->sizes().lineHeightBranch();
+     result.fNextLineBaselinePitch = this->height();
+     result.fLineBoxHeight = this->sizes().lineBoxHeight();
++    result.fIsTrailingEmptyLine = fIsTrailingEmptyLine;
++    if (FontDiagnosticsEnabled()) {
++        result.fAvailableWidth = fOwner->getMaxWidth();
++        result.fAdvanceBeforeJustification = fAdvanceBeforeJustification;
++        result.fAdvanceAfterJustification = fAdvance.fX;
++        result.fIsEllipsized = fEllipsis != nullptr;
++    }
+ 
+     // Fill out the style parts
+     this->iterateThroughVisualRuns(false,
+diff --git a/modules/skparagraph/src/TextWrapper.cpp b/modules/skparagraph/src/TextWrapper.cpp
+--- a/modules/skparagraph/src/TextWrapper.cpp
++++ b/modules/skparagraph/src/TextWrapper.cpp
+@@ -499,6 +499,7 @@
+                 needEllipsis);
+         fHeight += fEndLine.metrics().height();
+         parent->lines().back().setMaxRunMetrics(maxRunMetrics);
++        parent->lines().back().markTrailingEmptyLine();
+     }
+ 
+     if (parent->lines().empty()) {
+diff --git a/modules/canvaskit/paragraph_bindings.cpp b/modules/canvaskit/paragraph_bindings.cpp
+--- a/modules/canvaskit/paragraph_bindings.cpp
++++ b/modules/canvaskit/paragraph_bindings.cpp
+@@ -367,6 +367,11 @@
+     m.set("lineHeightBranch", metrics.fLineHeightBranch);
+     m.set("nextLineBaselinePitch", metrics.fNextLineBaselinePitch);
+     m.set("lineBoxHeight", metrics.fLineBoxHeight);
++    m.set("availableWidth", metrics.fAvailableWidth);
++    m.set("advanceBeforeJustification", metrics.fAdvanceBeforeJustification);
++    m.set("advanceAfterJustification", metrics.fAdvanceAfterJustification);
++    m.set("isEllipsized", metrics.fIsEllipsized);
++    m.set("isTrailingEmptyLine", metrics.fIsTrailingEmptyLine);
+     return m;
+ }
+ 

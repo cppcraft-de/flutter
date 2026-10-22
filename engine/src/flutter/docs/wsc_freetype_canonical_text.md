@@ -1,8 +1,12 @@
-# WSC FreeType-Canonical Text Path
+# Text rendering with FreeType
 
-This fork keeps native platform font discovery and fallback, then attempts to
-convert selected typefaces to Skia's FreeType backend before shaping, metrics,
-layout, text blob creation, or rendering consume them.
+The fork uses FreeType to help match text rendering and layout in Worksheet
+Crafter, the existing Qt application. This page describes the engine changes,
+their limits, and the diagnostic APIs for developers working on that code.
+
+The operating system still finds fonts and chooses replacements for missing
+characters. The fork then attempts to create FreeType-backed versions of those
+fonts before Flutter measures, lays out, and draws the text.
 
 The policy is implemented in Flutter-owned `txt` code with a canonicalizing
 `SkFontMgr`/`SkFontStyleSet` wrapper. Platform managers still decide which font
@@ -13,8 +17,9 @@ If font data cannot be opened or FreeType construction fails, the code asserts
 with `FML_DCHECK`; without that assertion, it logs an error and returns the
 original native typeface. Such fallback faces have no FreeType parity guarantee.
 
-WSC uses Qt-like integer layout metrics, subpixel-off SkParagraph settings,
-and third-party patch hooks.
+The fork also keeps its diagnostics and adjustments for matching Qt:
+Qt-like integer layout metrics, subpixel-off SkParagraph settings, optional
+advance/line diagnostics, and the third-party patch hooks remain in place.
 
 Layout parity requires matching font data, selected faces/styles, text, and
 layout inputs on SkParagraph/HarfBuzz/FreeType-backed paths. Sharing those
@@ -30,6 +35,50 @@ See [dependency patch maintenance](../../../../docs/wsc/dependency-patches.md)
 and [local engine development](../../../../docs/wsc/engine-identity.md#local-engine-development)
 for engine work. For tester setup, settings, and capture procedures, use the
 [FRT README](https://bitbucket.org/schoolcraftteam/font_rendering_tester/src/master/README.md).
+
+## Runtime font diagnostics
+
+The SDK includes the existing diagnostic APIs and data format, with collection
+disabled by default. Before creating any paragraph, applications can call:
+
+```dart
+import 'dart:ui' as ui;
+
+ui.configureFontRenderingDiagnostics(enabled: true);
+```
+
+Configure this before `WidgetsFlutterBinding.ensureInitialized()`. On native
+and CanvasKit, the mode is fixed at the first paragraph builder; repeating the
+same setting is allowed, but changing it afterward throws. Native applications
+can alternatively select the startup mode with `WSC_FONT_DIAGNOSTICS=1` (or
+`true`) in their environment. skwasm does not collect these extended diagnostics:
+configuration is a no-op, queries return empty records, and there is no
+startup-freeze enforcement.
+
+The mode changes collection only. Script classification remains available for
+cursive letter spacing even with collection disabled. Integer glyph-advance
+rounding and the final paragraph occupied-height correction run in both modes. SkParagraph includes
+the final occupied line box in its default height, so `Paragraph.height`,
+`TextPainter.height`, and normal `RichText`/`Text` layout all receive it.
+Line origins retain the signed baseline pitch. The height correction needs no
+extra client API and does not allocate or decode diagnostic line records.
+Raw shaping positions use `std::vector` and are retained only when enabled.
+Disabled diagnostic queries return empty records. Backends without extended
+diagnostics continue to report them unavailable.
+
+`PainterTest.FontDiagnosticsRenderingParity` covers 81 combinations of fonts,
+sizes, explicit/natural line heights, wrapping, hard breaks, and empty text
+using native Skia rasterization. It compares diagnostics modes within that path;
+it does not establish Impeller, web, cross-platform, or Qt parity.
+Run it in separate processes with `WSC_FONT_DIAGNOSTICS=0` and `=1`.
+Explicit height and strut controls now use their requested metrics; their old
+fingerprints are not compatibility baselines. Preserve the accepted natural-height
+Qt cases, and compare the current `FONT_RENDERING_PARITY` fingerprints between
+diagnostics modes. The enabled `FONT_DIAGNOSTICS_PARITY` fingerprint remains
+useful when comparing diagnostic records from equivalent implementations.
+The test checks the always-on bottom correction and rejects mode changes after
+paragraph creation. This does not replace an SDK build, application capture,
+or a disabled-mode allocation/performance benchmark.
 
 ## Explicit height controls
 

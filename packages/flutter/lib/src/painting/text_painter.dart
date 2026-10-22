@@ -18,7 +18,8 @@ import 'dart:ui'
         ParagraphConstraints,
         ParagraphStyle,
         PlaceholderAlignment,
-        TextStyle;
+        TextStyle,
+        fontRenderingDiagnosticsEnabled;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -33,6 +34,380 @@ import 'text_style.dart';
 
 export 'dart:ui' show LineMetrics;
 export 'package:flutter/services.dart' show TextRange, TextSelection;
+
+/// Indexed ranges and horizontal metrics from the actual laid-out paragraph.
+///
+/// Offsets use UTF-16. Widths use paragraph logical pixels and are unaffected by
+/// the TextPainter paint offset. The consumed range is [startIndex] through
+/// [endIncludingNewline], including wrap whitespace and hard-break separators.
+class DiagnosticLineLayoutMetrics {
+  /// Creates a validated final-line diagnostic record.
+  const DiagnosticLineLayoutMetrics({
+    required this.lineNumber,
+    required this.startIndex,
+    required this.endIndex,
+    required this.endExcludingWhitespaces,
+    required this.endIncludingNewline,
+    required this.availableWidth,
+    required this.advanceBeforeJustification,
+    required this.advanceAfterJustification,
+    required this.isComplete,
+    required this.isEllipsized,
+  });
+
+  /// Zero-based index in the paragraph's actual line list.
+  final int lineNumber;
+
+  /// First consumed UTF-16 offset.
+  final int startIndex;
+
+  /// End excluding the hard-break separator, including trailing whitespace.
+  final int endIndex;
+
+  /// End of the measured content, excluding trailing whitespace.
+  final int endExcludingWhitespaces;
+
+  /// End including consumed wrap whitespace and hard-break separators.
+  final int endIncludingNewline;
+
+  /// Actual width used by the paragraph engine for wrapping and justification.
+  final double availableWidth;
+
+  /// Exact content advance before justification, excluding trailing ghost spaces.
+  final double advanceBeforeJustification;
+
+  /// Exact content advance after justification, excluding trailing ghost spaces.
+  final double advanceAfterJustification;
+
+  /// Whether the paragraph was laid out without max-lines/ellipsis truncation.
+  ///
+  /// This paragraph-level value is repeated on each record. It does not mean
+  /// that this line consumes all paragraph text.
+  final bool isComplete;
+
+  /// Whether this line contains a generated ellipsis (excluded from advances).
+  final bool isEllipsized;
+}
+
+/// Detailed engine line metrics associated with a final laid-out line.
+class DiagnosticLineMetrics {
+  /// Creates detailed metrics associated with [lineMetrics].
+  const DiagnosticLineMetrics({
+    required this.lineMetrics,
+    required this.rawAscent,
+    required this.rawDescent,
+    required this.rawLeading,
+    required this.effectiveAscent,
+    required this.effectiveDescent,
+    required this.effectiveLeading,
+    required this.heightInputAscent,
+    required this.heightInputDescent,
+    required this.heightInputLeading,
+    required this.heightInputRawLeading,
+    required this.lineHeightBranch,
+    required this.nextLineBaselinePitch,
+    required this.lineBoxHeight,
+  });
+
+  /// The standard public metrics for this line.
+  final ui.LineMetrics lineMetrics;
+
+  /// The ascent from final resolved-font metrics before line adjustments.
+  final double rawAscent;
+
+  /// The descent from final resolved-font metrics before line adjustments.
+  final double rawDescent;
+
+  /// The leading from final resolved-font metrics before line adjustments.
+  final double rawLeading;
+
+  /// The ascent used by SkParagraph's final line layout.
+  final double effectiveAscent;
+
+  /// The descent used by SkParagraph's final line layout.
+  final double effectiveDescent;
+
+  /// The leading used by SkParagraph's final line layout.
+  final double effectiveLeading;
+
+  /// The signed ascent input used by SkParagraph's active line-height formula.
+  final double heightInputAscent;
+
+  /// The descent input used by SkParagraph's active line-height formula.
+  final double heightInputDescent;
+
+  /// The leading input used by SkParagraph's active line-height formula.
+  final double heightInputLeading;
+
+  /// The raw leading input used by SkParagraph's active line-height formula.
+  final double heightInputRawLeading;
+
+  /// The active line-height formula branch.
+  ///
+  /// Values are 0 for normal and 2 for Qt/FreeType size-metric baseline pitch.
+  final int lineHeightBranch;
+
+  /// The vertical advance used when positioning the next line.
+  final double nextLineBaselinePitch;
+
+  /// The occupied line height, tracked separately from baseline pitch.
+  final double lineBoxHeight;
+}
+
+/// Detailed metrics for a glyph from the final laid-out paragraph.
+class DiagnosticGlyphMetrics {
+  /// Creates diagnostic metrics for one laid-out glyph.
+  const DiagnosticGlyphMetrics({
+    required this.lineNumber,
+    required this.runIndex,
+    required this.fontFamily,
+    required this.typefaceId,
+    required this.typefaceStyleWeight,
+    required this.typefaceStyleWidth,
+    required this.typefaceStyleSlant,
+    required this.fontSize,
+    required this.shapingUtf8RangeStart,
+    required this.shapingUtf8RangeEnd,
+    required this.shapingBidiLevel,
+    required this.shapingScript,
+    required this.shapingLanguage,
+    required this.shapingFeatureCount,
+    required this.shapingFeatureMask,
+    required this.subpixel,
+    required this.linearMetrics,
+    required this.hinting,
+    required this.edging,
+    required this.fontMetricsTop,
+    required this.fontMetricsAscent,
+    required this.fontMetricsDescent,
+    required this.fontMetricsBottom,
+    required this.fontMetricsLeading,
+    required this.glyphId,
+    required this.utf8Cluster,
+    required this.rawShapePosition,
+    required this.rawAdvance,
+    required this.legacyPairKerningX,
+    required this.legacyPairKerningAvailable,
+    required this.qtLikeAdvanceX,
+    required this.qtLikeAdvanceAvailable,
+    required this.advanceProbeBackend,
+    required this.qtLikeAdvance26Dot6,
+    required this.qtLikeLinearHoriAdvance16Dot16,
+    required this.qtLikeMetricsHoriAdvance26Dot6,
+    required this.qtLikeLoadFlags,
+    required this.qtLikeXppem,
+    required this.qtLikeYppem,
+    required this.qtLikeXScale,
+    required this.qtLikeYScale,
+    required this.typefaceUnitsPerEm,
+    required this.typefaceGlyphCount,
+    required this.headTableChecksum,
+    required this.hheaTableChecksum,
+    required this.hmtxTableChecksum,
+    required this.os2TableChecksum,
+    required this.postTableChecksum,
+    required this.maxpTableChecksum,
+    required this.faceIndex,
+    required this.faceFlags,
+    required this.faceStyleFlags,
+    required this.platformDesignAdvance,
+    required this.platformGdiCompatibleAdvance,
+    required this.platformDesignUnitsPerEm,
+    required this.platformMeasuringMode,
+    required this.shapePosition,
+    required this.offset,
+    required this.advance,
+    required this.finalOrigin,
+    required this.bounds,
+    required this.inkBounds,
+  });
+
+  /// The final laid-out line containing this glyph.
+  final int lineNumber;
+
+  /// The SkParagraph run containing this glyph.
+  final int runIndex;
+
+  /// The resolved typeface family name.
+  final String fontFamily;
+
+  /// The process-local resolved SkTypeface identifier.
+  final int typefaceId;
+
+  /// The resolved SkTypeface style weight.
+  final int typefaceStyleWeight;
+
+  /// The resolved SkTypeface style width.
+  final int typefaceStyleWidth;
+
+  /// The resolved SkTypeface style slant.
+  final int typefaceStyleSlant;
+
+  /// The resolved font size.
+  final double fontSize;
+
+  /// The UTF-8 start offset passed to the shaping run.
+  final int shapingUtf8RangeStart;
+
+  /// The UTF-8 end offset passed to the shaping run.
+  final int shapingUtf8RangeEnd;
+
+  /// The bidi level passed to the shaping run.
+  final int shapingBidiLevel;
+
+  /// The OpenType script tag passed to the shaping run.
+  final int shapingScript;
+
+  /// The language tag passed to the shaping run.
+  final String shapingLanguage;
+
+  /// Count of explicit OpenType features passed to shaping.
+  final int shapingFeatureCount;
+
+  /// Compact mask for common explicit OpenType features passed to shaping.
+  final int shapingFeatureMask;
+
+  /// Whether the resolved SkFont requests subpixel positioning.
+  final bool subpixel;
+
+  /// Whether the resolved SkFont requests linear metrics.
+  final bool linearMetrics;
+
+  /// The numeric SkFontHinting value.
+  final int hinting;
+
+  /// The numeric SkFont::Edging value.
+  final int edging;
+
+  /// The resolved SkFontMetrics top value.
+  final double fontMetricsTop;
+
+  /// The resolved SkFontMetrics ascent value.
+  final double fontMetricsAscent;
+
+  /// The resolved SkFontMetrics descent value.
+  final double fontMetricsDescent;
+
+  /// The resolved SkFontMetrics bottom value.
+  final double fontMetricsBottom;
+
+  /// The resolved SkFontMetrics leading value.
+  final double fontMetricsLeading;
+
+  /// The resolved glyph identifier.
+  final int glyphId;
+
+  /// The UTF-8 cluster offset associated with this glyph.
+  final int utf8Cluster;
+
+  /// The shaping position before local Qt-like integer adjustments.
+  final Offset rawShapePosition;
+
+  /// The advance to the next raw shaping position.
+  final Offset rawAdvance;
+
+  /// Qt-style legacy `kern` adjustment to the next glyph, if Skia can resolve it.
+  final double legacyPairKerningX;
+
+  /// Whether [legacyPairKerningX] was available for this glyph pair.
+  final bool legacyPairKerningAvailable;
+
+  /// Qt-style FreeType glyph advance used by the local SkParagraph layout patch.
+  final double qtLikeAdvanceX;
+
+  /// Whether [qtLikeAdvanceX] was available for this glyph.
+  final bool qtLikeAdvanceAvailable;
+
+  /// Backend that produced the advance probe: 1 FreeType, 2 CoreText, 3 DirectWrite.
+  final int advanceProbeBackend;
+
+  /// The unrounded FreeType slot advance.x used by the Qt-like advance probe.
+  final double qtLikeAdvance26Dot6;
+
+  /// The FreeType slot linearHoriAdvance used by the Qt-like advance probe.
+  final double qtLikeLinearHoriAdvance16Dot16;
+
+  /// The FreeType slot metrics.horiAdvance used by the Qt-like advance probe.
+  final double qtLikeMetricsHoriAdvance26Dot6;
+
+  /// The FreeType FT_LOAD_* flags used by the Qt-like advance probe.
+  final int qtLikeLoadFlags;
+
+  /// The active FreeType size x_ppem used by the Qt-like advance probe.
+  final int qtLikeXppem;
+
+  /// The active FreeType size y_ppem used by the Qt-like advance probe.
+  final int qtLikeYppem;
+
+  /// The active FreeType size x_scale used by the Qt-like advance probe.
+  final double qtLikeXScale;
+
+  /// The active FreeType size y_scale used by the Qt-like advance probe.
+  final double qtLikeYScale;
+
+  /// The resolved typeface units-per-em.
+  final int typefaceUnitsPerEm;
+
+  /// The resolved typeface glyph count.
+  final int typefaceGlyphCount;
+
+  /// FNV-1a checksum of the resolved typeface `head` table.
+  final int headTableChecksum;
+
+  /// FNV-1a checksum of the resolved typeface `hhea` table.
+  final int hheaTableChecksum;
+
+  /// FNV-1a checksum of the resolved typeface `hmtx` table.
+  final int hmtxTableChecksum;
+
+  /// FNV-1a checksum of the resolved typeface `OS/2` table.
+  final int os2TableChecksum;
+
+  /// FNV-1a checksum of the resolved typeface `post` table.
+  final int postTableChecksum;
+
+  /// FNV-1a checksum of the resolved typeface `maxp` table.
+  final int maxpTableChecksum;
+
+  /// FreeType face index reported by the Qt-like advance probe.
+  final int faceIndex;
+
+  /// FreeType face_flags reported by the Qt-like advance probe.
+  final int faceFlags;
+
+  /// FreeType style_flags reported by the Qt-like advance probe.
+  final int faceStyleFlags;
+
+  /// Platform design-space advance converted to logical pixels, when available.
+  final double platformDesignAdvance;
+
+  /// Platform GDI-compatible advance converted to logical pixels, when available.
+  final double platformGdiCompatibleAdvance;
+
+  /// Platform font design units-per-em, when available.
+  final int platformDesignUnitsPerEm;
+
+  /// Platform measuring mode enum, when available.
+  final int platformMeasuringMode;
+
+  /// The position stored by the shaping/layout run.
+  final Offset shapePosition;
+
+  /// The shaping offset associated with this glyph.
+  final Offset offset;
+
+  /// The advance to the next shaping position.
+  final Offset advance;
+
+  /// The final glyph origin in paragraph coordinates.
+  final Offset finalOrigin;
+
+  /// The resolved glyph bounds relative to its origin.
+  final Rect bounds;
+
+  /// The resolved glyph bounds translated to [finalOrigin].
+  final Rect inkBounds;
+}
 
 /// The default font size if none is specified.
 ///
@@ -1702,6 +2077,25 @@ class TextPainter {
     );
   }
 
+  /// Returns the [ui.GlyphInfo] associated with [codeUnitOffset] in the laid
+  /// out paragraph, or null when that code unit isn't visible.
+  ///
+  /// The returned bounds are in this [TextPainter]'s coordinate system.
+  ui.GlyphInfo? getGlyphInfoAt(int codeUnitOffset) {
+    assert(_debugAssertTextLayoutIsValid);
+    assert(!_debugNeedsRelayout);
+    final _TextPainterLayoutCacheWithOffset cachedLayout = _layoutCache!;
+    final ui.GlyphInfo? rawGlyphInfo = cachedLayout.paragraph.getGlyphInfoAt(codeUnitOffset);
+    if (rawGlyphInfo == null || cachedLayout.paintOffset == Offset.zero) {
+      return rawGlyphInfo;
+    }
+    return ui.GlyphInfo(
+      rawGlyphInfo.graphemeClusterLayoutBounds.shift(cachedLayout.paintOffset),
+      rawGlyphInfo.graphemeClusterCodeUnitRange,
+      rawGlyphInfo.writingDirection,
+    );
+  }
+
   /// Returns the closest position within the text for the given pixel offset.
   TextPosition getPositionForOffset(Offset offset) {
     assert(_debugAssertTextLayoutIsValid);
@@ -1797,6 +2191,260 @@ class TextPainter {
         : rawMetrics
               .map((ui.LineMetrics metrics) => _shiftLineMetrics(metrics, offset))
               .toList(growable: false);
+  }
+
+  /// Translation from raw engine paragraph coordinates to this painter's output.
+  ///
+  /// Valid after [layout]. Public line metrics and glyph cluster bounds already
+  /// contain this offset; raw glyph diagnostics do not.
+  Offset get diagnosticPaintOffset {
+    assert(_debugAssertTextLayoutIsValid);
+    assert(!_debugNeedsRelayout);
+    return _layoutCache!.paintOffset;
+  }
+
+  /// Returns indexed diagnostics from the exact paragraph used for layout.
+  ///
+  /// Unsupported versions, malformed records, and unavailable backends return
+  /// an empty list. This query never reconstructs lines using caret positions.
+  List<DiagnosticLineLayoutMetrics> computeLineLayoutMetricsForDiagnostics() {
+    if (!ui.fontRenderingDiagnosticsEnabled) {
+      return const <DiagnosticLineLayoutMetrics>[];
+    }
+    assert(_debugAssertTextLayoutIsValid);
+    assert(!_debugNeedsRelayout);
+    // The bootstrap dart:ui summary may predate the patched engine API.
+    // ignore: undefined_method
+    final Float64List encoded = _layoutCache!.paragraph.computeLineLayoutMetricsForDiagnostics();
+    const recordLength = 10;
+    if (encoded.length < 3 ||
+        encoded[0] != 1 ||
+        encoded[1] != recordLength ||
+        !encoded[2].isFinite ||
+        encoded[2] < 0 ||
+        encoded[2] != encoded[2].truncateToDouble() ||
+        encoded.length != 3 + encoded[2] * recordLength ||
+        encoded[2] != _layoutCache!.lineMetrics.length) {
+      return const <DiagnosticLineLayoutMetrics>[];
+    }
+    final result = <DiagnosticLineLayoutMetrics>[];
+    for (var position = 3; position < encoded.length; position += recordLength) {
+      final List<double> indexes = encoded.sublist(position, position + 5);
+      if (indexes.any(
+            (double value) => !value.isFinite || value < 0 || value != value.truncateToDouble(),
+          ) ||
+          indexes[0] != result.length ||
+          indexes[1] > indexes[3] ||
+          indexes[3] > indexes[2] ||
+          indexes[2] > indexes[4] ||
+          encoded[position + 5].isNaN ||
+          encoded[position + 5] < 0 ||
+          !encoded[position + 6].isFinite ||
+          encoded[position + 6] < 0 ||
+          !encoded[position + 7].isFinite ||
+          encoded[position + 7] < 0 ||
+          (encoded[position + 8] != 0 && encoded[position + 8] != 1) ||
+          (encoded[position + 9] != 0 && encoded[position + 9] != 1)) {
+        return const <DiagnosticLineLayoutMetrics>[];
+      }
+      result.add(
+        DiagnosticLineLayoutMetrics(
+          lineNumber: indexes[0].toInt(),
+          startIndex: indexes[1].toInt(),
+          endIndex: indexes[2].toInt(),
+          endExcludingWhitespaces: indexes[3].toInt(),
+          endIncludingNewline: indexes[4].toInt(),
+          availableWidth: encoded[position + 5],
+          advanceBeforeJustification: encoded[position + 6],
+          advanceAfterJustification: encoded[position + 7],
+          isComplete: encoded[position + 8] == 1,
+          isEllipsized: encoded[position + 9] == 1,
+        ),
+      );
+    }
+    return result;
+  }
+
+  /// Returns detailed metrics from the exact paragraph used for layout.
+  List<DiagnosticLineMetrics> computeDetailedLineMetricsForDiagnostics() {
+    if (!ui.fontRenderingDiagnosticsEnabled) {
+      return const <DiagnosticLineMetrics>[];
+    }
+    assert(_debugAssertTextLayoutIsValid);
+    assert(!_debugNeedsRelayout);
+    final _TextPainterLayoutCacheWithOffset layout = _layoutCache!;
+    final List<ui.LineMetrics> lines = computeLineMetrics();
+    // The repository SDK's prebuilt dart:ui summary does not include this
+    // locally patched diagnostic method.
+    // ignore: undefined_method
+    final Float64List encoded = layout.paragraph.computeDetailedLineMetricsForDiagnostics();
+    if (encoded.length != lines.length * 13) {
+      return const <DiagnosticLineMetrics>[];
+    }
+    var position = 0;
+    return <DiagnosticLineMetrics>[
+      for (final ui.LineMetrics line in lines)
+        DiagnosticLineMetrics(
+          lineMetrics: line,
+          rawAscent: encoded[position++],
+          rawDescent: encoded[position++],
+          rawLeading: encoded[position++],
+          effectiveAscent: encoded[position++],
+          effectiveDescent: encoded[position++],
+          effectiveLeading: encoded[position++],
+          heightInputAscent: encoded[position++],
+          heightInputDescent: encoded[position++],
+          heightInputLeading: encoded[position++],
+          heightInputRawLeading: encoded[position++],
+          lineHeightBranch: encoded[position++].toInt(),
+          nextLineBaselinePitch: encoded[position++],
+          lineBoxHeight: encoded[position++],
+        ),
+    ];
+  }
+
+  /// Returns detailed glyph metrics from the exact paragraph used for layout.
+  List<DiagnosticGlyphMetrics> computeGlyphMetricsForDiagnostics() {
+    if (!ui.fontRenderingDiagnosticsEnabled) {
+      return const <DiagnosticGlyphMetrics>[];
+    }
+    assert(_debugAssertTextLayoutIsValid);
+    assert(!_debugNeedsRelayout);
+    final _TextPainterLayoutCacheWithOffset layout = _layoutCache!;
+    // The repository SDK's prebuilt dart:ui summary does not include this
+    // locally patched diagnostic method.
+    // ignore: undefined_method
+    final List<Object?> encoded = layout.paragraph.computeGlyphMetricsForDiagnostics();
+    final result = <DiagnosticGlyphMetrics>[];
+    for (final Object? value in encoded) {
+      if (value case final List<Object?> record when record.length >= 32) {
+        final bool hasRawShaping = record.length >= 36;
+        final bool hasLegacyPairKerning = record.length >= 38;
+        final bool hasQtLikeAdvance = record.length >= 40;
+        final bool hasTypefaceStyle = record.length >= 43;
+        final bool hasShapingRun = record.length >= 50;
+        final bool hasQtLikeAdvanceDiagnostics = record.length >= 69;
+        final bool hasPlatformAdvanceDiagnostics = record.length >= 74;
+        final int rawExtraWidth = (hasLegacyPairKerning ? 2 : 0) + (hasQtLikeAdvance ? 2 : 0);
+        final int shapePositionIndex = hasRawShaping ? 20 + rawExtraWidth : 16;
+        final int offsetIndex = hasRawShaping ? 22 + rawExtraWidth : 18;
+        final int advanceIndex = hasRawShaping ? 24 + rawExtraWidth : 20;
+        final int finalOriginIndex = hasRawShaping ? 26 + rawExtraWidth : 22;
+        final int boundsIndex = hasRawShaping ? 28 + rawExtraWidth : 24;
+        final int inkBoundsIndex = hasRawShaping ? 32 + rawExtraWidth : 28;
+        result.add(
+          DiagnosticGlyphMetrics(
+            lineNumber: (record[0]! as num).toInt(),
+            runIndex: (record[1]! as num).toInt(),
+            fontFamily: record[2]! as String,
+            typefaceId: (record[3]! as num).toInt(),
+            typefaceStyleWeight: hasTypefaceStyle ? (record[40]! as num).toInt() : 0,
+            typefaceStyleWidth: hasTypefaceStyle ? (record[41]! as num).toInt() : 0,
+            typefaceStyleSlant: hasTypefaceStyle ? (record[42]! as num).toInt() : 0,
+            fontSize: (record[4]! as num).toDouble(),
+            shapingUtf8RangeStart: hasShapingRun ? (record[43]! as num).toInt() : 0,
+            shapingUtf8RangeEnd: hasShapingRun ? (record[44]! as num).toInt() : 0,
+            shapingBidiLevel: hasShapingRun ? (record[45]! as num).toInt() : 0,
+            shapingScript: hasShapingRun ? (record[46]! as num).toInt() : 0,
+            shapingLanguage: hasShapingRun ? record[47]! as String : '',
+            shapingFeatureCount: hasShapingRun ? (record[48]! as num).toInt() : 0,
+            shapingFeatureMask: hasShapingRun ? (record[49]! as num).toInt() : 0,
+            subpixel: (record[5]! as num) != 0,
+            linearMetrics: (record[6]! as num) != 0,
+            hinting: (record[7]! as num).toInt(),
+            edging: (record[8]! as num).toInt(),
+            fontMetricsTop: (record[9]! as num).toDouble(),
+            fontMetricsAscent: (record[10]! as num).toDouble(),
+            fontMetricsDescent: (record[11]! as num).toDouble(),
+            fontMetricsBottom: (record[12]! as num).toDouble(),
+            fontMetricsLeading: (record[13]! as num).toDouble(),
+            glyphId: (record[14]! as num).toInt(),
+            utf8Cluster: (record[15]! as num).toInt(),
+            rawShapePosition: hasRawShaping
+                ? Offset((record[16]! as num).toDouble(), (record[17]! as num).toDouble())
+                : Offset(
+                    (record[shapePositionIndex]! as num).toDouble(),
+                    (record[shapePositionIndex + 1]! as num).toDouble(),
+                  ),
+            rawAdvance: hasRawShaping
+                ? Offset((record[18]! as num).toDouble(), (record[19]! as num).toDouble())
+                : Offset(
+                    (record[advanceIndex]! as num).toDouble(),
+                    (record[advanceIndex + 1]! as num).toDouble(),
+                  ),
+            legacyPairKerningX: hasLegacyPairKerning ? (record[20]! as num).toDouble() : 0.0,
+            legacyPairKerningAvailable: hasLegacyPairKerning && (record[21]! as num) != 0,
+            qtLikeAdvanceX: hasQtLikeAdvance ? (record[22]! as num).toDouble() : 0.0,
+            qtLikeAdvanceAvailable: hasQtLikeAdvance && (record[23]! as num) != 0,
+            advanceProbeBackend: hasQtLikeAdvanceDiagnostics ? (record[50]! as num).toInt() : 0,
+            qtLikeAdvance26Dot6: hasQtLikeAdvanceDiagnostics
+                ? (record[51]! as num).toDouble()
+                : 0.0,
+            qtLikeLinearHoriAdvance16Dot16: hasQtLikeAdvanceDiagnostics
+                ? (record[52]! as num).toDouble()
+                : 0.0,
+            qtLikeMetricsHoriAdvance26Dot6: hasQtLikeAdvanceDiagnostics
+                ? (record[53]! as num).toDouble()
+                : 0.0,
+            qtLikeLoadFlags: hasQtLikeAdvanceDiagnostics ? (record[54]! as num).toInt() : 0,
+            qtLikeXppem: hasQtLikeAdvanceDiagnostics ? (record[55]! as num).toInt() : 0,
+            qtLikeYppem: hasQtLikeAdvanceDiagnostics ? (record[56]! as num).toInt() : 0,
+            qtLikeXScale: hasQtLikeAdvanceDiagnostics ? (record[57]! as num).toDouble() : 0.0,
+            qtLikeYScale: hasQtLikeAdvanceDiagnostics ? (record[58]! as num).toDouble() : 0.0,
+            typefaceUnitsPerEm: hasQtLikeAdvanceDiagnostics ? (record[59]! as num).toInt() : 0,
+            typefaceGlyphCount: hasQtLikeAdvanceDiagnostics ? (record[60]! as num).toInt() : 0,
+            headTableChecksum: hasQtLikeAdvanceDiagnostics ? (record[61]! as num).toInt() : 0,
+            hheaTableChecksum: hasQtLikeAdvanceDiagnostics ? (record[62]! as num).toInt() : 0,
+            hmtxTableChecksum: hasQtLikeAdvanceDiagnostics ? (record[63]! as num).toInt() : 0,
+            os2TableChecksum: hasQtLikeAdvanceDiagnostics ? (record[64]! as num).toInt() : 0,
+            postTableChecksum: hasQtLikeAdvanceDiagnostics ? (record[65]! as num).toInt() : 0,
+            maxpTableChecksum: hasQtLikeAdvanceDiagnostics ? (record[66]! as num).toInt() : 0,
+            faceIndex: hasQtLikeAdvanceDiagnostics ? (record[67]! as num).toInt() : 0,
+            faceFlags: hasQtLikeAdvanceDiagnostics ? (record[68]! as num).toInt() : 0,
+            faceStyleFlags: hasQtLikeAdvanceDiagnostics ? (record[69]! as num).toInt() : 0,
+            platformDesignAdvance: hasPlatformAdvanceDiagnostics
+                ? (record[70]! as num).toDouble()
+                : 0.0,
+            platformGdiCompatibleAdvance: hasPlatformAdvanceDiagnostics
+                ? (record[71]! as num).toDouble()
+                : 0.0,
+            platformDesignUnitsPerEm: hasPlatformAdvanceDiagnostics
+                ? (record[72]! as num).toInt()
+                : 0,
+            platformMeasuringMode: hasPlatformAdvanceDiagnostics ? (record[73]! as num).toInt() : 0,
+            shapePosition: Offset(
+              (record[shapePositionIndex]! as num).toDouble(),
+              (record[shapePositionIndex + 1]! as num).toDouble(),
+            ),
+            offset: Offset(
+              (record[offsetIndex]! as num).toDouble(),
+              (record[offsetIndex + 1]! as num).toDouble(),
+            ),
+            advance: Offset(
+              (record[advanceIndex]! as num).toDouble(),
+              (record[advanceIndex + 1]! as num).toDouble(),
+            ),
+            finalOrigin: Offset(
+              (record[finalOriginIndex]! as num).toDouble(),
+              (record[finalOriginIndex + 1]! as num).toDouble(),
+            ),
+            bounds: Rect.fromLTRB(
+              (record[boundsIndex]! as num).toDouble(),
+              (record[boundsIndex + 1]! as num).toDouble(),
+              (record[boundsIndex + 2]! as num).toDouble(),
+              (record[boundsIndex + 3]! as num).toDouble(),
+            ),
+            inkBounds: Rect.fromLTRB(
+              (record[inkBoundsIndex]! as num).toDouble(),
+              (record[inkBoundsIndex + 1]! as num).toDouble(),
+              (record[inkBoundsIndex + 2]! as num).toDouble(),
+              (record[inkBoundsIndex + 3]! as num).toDouble(),
+            ),
+          ),
+        );
+      }
+    }
+    return result;
   }
 
   bool _disposed = false;

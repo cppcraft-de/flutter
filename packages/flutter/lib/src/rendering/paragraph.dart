@@ -13,6 +13,7 @@ import 'dart:ui'
     show
         BoxHeightStyle,
         BoxWidthStyle,
+        GlyphInfo,
         Gradient,
         LineMetrics,
         PlaceholderAlignment,
@@ -1072,6 +1073,68 @@ class RenderParagraph extends RenderBox
     assert(!debugNeedsLayout);
     _layoutTextWithConstraints(constraints);
     return _textPainter.getFullHeightForCaret(position, Rect.zero);
+  }
+
+  /// Returns the line metrics from the exact paragraph used to paint this
+  /// render object.
+  ///
+  /// This read-only diagnostic API is valid only after [layout].
+  List<ui.LineMetrics> computeLineMetricsForDiagnostics() {
+    assert(!debugNeedsLayout);
+    _layoutTextWithConstraints(constraints);
+    return _textPainter.computeLineMetrics();
+  }
+
+  /// Returns the exact UTF-16 line range from the paragraph used to paint
+  /// this render object.
+  ///
+  /// This read-only layout query is valid only after [layout].
+  TextRange getLineBoundary(TextPosition position) {
+    assert(!debugNeedsLayout);
+    _layoutTextWithConstraints(constraints);
+    return _textPainter.getLineBoundary(position);
+  }
+
+  /// Returns detailed line metrics from the exact paragraph used to paint this
+  /// render object.
+  List<DiagnosticLineMetrics> computeDetailedLineMetricsForDiagnostics() {
+    assert(!debugNeedsLayout);
+    _layoutTextWithConstraints(constraints);
+    return _textPainter.computeDetailedLineMetricsForDiagnostics();
+  }
+
+  /// Returns indexed ranges and horizontal metrics from the painted paragraph.
+  List<DiagnosticLineLayoutMetrics> computeLineLayoutMetricsForDiagnostics() {
+    assert(!debugNeedsLayout);
+    _layoutTextWithConstraints(constraints);
+    return _textPainter.computeLineLayoutMetricsForDiagnostics();
+  }
+
+  /// Translation from raw engine paragraph coordinates to this render object's
+  /// local painted coordinates. Valid after layout.
+  Offset get diagnosticPaintOffset {
+    assert(!debugNeedsLayout);
+    _layoutTextWithConstraints(constraints);
+    return _textPainter.diagnosticPaintOffset;
+  }
+
+  /// Returns detailed glyph metrics from the exact paragraph used to paint this
+  /// render object.
+  List<DiagnosticGlyphMetrics> computeGlyphMetricsForDiagnostics() {
+    assert(!debugNeedsLayout);
+    _layoutTextWithConstraints(constraints);
+    return _textPainter.computeGlyphMetricsForDiagnostics();
+  }
+
+  /// Returns the laid-out grapheme-cluster information associated with
+  /// [codeUnitOffset] from the exact paragraph used to paint this render
+  /// object.
+  ///
+  /// This read-only diagnostic API is valid only after [layout].
+  ui.GlyphInfo? getGlyphInfoAtForDiagnostics(int codeUnitOffset) {
+    assert(!debugNeedsLayout);
+    _layoutTextWithConstraints(constraints);
+    return _textPainter.getGlyphInfoAt(codeUnitOffset);
   }
 
   /// Returns a list of rects that bound the given selection.

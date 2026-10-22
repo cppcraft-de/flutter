@@ -30,6 +30,14 @@ double Paragraph::width() {
   return m_paragraph_->GetMaxWidth();
 }
 
+bool Paragraph::configureFontRenderingDiagnostics(bool enabled) {
+  return skia::textlayout::ConfigureFontDiagnostics(enabled);
+}
+
+bool Paragraph::fontRenderingDiagnosticsEnabled() {
+  return skia::textlayout::FontDiagnosticsEnabled();
+}
+
 double Paragraph::height() {
   return m_paragraph_->GetHeight();
 }
@@ -209,6 +217,127 @@ tonic::Float64List Paragraph::computeLineMetrics() const {
     result[position++] = static_cast<double>(line.line_number);
   }
 
+  return result;
+}
+
+tonic::Float64List Paragraph::computeLineLayoutMetricsForDiagnostics() const {
+  if (!fontRenderingDiagnosticsEnabled()) {
+    return tonic::Float64List(Dart_NewTypedData(Dart_TypedData_kFloat64, 0));
+  }
+  const auto& metrics = m_paragraph_->GetLineMetrics();
+  // Header: schema version, record length, record count. See dart:ui contract.
+  constexpr size_t kRecordLength = 10;
+  tonic::Float64List result(Dart_NewTypedData(
+      Dart_TypedData_kFloat64, 3 + metrics.size() * kRecordLength));
+  size_t position = 0;
+  result[position++] = 1;
+  result[position++] = kRecordLength;
+  result[position++] = metrics.size();
+  const bool complete = !m_paragraph_->DidExceedMaxLines();
+  for (const auto& line : metrics) {
+    result[position++] = line.line_number;
+    // The source marks the empty line appended after a terminal hard break.
+    // Normalize only this diagnostic API; preserve public caret/range behavior.
+    const auto end = line.end_including_newline;
+    result[position++] = line.is_trailing_empty_line ? end : line.start_index;
+    result[position++] = line.is_trailing_empty_line ? end : line.end_index;
+    result[position++] =
+        line.is_trailing_empty_line ? end : line.end_excluding_whitespace;
+    result[position++] = line.end_including_newline;
+    result[position++] = line.available_width;
+    result[position++] = line.advance_before_justification;
+    result[position++] = line.advance_after_justification;
+    result[position++] = complete ? 1 : 0;
+    result[position++] = line.is_ellipsized ? 1 : 0;
+  }
+  return result;
+}
+
+tonic::Float64List Paragraph::computeDetailedLineMetricsForDiagnostics() const {
+  if (!fontRenderingDiagnosticsEnabled()) {
+    return tonic::Float64List(Dart_NewTypedData(Dart_TypedData_kFloat64, 0));
+  }
+  std::vector<txt::LineMetrics> metrics = m_paragraph_->GetLineMetrics();
+
+  // Groups of 13: raw ascent/descent/leading, effective
+  // ascent/descent/leading, height input ascent/descent/leading/raw-leading,
+  // line-height branch, next-line baseline pitch, and line-box height.
+  tonic::Float64List result(
+      Dart_NewTypedData(Dart_TypedData_kFloat64, metrics.size() * 13));
+  uint64_t position = 0;
+  for (const txt::LineMetrics& line : metrics) {
+    result[position++] = line.raw_ascent;
+    result[position++] = line.raw_descent;
+    result[position++] = line.raw_leading;
+    result[position++] = line.effective_ascent;
+    result[position++] = line.effective_descent;
+    result[position++] = line.effective_leading;
+    result[position++] = line.height_input_ascent;
+    result[position++] = line.height_input_descent;
+    result[position++] = line.height_input_leading;
+    result[position++] = line.height_input_raw_leading;
+    result[position++] = line.line_height_branch;
+    result[position++] = line.next_line_baseline_pitch;
+    result[position++] = line.line_box_height;
+  }
+  return result;
+}
+
+Dart_Handle Paragraph::computeGlyphMetricsForDiagnostics() const {
+  if (!fontRenderingDiagnosticsEnabled()) {
+    return Dart_NewList(0);
+  }
+  const auto glyphs = m_paragraph_->GetGlyphDiagnostics();
+  Dart_Handle result = Dart_NewList(glyphs.size());
+  for (intptr_t i = 0; i < static_cast<intptr_t>(glyphs.size()); ++i) {
+    const auto& glyph = glyphs[i];
+    Dart_Handle record = Dart_NewList(32);
+    intptr_t position = 0;
+    auto add_double = [&](double value) {
+      tonic::CheckAndHandleError(
+          Dart_ListSetAt(record, position++, Dart_NewDouble(value)));
+    };
+    add_double(glyph.fLineNumber);
+    add_double(glyph.fRunIndex);
+    SkString family;
+    SkTypefaceID typeface_id = 0;
+    if (glyph.fFont.getTypeface() != nullptr) {
+      glyph.fFont.getTypeface()->getFamilyName(&family);
+      typeface_id = glyph.fFont.getTypeface()->uniqueID();
+    }
+    tonic::CheckAndHandleError(
+        Dart_ListSetAt(record, position++, tonic::ToDart(family.c_str())));
+    add_double(typeface_id);
+    add_double(glyph.fFont.getSize());
+    add_double(glyph.fFont.isSubpixel());
+    add_double(glyph.fFont.isLinearMetrics());
+    add_double(static_cast<int>(glyph.fFont.getHinting()));
+    add_double(static_cast<int>(glyph.fFont.getEdging()));
+    add_double(glyph.fFontMetrics.fTop);
+    add_double(glyph.fFontMetrics.fAscent);
+    add_double(glyph.fFontMetrics.fDescent);
+    add_double(glyph.fFontMetrics.fBottom);
+    add_double(glyph.fFontMetrics.fLeading);
+    add_double(glyph.fGlyph);
+    add_double(glyph.fUtf8Cluster);
+    add_double(glyph.fShapePosition.fX);
+    add_double(glyph.fShapePosition.fY);
+    add_double(glyph.fOffset.fX);
+    add_double(glyph.fOffset.fY);
+    add_double(glyph.fAdvance.fX);
+    add_double(glyph.fAdvance.fY);
+    add_double(glyph.fFinalOrigin.fX);
+    add_double(glyph.fFinalOrigin.fY);
+    add_double(glyph.fBounds.fLeft);
+    add_double(glyph.fBounds.fTop);
+    add_double(glyph.fBounds.fRight);
+    add_double(glyph.fBounds.fBottom);
+    add_double(glyph.fInkBounds.fLeft);
+    add_double(glyph.fInkBounds.fTop);
+    add_double(glyph.fInkBounds.fRight);
+    add_double(glyph.fInkBounds.fBottom);
+    tonic::CheckAndHandleError(Dart_ListSetAt(result, i, record));
+  }
   return result;
 }
 
