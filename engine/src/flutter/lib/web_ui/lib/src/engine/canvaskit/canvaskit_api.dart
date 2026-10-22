@@ -2148,11 +2148,16 @@ extension type TypefaceFontProvider(JSObject _) implements SkFontMgr {
   @JS('registerFont')
   external void _registerFont(JSUint8Array font, String family);
   void registerFont(Uint8List font, String family) => _registerFont(font.toJS, family);
+
+  @JS('registerTypeface')
+  external void _registerTypeface(SkTypeface typeface, String family);
+  void registerTypeface(SkTypeface typeface, String family) => _registerTypeface(typeface, family);
 }
 
 extension type SkFontCollection(JSObject _) implements JSObject {
   external void enableFontFallback();
   external void setDefaultFontManager(TypefaceFontProvider? fontManager);
+  external void clearFontLookupCaches();
   external void delete();
 }
 

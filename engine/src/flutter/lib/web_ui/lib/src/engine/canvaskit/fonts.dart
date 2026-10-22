@@ -32,6 +32,8 @@ class SkiaFontCollection implements FlutterFontCollection {
   final List<RegisteredFont> _registeredFonts = <RegisteredFont>[];
   final List<RegisteredFont> registeredFallbackFonts = <RegisteredFont>[];
 
+  int _fontRegistrationGeneration = 0;
+
   /// Returns fonts that have been downloaded, registered, and parsed.
   ///
   /// This should only be used in tests.
@@ -46,6 +48,29 @@ class SkiaFontCollection implements FlutterFontCollection {
 
   final Map<String, List<SkFont>> familyToFontMap = <String, List<SkFont>>{};
 
+  void _ensureFontProvider() {
+    if (_fontProvider != null) {
+      return;
+    }
+    _fontProvider = canvasKit.TypefaceFontProvider.Make();
+    _recreateSkFontCollection();
+  }
+
+  void _recreateSkFontCollection() {
+    skFontCollection?.delete();
+    skFontCollection = canvasKit.FontCollection.Make();
+    skFontCollection!.enableFontFallback();
+    skFontCollection!.setDefaultFontManager(_fontProvider);
+  }
+
+  void _registerFontWithFontProvider(RegisteredFont font) {
+
+    _ensureFontProvider();
+    _fontProvider!.registerTypeface(font.typeface, font.family);
+    familyToFontMap.putIfAbsent(font.family, () => <SkFont>[]).add(SkFont(font.typeface));
+    _fontRegistrationGeneration += 1;
+  }
+
   void _registerWithFontProvider() {
     if (_fontProvider != null) {
       _fontProvider!.delete();
@@ -53,26 +78,22 @@ class SkiaFontCollection implements FlutterFontCollection {
       skFontCollection?.delete();
       skFontCollection = null;
     }
-    _fontProvider = canvasKit.TypefaceFontProvider.Make();
-    skFontCollection = canvasKit.FontCollection.Make();
-    skFontCollection!.enableFontFallback();
-    skFontCollection!.setDefaultFontManager(_fontProvider);
     familyToFontMap.clear();
 
     for (final RegisteredFont font in _registeredFonts) {
-      _fontProvider!.registerFont(font.bytes, font.family);
-      familyToFontMap.putIfAbsent(font.family, () => <SkFont>[]).add(SkFont(font.typeface));
+      _registerFontWithFontProvider(font);
     }
 
     for (final RegisteredFont font in registeredFallbackFonts) {
-      _fontProvider!.registerFont(font.bytes, font.family);
-      familyToFontMap.putIfAbsent(font.family, () => <SkFont>[]).add(SkFont(font.typeface));
+      _registerFontWithFontProvider(font);
     }
   }
 
   @override
   Future<bool> loadFontFromList(Uint8List list, {String? fontFamily}) async {
+
     // Make sure CanvasKit is actually loaded
+
     await renderer.initialize();
 
     final SkTypeface? typeface = canvasKit.Typeface.MakeFreeTypeFaceFromData(list.buffer);
@@ -80,14 +101,19 @@ class SkiaFontCollection implements FlutterFontCollection {
     if (typeface != null) {
       if (fontFamily == null) {
         // Read actual family name from SkTypeface
+
         fontFamily = typeface.getFamilyName();
         if (fontFamily == null) {
           printWarning('Failed to read font family name. Aborting font load.');
           return false;
         }
       }
-      _registeredFonts.add(RegisteredFont(list, fontFamily, typeface));
-      _registerWithFontProvider();
+      final registeredFont = RegisteredFont(list, fontFamily, typeface);
+      _registeredFonts.add(registeredFont);
+      _registerFontWithFontProvider(registeredFont);
+
+      skFontCollection?.clearFontLookupCaches();
+
     } else {
       printWarning('Failed to parse font family "$fontFamily"');
       return false;
@@ -214,6 +240,7 @@ class SkiaFontCollection implements FlutterFontCollection {
 /// Represents a font that has been registered.
 class RegisteredFont {
   RegisteredFont(this.bytes, this.family, this.typeface) {
+
     // This is a hack which causes Skia to cache the decoded font.
     final skFont = SkFont(typeface);
     skFont.getGlyphBounds(<int>[0], null, null);
@@ -252,9 +279,31 @@ class SkiaFallbackRegistry implements FallbackFontRegistry {
   SkiaFallbackRegistry(this._fontCollection);
 
   final SkiaFontCollection _fontCollection;
+  // Bound both entry overhead and retained text. A single large paragraph must
+  // not displace the entire cache or remain retained indefinitely.
+  static const int _maxMissingCodePointEntries = 256;
+  static const int _maxMissingCodePointUnits = 64 * 1024;
+  final Map<String, List<int>> _missingCodePointCache = <String, List<int>>{};
+  int _missingCodePointCacheUnits = 0;
+  int _cachedFontRegistrationGeneration = -1;
 
   @override
   List<int> getMissingCodePoints(List<int> codeUnits, List<String> fontFamilies) {
+
+    if (_cachedFontRegistrationGeneration != _fontCollection._fontRegistrationGeneration) {
+      _missingCodePointCache.clear();
+      _missingCodePointCacheUnits = 0;
+      _cachedFontRegistrationGeneration = _fontCollection._fontRegistrationGeneration;
+    }
+    final String cacheKey = '${fontFamilies.join('\u0001')}|${codeUnits.join(',')}';
+    final List<int>? cachedMissingCodeUnits = _missingCodePointCache.remove(cacheKey);
+    if (cachedMissingCodeUnits != null) {
+      // Map insertion order gives least-recently-used eviction.
+      _missingCodePointCache[cacheKey] = cachedMissingCodeUnits;
+
+      return cachedMissingCodeUnits;
+    }
+
     final fonts = <SkFont>[];
     for (final font in fontFamilies) {
       final List<SkFont>? typefacesForFamily = _fontCollection.familyToFontMap[font];
@@ -278,6 +327,18 @@ class SkiaFallbackRegistry implements FallbackFontRegistry {
         missingCodeUnits.add(codeUnits[i]);
       }
     }
+    final int entryUnits = cacheKey.length + missingCodeUnits.length;
+    if (entryUnits <= _maxMissingCodePointUnits) {
+      while (_missingCodePointCache.length >= _maxMissingCodePointEntries ||
+          _missingCodePointCacheUnits + entryUnits > _maxMissingCodePointUnits) {
+        final String oldestKey = _missingCodePointCache.keys.first;
+        _missingCodePointCacheUnits -=
+            oldestKey.length + _missingCodePointCache.remove(oldestKey)!.length;
+      }
+      _missingCodePointCache[cacheKey] = missingCodeUnits;
+      _missingCodePointCacheUnits += entryUnits;
+    }
+
     return missingCodeUnits;
   }
 

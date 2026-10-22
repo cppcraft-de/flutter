@@ -38,6 +38,11 @@ GROUP_MARKERS = {'text_layout': {('skia', 'modules/skparagraph/src/Run.cpp'): '[
                                                                       'every '
                                                                       'SkParagraph '
                                                                       'target',
+                 ('skia', 'modules/canvaskit/paragraph.js'): 'registerTypeface '
+                                                             '= '
+                                                             'function(typeface, '
+                                                             'family)',
+                 ('skia', 'modules/skparagraph/include/FontCollection.h'): 'clearFontLookupCaches',
                  ('skia', 'src/ports/SkFontHost_FreeType.cpp'): '[SCHOOLCRAFT] '
                                                                 'WSC obtains '
                                                                 'line metrics',
