@@ -1,0 +1,366 @@
+# Build and distribute the patched Flutter SDK
+
+Use this guide to set up Jenkins, build the fork's SDKs, and test them before
+sharing them with the team. A candidate SDK is a build being evaluated for
+release. For other tasks, start with the
+[maintenance guide](docs/wsc/README.md).
+
+## Documentation map
+
+- First setup: [prepare agents](#1-prepare-the-agents),
+  [configure Jenkins](#2-configure-jenkins-and-credentials), then
+  [set folder properties](#3-set-folder-properties).
+- Existing setup: [run an integration build](#4-run-the-integration-build),
+  then [check the SDKs](#5-accept-the-sdks-before-distribution).
+- New upstream version: [update the fork](docs/wsc/updating.md) first.
+- Release an accepted candidate: follow the
+  [release procedure](docs/wsc/releases.md#release-procedure).
+
+[Artifact storage and packaging](docs/wsc/artifacts.md) and
+[FRT integration settings](docs/wsc/rendering-regression.md) have separate references.
+
+## Current behavior
+
+The pipeline is **`Jenkinsfile.testing`**, used for both test builds and releases.
+It compiles the patched engine, uploads the compiled files, then packages and
+uploads the Windows and macOS SDKs. The compiled files are called **artifacts**;
+they go directly from the build machines, or **agents**, to the download server.
+FRT comparison follows Windows SDK packaging: Windows and Web both run on Windows.
+macOS FRT is disabled; macOS engine builds and SDK packaging are unchanged.
+The font rendering tester (FRT) is enabled by default. It compares the new SDK
+with the Windows SDK from Jenkins build #24; Web uses Edge. Missing baseline
+configuration stops the pipeline before it builds. Test the FRT setup on your actual
+agents before relying on it; a successful SDK package alone says nothing about
+rendering.
+
+| Agent label | Work |
+| --- | --- |
+| `flutter_win` | Release metadata, mirror seeding, Windows engine, Windows Android AOT host tools, Windows x64 SDK |
+| `flutter_macos` | macOS and iOS engines, macOS Android AOT host tools, macOS SDK (arm64 on the current packaging host) |
+| `flutter_linux` | Android runtime/JAR/Maven artifacts and Web SDK artifacts; no Linux host SDK |
+
+Platform builds can run in parallel when agents are available. Debug, profile,
+and release modes run one after another in each platform's build folder so they
+can share dependencies and outputs.
+Linux is the current upstream-builder layout choice, not a fundamental claim
+that Android/Web cannot be built on macOS. Removing that agent would require
+build/collection changes and validation, not merely changing a label.
+
+These instructions describe the pipeline in this repository. Verify the build,
+downloads, and application rendering on your own setup before distributing SDKs.
+
+## 1. Prepare the agents
+
+Use persistent agent work directories with sufficient room for dependencies,
+per-target engine outputs, temporary packaging clones, SDK caches, and archives.
+Packaging creates its clone and Pub cache on the agent's system temporary
+volume; reserve space there as well as on the workspace volume.
+Changing paths can invalidate Ninja outputs containing absolute paths. Do not
+enable workspace-wipe/cleanup steps for the persistent engine workspaces.
+
+- **All agents:** compatible Jenkins agent Java, Git, Python 3.10 or newer,
+  depot_tools with `gclient`, and the native build prerequisites for the Flutter version being built.
+  Verify commands in the actual agent process environment, not only your shell.
+- **Windows:** VS2022 and Windows SDK components for the built architectures,
+  including ARM64 libraries and matching debugging tools/`dbghelp.dll`; `7za`
+  on PATH for packaging. `7z.exe` alone is not the command used by this packager.
+  Enable Git/OS long-path support for the agent account. `WINDOWS_PYTHON`
+  defaults to `python`; verify that it is a working interpreter, not a broken
+  launcher or Windows Store alias.
+- **macOS:** Xcode, its selected command-line tools/SDKs (including Metal tools
+  required by the engine), and `python3`, `zip`, and `unzip` on PATH. Allow disk
+  capacity for both macOS and iOS workspaces plus SDK packaging.
+- **Linux:** the commissioning baseline is Ubuntu 26.04 in a VM or WSL2 with
+  native Linux filesystem storage. Install the pinned engine's Linux build
+  prerequisites. Android Studio is not required for this engine CI path;
+  dependency synchronization obtains the DEPS-managed build inputs.
+
+CPU/RAM and free disk should be sized for the selected concurrent targets, not
+just one checkout. Existing small incremental workspaces are not a clean-build
+capacity estimate. Reserve additional space for another supported release line
+and packaging; measure peak use on the first complete run before fixing quotas.
+Retain released artifacts independently of disposable Jenkins workspaces.
+
+Agents need outbound access to Bitbucket, dependency/toolchain downloads,
+pub.dev, and the artifact endpoints. This is not an air-gapped build setup.
+Use the source revision's [engine environment guide](docs/engine/contributing/Setting-up-the-Engine-development-environment.md)
+and [compilation guide](docs/engine/contributing/Compiling-the-engine.md) for
+platform prerequisites; the packaging requirements above are additional.
+
+## 2. Configure Jenkins and credentials
+
+1. Create a multibranch job with script path **`Jenkinsfile.testing`**. Do not
+   add a root `Jenkinsfile` during commissioning: another Jenkins installation
+   could discover it and start builds. Keep one shared pipeline implementation.
+   Folder/job names must form a relative path using only letters, digits,
+   `_`, `.`, `-`, and `/`, with no empty, `.` or `..` components. Preflight
+   rejects spaces and `%`; slash-containing branch names encoded as `%2F` by
+   multibranch jobs therefore fail the workspace-key check. Use branch names
+   such as `wsc-main-3.44.4`.
+2. Install the required plugins: Declarative Pipeline, Git with
+   `gitUsernamePassword`, Credentials Binding, Folder Properties with
+   build-start exposure, Pipeline Utility Steps (`readJSON`), Lockable Resources
+   (`lock`), Timestamper (`timestamps`), and Email Extension. Publication uses an
+   automatically created controller-wide lock; no manually configured lock resource is needed.
+   Enabled FRT reporting also requires the JUnit plugin (`junit`).
+   Pipeline Utility Steps is required even when FRT is disabled: preflight reads
+   its configuration. No custom JSON-parser script approval is needed.
+   Configure SMTP if using email.
+   Guarded engine publication currently requires HTTP PUT and authenticated GET
+   at the storage origin. FTP/SFTP engine publishing is rejected before builds;
+   it needs an equivalent receipt/read/locking adapter before being supported.
+3. Set the SCM URL to
+   `https://bitbucket.org/schoolcraftteam/flutter_wsc.git`. Select a Jenkins
+   **Username with password** credential: username
+   `x-bitbucket-api-token-auth`, password a Bitbucket API token with repository
+   read access. Use a service identity appropriate for your team's operations.
+4. Both SDK stages reuse that SCM credential ID for the packager's nested HTTPS
+   clone through Jenkins' Git credential binding. No SSH key, `known_hosts`,
+   `setsid`, or interactive login is required for this path. Do not put tokens
+   in URLs, scripts, folder properties, or build parameters.
+5. Create a **Secret text** credential with ID **`HTTP_UPLOAD_KEY`**, containing
+   the Bunny storage key. This is separate from the Git credential; it is sent
+   as the upload `AccessKey` header, never embedded in the SDK.
+6. The fork URL is also configured in
+   [prepare_package/common.dart](dev/bots/prepare_package/common.dart). A new
+   repository requires updating those constants and their tests, not only the
+   job URL. The `RELEASE_BRANCH` ref (default `stable`) must exist in that fork,
+   and the build commit must be fetchable. Packaging clones that branch then
+   resets to the exact Jenkins build revision; the branch name controls SDK
+   channel identity, not source selection.
+7. Suppress automatic SCM/indexing builds in the multibranch job, including
+   newly discovered branches. For the existing suppression UI, `^$` under
+   **Branch names to build automatically** matches no normal branch. Perform
+   an initial scan to discover the branch you intend to build.
+
+Deploy the pipeline **and its supporting scripts together**. Do not copy only
+the Jenkinsfile into an otherwise older source tree.
+
+## 3. Set folder properties
+
+Use **Folder Properties** on the containing Jenkins folder and enable
+**Expose these properties at build start**. This is required for the polling
+expression evaluated before the normal pipeline wrapper. Folder properties
+are inherited by all branch jobs; they are configuration, not secret storage.
+
+| Property | Value/default |
+| --- | --- |
+| `DISABLE_SCM_POLLING` | Unset or `0`: poll for commits approximately every five minutes |
+| `BUILD_LOG_MAIL_RECIPIENT` | Desired email address; unset/empty disables email |
+| `WSC_ARTIFACT_BASE_URL` | Unset uses `https://fluttertest.b-cdn.net/ci-v2` |
+| `WSC_HTTP_UPLOAD_BASE_URL` | Unset uses `https://storage.bunnycdn.com/fluttertest/ci-v2` |
+| `WSC_UPLOAD_CREDENTIALS_ID` | Unset uses `HTTP_UPLOAD_KEY` |
+| `WSC_ENGINE_WORKSPACE_JOB` | Leave unset; local-testing exception only |
+| `WSC_ENGINE_WORKSPACE_KEY` | Leave unset; local-testing exception only |
+
+URLs are base roots **without trailing slashes**. Explicit nonempty build
+parameters for URLs/credential ID override these properties. Leave those
+parameters empty to inherit; saved values on an existing job may override new
+defaults. Only the download URL is written into the SDK.
+
+The fixed `ci-v2` testing prefix separates guarded publication from legacy test
+artifacts. If that prefix is empty at both origin and CDN, the first run needs
+neither the dangerous overwrite flag nor a CDN purge. Completed, verified
+publications can be reused normally. Unrecorded objects, pending receipts, or
+inconsistent CDN responses need the
+[adoption/recovery review](docs/wsc/artifacts.md#explicit-overwrite-and-first-adoption).
+Keep the prefix fixed across builds;
+normal publish-once reuse is compatible with CDN caching. Source-checkout
+bootstrap and approved FRT baseline URLs do not automatically follow CI URL
+changes; baseline pins are reviewed separately. Local Jenkins URL overrides
+remain effective.
+
+### Polling and email
+
+`DISABLE_SCM_POLLING=1`, `true`, `yes`, or `on` disables periodic polling
+(case-insensitive, whitespace ignored). Other/unset values enable
+`pollSCM('H/5 * * * *')`. This builds on detected changes, not on every timer
+tick. Indexing/event-triggered builds remain suppressed by
+`overrideIndexTriggers(false)`; the parent **Periodically if not otherwise run**
+scan may stay unchecked. Scanning discovers branches; polling checks existing
+branch jobs for commits.
+
+Run the desired branch manually once to register its schedule. Later changes
+to the folder property also take effect on the next pipeline run, not when the
+folder is saved, and do not cancel queued builds. Normal polling requests with
+identical parameters coalesce into one pending request per branch. Running
+builds are not aborted. Other branches/different parameters are separate jobs
+or requests; a started pipeline waiting for an agent already counts as running.
+
+Email sends a compressed console log on target/SDK stage failure and a final
+summary/log from global cleanup. The early log contains the overall run so far;
+other targets may continue. Delivery errors are logged without replacing the
+build result. No recipient means no email.
+Enabled FRT comparisons also notify early on rendering mismatches (unstable).
+
+## 4. Run the integration build
+
+Before pushing a CI candidate (including polling-triggered builds) or starting
+a build, validate the current committed source and `bin/internal/engine.version`
+using the [engine-pin procedure](docs/wsc/releases.md#engine-identity). Check
+every candidate; update and commit the pin when engine inputs changed. Local-only
+engine development should retain its published bootstrap pin.
+
+Before the first host SDK build, complete the default-on
+[FRT prerequisites](docs/wsc/rendering-regression.md#execution-and-prerequisites),
+including agent capture setup and read access to the separate FRT repository.
+Its checkout credential defaults to the Flutter SCM credential; access to the
+Flutter fork alone is insufficient. FRT configuration and temporary disabling
+are covered in the [FRT reference](docs/wsc/rendering-regression.md#configure-once-then-version-the-defaults).
+
+These are the current script defaults (verify saved job parameters):
+
+```ini
+TARGETS=windows,macos,ios,android,web
+HOST_SDKS=windows,macos
+MODES=debug,profile,release
+BUILD_POLICY=incremental
+SYNC_ENGINE_DEPS=auto
+PUBLISH_ENGINE_ARTIFACTS=true
+DANGEROUSLY_OVERWRITE_BUILD_ARTIFACTS=false
+UPLOAD_TRANSPORT=http_put
+RELEASE_BRANCH=stable
+REQUIRE_RELEASE_TAG=false
+```
+
+Start the first run manually. It seeds missing upstream-owned mirror inputs,
+builds the target artifacts, publishes missing files or reuses verified publications,
+and then creates, validates, and uploads
+both host SDK ZIPs and checksum sidecars. See the
+[actual storage layout](docs/wsc/artifacts.md#storage-layout) for download paths.
+The first run on an empty agent must compile everything selected.
+
+### Incremental behavior
+
+Preflight requires `bin/internal/engine.version` to match the selected source's
+upstream engine content hash on every build policy. See
+[engine identity](docs/wsc/releases.md#engine-identity) for pinning and the
+local CI branch context used to avoid development merge-base hashing.
+
+Engine workspaces are persistent, relative to each agent root:
+
+```text
+engine-workspaces/<full Jenkins JOB_NAME>/<BUILD_TARGET>
+```
+
+- `incremental` preserves `engine/src/out`; Ninja decides which work is needed.
+  The pipeline still invokes every selected build. Publication reuses previously
+  completed remote files, even if rebuilt bytes differ, and adds missing target
+  coverage. It never silently overwrites a completed artifact. See
+  [publish-once policy and recovery](docs/wsc/artifacts.md#publish-once-policy-and-recovery).
+  Existing servers without publication receipts require an explicit migration;
+  the first guarded run will not silently adopt their files.
+- `SYNC_ENGINE_DEPS=auto` (default) synchronizes when dependency inputs change
+  or dependencies are missing. It fingerprints tracked `DEPS` files, the engine
+  tools subtree (including patches/hook helpers), engine Pub manifests/locks,
+  the sync helper, host type, and effective `.gclient` configuration. Ordinary
+  source/docs edits outside those inputs, tags, and mtimes do not trigger sync.
+  Tracking the tools subtree is deliberately conservative: a tools-only change
+  can cause an extra sync rather than miss a hook-helper change.
+- One fingerprint lives in each checkout's Git-local `wsc-deps-sync.sha256`
+  file. **Existing workspaces sync once when adopting auto.** The marker is
+  invalidated before synchronization and written only after success, so failed
+  or interrupted attempts retry. This is input tracking, **not** a full integrity
+  audit: basic checks cover `.gclient`, Dart, Skia, and FreeType; use `true` to
+  repair other manually damaged dependencies or refresh changed host tooling.
+- `true` always syncs. Explicit choice `false` skips input-change detection but
+  still bootstraps missing dependencies; use it only as a testing override.
+- Synchronization can reset/reapply nested patches and cause recompilation;
+  it is not done once per runtime mode. Each target has its own dependency tree.
+- Each dependency sync limits parallel SCM operations to two (`gclient -j 2`),
+  or one for Web, to reduce upstream HTTP 429 rate-limit failures. This is a
+  per-sync concurrency cap, not a global request-rate limit; target cells can
+  still sync concurrently. Compilation parallelism is unchanged.
+- SDK packaging intentionally uses clean separate checkouts and warms/downloads
+  a new cache. Incremental engine builds do not make packaging a no-op.
+- `full_rebuild` explicitly deletes `engine/src/out` before building. It does
+  not recreate every dependency/toolchain/cache or make the agent hermetic.
+  It does not override publish-once behavior. Only the separately opt-in
+  `DANGEROUSLY_OVERWRITE_BUILD_ARTIFACTS` flag permits remote replacement.
+- Stable paths matter. Renaming the job, changing its workspace key, or adding
+  a target can create new output directories. There is no cross-job workspace
+  lock. Do not share paths or enable automatic cleanup of these workspaces.
+
+Migration from the old checkbox is handled in the pipeline: a legacy **boolean**
+`false` becomes `auto`, boolean `true` remains forced sync, and a missing value
+defaults to `auto`. Thus the **first polling-triggered run loading the new
+Jenkinsfile** adopts auto without a manual parameter-refresh build. Subsequent
+explicit choice **string** `false` is honored. Already-running builds keep their
+loaded pipeline; this change does not restart or cancel them.
+
+Reduced smoke tests can set fewer targets/modes and **empty `HOST_SDKS`**.
+Complete SDK packaging requires all three modes and the standard targets:
+Windows needs `windows,android,web`; macOS needs `macos,ios,android,web`.
+Debug-only SDK packaging is not implemented. Detailed tradeoffs are in
+[Artifacts and SDK packaging](docs/wsc/artifacts.md#supported-targets-and-reductions).
+
+### Remaining parameters
+
+| Parameter | Purpose |
+| --- | --- |
+| `ARTIFACT_BASE_URL` | Explicit download root; empty inherits folder/default |
+| `HTTP_UPLOAD_BASE_URL` | Explicit PUT root; empty inherits folder/default |
+| `UPLOAD_CREDENTIALS_ID` | Credential ID, not the key; empty inherits folder/default |
+| `WINDOWS_PYTHON` | Working Python command on Windows; default `python` |
+| `TRANSFER_CONFIG_NAME` | Legacy FTP/SFTP setting; not usable for guarded engine publication |
+| `TRANSFER_REMOTE_DIRECTORY` | Legacy FTP/SFTP setting; not usable for guarded engine publication |
+
+## 5. Accept the SDKs before distribution
+
+A configurable [FRT regression stage](docs/wsc/rendering-regression.md) compares
+the Windows candidate SDK against a manually approved SDK for Windows and Web.
+Its versioned defaults and optional folder overrides are documented there.
+This covers Windows desktop and Chromium Web rendering and complements the checks
+below; it does not currently capture macOS, Android or iOS.
+
+A successful upload is not a release approval. Extract each SDK into a fresh
+directory and use **that SDK's** `flutter` executable, without `--local-engine`.
+Check `flutter --version --machine`: fork version, framework revision, channel,
+and engine revision must match the intended build. See
+[release identity](docs/wsc/releases.md#version-and-channel-identity).
+
+For Android acceptance, set `GRADLE_USER_HOME` in the test shell to a newly
+created disposable directory before running the commands below. This forces
+fresh Maven downloads independently of the extracted SDK's Flutter cache;
+neither clearing Flutter's cache nor `flutter clean` clears Gradle's cache.
+
+With the application's normal platform toolchains installed:
+
+```sh
+flutter doctor
+flutter create smoke
+cd smoke
+flutter build apk
+flutter build web
+# On Windows:
+flutter build windows
+# On macOS:
+flutter build macos
+flutter build ios --no-codesign
+```
+
+Also exercise debug/profile workflows and the application rendering tests on
+the supported devices. After testing with the SDK's existing cache, remove a whole
+non-bootstrap platform artifact directory in this **disposable extracted SDK
+cache**, such as `bin/cache/artifacts/engine/android-arm64-release`, and rebuild
+that target to confirm Flutter restores it from the configured mirror. Removing
+one file may not invalidate Flutter's directory-based cache check. Observe the
+HTTP requests; fork engine/Maven downloads must not silently switch to public storage.
+Pub/Gradle/toolchain downloads are separate and may still use public services.
+
+Keep failed/partial runs as candidates, not releases. One host's SDK may have
+uploaded before the other failed. Production acceptance additionally requires
+the [tag, engine-pin, clean-build, and retention gates](docs/wsc/releases.md#release-procedure).
+Automatic production promotion, a tag-only release job, and a private channel
+update service are **not implemented by this pipeline**.
+
+## Troubleshooting reference
+
+| Symptom | First check |
+| --- | --- |
+| Git authentication fails or prompts | Job uses HTTPS and a username/password credential; its token can read the fork; packager URL matches. Do not restore SSH workarounds for an HTTPS problem. |
+| PUT fails with 401/403/501 | Storage URL, secret-text credential, and server support for PUT. The CDN read URL is not the upload endpoint. |
+| Packaging gets 404 after an upload | Exact engine ID/path, target publication result, and CDN stale/negative caching. A green seed check only covers seed inputs. |
+| Unexpected broad rebuild | Confirm job/workspace path, build policy, dependency-sync setting, source/toolchain changes, and preserved output directories before cleaning anything. |
+| Polling/email differs from configuration | Check inherited folder properties, build-start exposure, saved parameters, and whether the pipeline has run to apply the schedule. |
+| Disk pressure | Pause and review ownership/capacity. Do not delete shared dependency trees or previous release workspaces during an active build. |
