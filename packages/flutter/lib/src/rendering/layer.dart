@@ -1524,6 +1524,51 @@ class OffsetLayer extends ContainerLayer {
     return buildScene(builder);
   }
 
+  ui.PdfPage _createPdfPage(Rect bounds) {
+    return ui.PdfPage(scene: _createSceneForImage(bounds), size: bounds.size);
+  }
+
+  /// Capture a PDF document containing the current state of this layer and its
+  /// children as a single page.
+  ///
+  /// The layer bounds are scaled to fill the selected PDF page [format] and
+  /// [orientation]. For vector output, text and drawing operations are replayed
+  /// into Skia's PDF backend rather than first rasterizing the layer to an
+  /// image.
+  Future<Uint8List> toPdf(
+    Rect bounds, {
+    ui.PdfPageFormat format = ui.PdfPageFormat.a4,
+    ui.PdfPageOrientation orientation = ui.PdfPageOrientation.portrait,
+  }) {
+    return toPdfDocument(
+      <OffsetLayerPdfPage>[OffsetLayerPdfPage(layer: this, bounds: bounds)],
+      format: format,
+      orientation: orientation,
+    );
+  }
+
+  /// Capture a PDF document containing one page for each entry in [pages].
+  ///
+  /// Every output page uses the same [format] and [orientation]. Each page's
+  /// layer bounds are scaled independently to fill the selected PDF page size.
+  static Future<Uint8List> toPdfDocument(
+    List<OffsetLayerPdfPage> pages, {
+    ui.PdfPageFormat format = ui.PdfPageFormat.a4,
+    ui.PdfPageOrientation orientation = ui.PdfPageOrientation.portrait,
+  }) async {
+    final pdfPages = <ui.PdfPage>[];
+    try {
+      for (final page in pages) {
+        pdfPages.add(page.layer._createPdfPage(page.bounds));
+      }
+      return await ui.PdfDocument.toBytes(pdfPages, format: format, orientation: orientation);
+    } finally {
+      for (final page in pdfPages) {
+        page.scene.dispose();
+      }
+    }
+  }
+
   /// Capture an image of the current state of this layer and its children.
   ///
   /// The returned [ui.Image] has uncompressed raw RGBA bytes, will be offset
@@ -1591,6 +1636,19 @@ class OffsetLayer extends ContainerLayer {
       scene.dispose();
     }
   }
+}
+
+/// Describes one [OffsetLayer] capture to use as a PDF page.
+@immutable
+class OffsetLayerPdfPage {
+  /// Creates a PDF page capture description for [layer] and [bounds].
+  const OffsetLayerPdfPage({required this.layer, required this.bounds});
+
+  /// The layer to capture.
+  final OffsetLayer layer;
+
+  /// The layer-space bounds to capture.
+  final Rect bounds;
 }
 
 /// A composite layer that clips its children using a rectangle.

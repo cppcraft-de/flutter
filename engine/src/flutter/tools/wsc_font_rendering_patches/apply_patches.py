@@ -13,7 +13,7 @@ import sys
 EXPECTED_SKIA_REVISION = 'e9ed4fc9f1544c58d8a9347c1fc9471d8dd7c465'
 EXPECTED_FREETYPE_REVISION = 'be4bcb57914154fc1b9e2900bf8e4b516057e2b8'
 
-PATCH_GROUP_ORDER = ('text_layout',)
+PATCH_GROUP_ORDER = ('text_layout', 'pdf')
 
 GROUP_DEPENDENCIES = {}
 
@@ -59,7 +59,11 @@ GROUP_MARKERS = {'text_layout': {('skia', 'modules/skparagraph/src/Run.cpp'): '[
                                                     'here',
                  ('freetype', 'src/sfnt/sfobjs.c'): 'For Worksheet Crafter it '
                                                     'is essential that the '
-                                                    'ascender'}}
+                                                    'ascender'},
+ 'pdf': {('skia', 'modules/canvaskit/canvaskit_bindings.cpp'): 'MakePdf(JSArray '
+                                                               'pictures',
+         ('skia', 'modules/canvaskit/compile.sh'): 'skia_enable_pdf=true',
+         ('skia', 'modules/canvaskit/BUILD.gn'): 'SK_SUPPORT_PDF'}}
 
 PATCH_SUBDIRS = {
     'skia': '{group}',
@@ -332,7 +336,7 @@ def main(argv):
       default=['all'],
       metavar='GROUP',
       help=(
-          'Patch groups to apply: all, text_layout.'
+          'Patch groups to apply: all, text_layout, pdf.'
       ),
   )
   args = parser.parse_args(argv[1:])

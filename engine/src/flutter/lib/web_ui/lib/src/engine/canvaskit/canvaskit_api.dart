@@ -105,6 +105,20 @@ extension type CanvasKit(JSObject _) implements JSObject {
   external SkSurface MakeWebGLCanvasSurface(DomHTMLCanvasElement canvas);
   external SkSurface MakeSurface(double width, double height);
 
+  @JS('MakePdf')
+  external JSUint8Array? _MakePdf(
+    JSArray<SkPicture> pictures,
+    JSFloat32Array sourceSizes,
+    double pageWidth,
+    double pageHeight,
+  );
+  Uint8List? MakePdf(
+    List<SkPicture> pictures,
+    Float32List sourceSizes,
+    double pageWidth,
+    double pageHeight,
+  ) => _MakePdf(pictures.toJS, sourceSizes.toJS, pageWidth, pageHeight)?.toDart;
+
   @JS('getDataBytes')
   external JSUint8Array _getDataBytes(SkData skData);
   Uint8List getDataBytes(SkData skData) => _getDataBytes(skData).toDart;
