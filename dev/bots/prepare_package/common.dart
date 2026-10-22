@@ -4,8 +4,8 @@
 
 import 'dart:io' hide Platform;
 
-const String gobMirror = 'https://flutter.googlesource.com/mirrors/flutter';
-const String githubRepo = 'https://github.com/flutter/flutter.git';
+const String gobMirror = 'https://bitbucket.org/schoolcraftteam/flutter_wsc.git';
+const String githubRepo = 'https://bitbucket.org/schoolcraftteam/flutter_wsc.git';
 const String mingitForWindowsUrl =
     'https://storage.googleapis.com/flutter_infra_release/mingit/'
     '603511c649b00bbef0a6122a827ac419b656bc19/mingit.zip';
@@ -15,6 +15,7 @@ const String gsReleaseFolder = '$gsBase$releaseFolder';
 const String baseUrl = 'https://storage.googleapis.com/flutter_infra_release';
 const int shortCacheSeconds = 60;
 const String frameworkVersionTag = 'frameworkVersionFromGit';
+const String wscVersionTag = 'wscVersion';
 const String dartVersionTag = 'dartSdkVersion';
 const String dartTargetArchTag = 'dartTargetArch';
 
