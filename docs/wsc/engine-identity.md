@@ -93,14 +93,14 @@ repair: the launcher can regenerate them.
 
 ## Local engine development
 
-A source checkout uses the published engine selected by the tracked
-`bin/internal/engine.version` to bootstrap its Dart SDK and tooling. Keep that
+A checkout of this repository first downloads the Dart SDK and other startup
+files for the engine recorded in `bin/internal/engine.version`. Keep that
 pin at a published, compatible version while making local commits. The launcher
 uses the tracked pin rather than recalculating it from each local commit.
 Select a mirror containing that pin's artifacts before starting the tool or IDE;
 see [mirror selection](artifacts.md#packaging-and-mirror-selection).
 
-Use the source revision's [engine setup guide](../engine/contributing/Setting-up-the-Engine-development-environment.md)
+Use the checkout's [engine setup guide](../engine/contributing/Setting-up-the-Engine-development-environment.md)
 and [compilation guide](../engine/contributing/Compiling-the-engine.md) to build
 the modified engine locally, then select its outputs with `--local-engine`
 and `--local-engine-host`, optionally supplying `--local-engine-src-path`.
@@ -120,9 +120,9 @@ The following steps apply when preparing engine artifacts and an SDK for
 publication, including untagged Jenkins candidates. They are not required for
 each local development commit.
 
-Source-checkout bootstrap still uses its selected mirror. After CI publishes
-the candidate, select that build's download root before retrying Dart/Flutter
-commands; the tracked default does not automatically follow Jenkins' `ci-v2`
+The Flutter commands in your checkout still use its configured download server.
+After Jenkins publishes the new engine, select that build's download root before
+retrying Dart/Flutter commands; the tracked default does not automatically follow Jenkins' `ci-v2`
 root. See [mirror selection](artifacts.md#packaging-and-mirror-selection).
 
 1. Commit engine, dependency, and patch-file changes first. The hash is based on
@@ -231,7 +231,7 @@ upstream ancestor instead of our fork's engine inputs.
 Jenkins therefore attaches the already-selected commit to the local branch
 `flutter-wsc-candidate.ci`. The name matches upstream's `flutter-*-candidate.*`
 rule, under which the helper hashes the checked-out commit. This is a local CI
-checkout detail. It does not select another commit, rename the public WSC
+checkout detail. It does not select another commit, rename the fork's public
 branch, move a release tag, or change the packaged SDK channel.
 
 For developers working on arbitrary branch names, `dev/bots/engine_identity.py`

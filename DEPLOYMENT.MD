@@ -1,8 +1,9 @@
-# WSC Flutter deployment
+# Build and distribute the patched Flutter SDK
 
-Use this runbook to configure Jenkins, build candidate SDKs, and check them
-before distribution. For other tasks, start with the
-[WSC maintenance guide](docs/wsc/README.md).
+Use this guide to set up Jenkins, build the fork's SDKs, and test them before
+sharing them with the team. A candidate SDK is a build being evaluated for
+release. For other tasks, start with the
+[maintenance guide](docs/wsc/README.md).
 
 ## Documentation map
 
@@ -20,16 +21,17 @@ before distribution. For other tasks, start with the
 
 ## Current behavior
 
-The pipeline is **`Jenkinsfile.testing`**. There is no separate production
-Jenkinsfile. It builds engine artifacts, uploads them directly from their agents,
-then packages and uploads Windows and macOS SDKs using those artifacts. Large
-engine payloads do not pass through Jenkins stashes.
+The pipeline is **`Jenkinsfile.testing`**, used for both test builds and releases.
+It compiles the patched engine, uploads the compiled files, then packages and
+uploads the Windows and macOS SDKs. The compiled files are called **artifacts**;
+they go directly from the build machines, or **agents**, to the download server.
 FRT comparison follows Windows SDK packaging: Windows and Web both run on Windows.
 macOS FRT is disabled; macOS engine builds and SDK packaging are unchanged.
-FRT is enabled by default with client build #24's Windows SDK pinned as the
-commissioning baseline; Web uses Edge. Missing baseline
-configuration fails preflight. Real-agent FRT execution still needs acceptance;
-a packaging-only green build does not certify rendering.
+The font rendering tester (FRT) is enabled by default. It compares the new SDK
+with the Windows SDK from Jenkins build #24; Web uses Edge. Missing baseline
+configuration stops the pipeline before it builds. Test the FRT setup on your actual
+agents before relying on it; a successful SDK package alone says nothing about
+rendering.
 
 | Agent label | Work |
 | --- | --- |
@@ -37,15 +39,15 @@ a packaging-only green build does not certify rendering.
 | `flutter_macos` | macOS and iOS engines, macOS Android AOT host tools, macOS SDK (arm64 on the current packaging host) |
 | `flutter_linux` | Android runtime/JAR/Maven artifacts and Web SDK artifacts; no Linux host SDK |
 
-The target cells can run in parallel when executors are available. Runtime modes
-run sequentially inside each target workspace to share dependencies and outputs.
+Platform builds can run in parallel when agents are available. Debug, profile,
+and release modes run one after another in each platform's build folder so they
+can share dependencies and outputs.
 Linux is the current upstream-builder layout choice, not a fundamental claim
 that Android/Web cannot be built on macOS. Removing that agent would require
 build/collection changes and validation, not merely changing a label.
 
-These documents describe checked-in behavior, not proof that a particular
-client environment has passed. A green source/unit test is not engine,
-packaging, authentication, or developer-installation acceptance.
+These instructions describe the pipeline in this repository. Verify the build,
+downloads, and application rendering on your own setup before distributing SDKs.
 
 ## 1. Prepare the agents
 
@@ -57,7 +59,7 @@ Changing paths can invalidate Ninja outputs containing absolute paths. Do not
 enable workspace-wipe/cleanup steps for the persistent engine workspaces.
 
 - **All agents:** compatible Jenkins agent Java, Git, Python 3.10 or newer,
-  depot_tools with `gclient`, and the native build prerequisites for the pinned Flutter source.
+  depot_tools with `gclient`, and the native build prerequisites for the Flutter version being built.
   Verify commands in the actual agent process environment, not only your shell.
 - **Windows:** VS2022 and Windows SDK components for the built architectures,
   including ARM64 libraries and matching debugging tools/`dbghelp.dll`; `7za`
@@ -83,7 +85,7 @@ Agents need outbound access to Bitbucket, dependency/toolchain downloads,
 pub.dev, and the artifact endpoints. This is not an air-gapped build setup.
 Use the source revision's [engine environment guide](docs/engine/contributing/Setting-up-the-Engine-development-environment.md)
 and [compilation guide](docs/engine/contributing/Compiling-the-engine.md) for
-platform prerequisites; WSC packaging requirements above are additional.
+platform prerequisites; the packaging requirements above are additional.
 
 ## 2. Configure Jenkins and credentials
 
@@ -111,7 +113,7 @@ platform prerequisites; WSC packaging requirements above are additional.
    `https://bitbucket.org/schoolcraftteam/flutter_wsc.git`. Select a Jenkins
    **Username with password** credential: username
    `x-bitbucket-api-token-auth`, password a Bitbucket API token with repository
-   read access. Use a service identity appropriate for the client's operations.
+   read access. Use a service identity appropriate for your team's operations.
 4. Both SDK stages reuse that SCM credential ID for the packager's nested HTTPS
    clone through Jenkins' Git credential binding. No SSH key, `known_hosts`,
    `setsid`, or interactive login is required for this path. Do not put tokens
@@ -141,7 +143,7 @@ Use **Folder Properties** on the containing Jenkins folder and enable
 expression evaluated before the normal pipeline wrapper. Folder properties
 are inherited by all branch jobs; they are configuration, not secret storage.
 
-| Property | Client value/default |
+| Property | Value/default |
 | --- | --- |
 | `DISABLE_SCM_POLLING` | Unset or `0`: poll for commits approximately every five minutes |
 | `BUILD_LOG_MAIL_RECIPIENT` | Desired email address; unset/empty disables email |
@@ -313,7 +315,7 @@ below; it does not currently capture macOS, Android or iOS.
 
 A successful upload is not a release approval. Extract each SDK into a fresh
 directory and use **that SDK's** `flutter` executable, without `--local-engine`.
-Check `flutter --version --machine`: WSC identity, framework revision, channel,
+Check `flutter --version --machine`: fork version, framework revision, channel,
 and engine revision must match the intended build. See
 [release identity](docs/wsc/releases.md#version-and-channel-identity).
 
@@ -337,8 +339,8 @@ flutter build macos
 flutter build ios --no-codesign
 ```
 
-Also exercise debug/profile workflows and the actual WSC rendering tests on
-the supported devices. After checking the warm-cache path, remove a whole
+Also exercise debug/profile workflows and the application rendering tests on
+the supported devices. After testing with the SDK's existing cache, remove a whole
 non-bootstrap platform artifact directory in this **disposable extracted SDK
 cache**, such as `bin/cache/artifacts/engine/android-arm64-release`, and rebuild
 that target to confirm Flutter restores it from the configured mirror. Removing

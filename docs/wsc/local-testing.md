@@ -1,7 +1,8 @@
 # Local testing exceptions
 
-These settings are for the maintainer's existing installation, **not client
-prerequisites**. Follow [DEPLOYMENT.MD](../../DEPLOYMENT.MD) for the shared setup.
+This page records exceptions for one existing development workstation. Use
+[the shared build setup](../../DEPLOYMENT.MD) unless you are maintaining that
+workstation; these addresses and workspace names are specific to it.
 
 Enable folder-property build-start exposure and set:
 
@@ -50,8 +51,8 @@ concurrency guard protects one branch job, not two jobs sharing a directory.
 Do not move/copy these outputs to a new path to avoid a rebuild; Ninja files
 can embed absolute paths.
 
-Client CI leaves both properties unset and naturally reuses its own per-job
-workspaces. Remove this exception once local reuse is no longer needed, but
+For the shared build setup, leave both properties unset so each job uses its own
+workspace. Remove this exception once local reuse is no longer needed, but
 schedule the resulting path change/initial build deliberately. Do not delete
 the older workspaces as an incidental cleanup step.
 

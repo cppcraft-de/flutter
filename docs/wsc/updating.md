@@ -1,149 +1,178 @@
-# Updating the WSC fork
+# Update to a new Flutter version
 
-Use this guide to move the WSC changes onto a new upstream **stable**, **beta**,
-or **main** base. You can skip intermediate releases.
+Use this guide to take the fork's patches to a newer **stable** or **beta**
+release, or to a chosen commit on Flutter's **main** branch. The aim is to keep
+our rendering behavior while picking up Flutter's changes. You can skip
+intermediate releases.
 
-The helper creates a new branch and worktree, then replays the WSC commits with
-`git cherry-pick`. Your original branch and build outputs stay in place.
-After the replay, check dependency patches, build SDKs, and review the results
-before releasing anything.
+The update helper creates a branch and a separate working folder, called a Git
+*worktree*. It applies the fork's commits to the chosen Flutter version using
+`git cherry-pick`. This is the patch replay used here to rebase the fork. Your
+existing folder and build outputs stay in place.
 
-1. [Choose the source and new base](#1-choose-the-source-and-new-base).
-2. [Preview and replay the WSC changes](#2-preview-and-replay-the-wsc-changes).
+The new branch is a **candidate**: an updated version to build and test before
+releasing it. Applying the patches successfully is only the first part of the
+update; you still need to check that the SDK builds and renders correctly.
+
+1. [Choose the versions to use](#1-choose-the-versions-to-use).
+2. [Apply the patches in a new folder](#2-apply-the-patches-in-a-new-folder).
 3. [Check Skia and FreeType patches](#3-check-skia-and-freetype-patches).
-4. [Commit the changes and update the engine pin](#4-commit-the-changes-and-update-the-engine-pin).
-5. [Run source checks](#5-run-source-checks).
-6. [Build and review the candidate](#6-build-and-review-the-candidate).
-7. [Release the accepted candidate](#7-release-the-accepted-candidate).
+4. [Update the engine version used for downloads](#4-update-the-engine-version-used-for-downloads).
+5. [Run the checks and tests](#5-run-the-checks-and-tests).
+6. [Build and test the updated SDKs](#6-build-and-test-the-updated-sdks).
+7. [Release the tested version](#7-release-the-tested-version).
 
 ## Before you start
 
-You need Git, Python 3.10+, full repository history, and a clean source checkout,
-including untracked files. Finish any pending Git operation first. Use `python3`
-instead of `python` where needed. Tests also need PowerShell on Windows or Bash
-on other hosts.
+Use a checkout with full Git history and Python 3.10 or newer. The helper
+requires a clean working folder, including no untracked files. Commit or save
+unfinished work elsewhere, and finish any pending merge or cherry-pick first.
+Do not remove local work or build outputs just to satisfy this check.
 
-Choose a new sibling directory for the candidate. Replaying source needs no
-engine dependencies, but a later dependency sync or build needs substantial disk
-space. Keep existing engine workspaces and unrelated nested edits intact.
+You do not need to download or build the engine to apply the commits. The later
+dependency and build steps need the [engine development setup](../engine/contributing/Setting-up-the-Engine-development-environment.md)
+and enough disk space for another build folder.
 
-Agree on the source line, new upstream base, and rendering baseline with the
-release reviewer. Review changes to rendering behavior or test expectations;
-do not change baselines just to make a candidate pass. Agents use this same
-procedure within the approvals given to them.
+Agree with the release reviewer which maintained version to start from, which
+Flutter version to use, and which SDK to compare rendering against. Keep that
+comparison baseline fixed while investigating differences.
 
-## 1. Choose the source and new base
+## 1. Choose the versions to use
 
-Run these commands in the WSC source checkout. `origin` should point to the
-client's fork; `upstream` should point to `https://github.com/flutter/flutter.git`.
-If `upstream` is missing, add it with
-`git remote add upstream https://github.com/flutter/flutter.git`.
+Run these commands in your existing checkout. Check the repository addresses:
+
+- `origin` should be this fork on Bitbucket.
+- `upstream` should be the official repository, `https://github.com/flutter/flutter.git`.
 
 ```sh
 git remote -v
+```
+
+If `upstream` is missing, add it:
+
+```sh
+git remote add upstream https://github.com/flutter/flutter.git
+```
+
+Fetch both repositories so their branches and tags are available locally:
+
+```sh
 git fetch origin --tags
 git fetch upstream --tags
 ```
 
-These fetches refresh your local history. To also copy vanilla upstream history
-into the client's remote fork, use [Synchronizing upstream Git history](upstream-sync.md).
-That is a separate task; it does not replay WSC patches.
+You need three commits to describe the update:
 
-The similar branch names mean different things:
-
-| Local ref | What it represents |
-| --- | --- |
-| `upstream/stable` | Stable fetched directly from official Flutter |
-| `origin/upstream/stable` | The fork's copy of vanilla upstream stable, after synchronization and a fetch |
-| `origin/stable` | The fork's WSC stable branch; check its acceptance record before using it |
-
-The same naming applies to beta and main.
-
-Choose three inputs:
-
-| Input | How to choose it |
-| --- | --- |
-| `OLD_BASE` | Read the exact upstream base from the source line's last update PR or release record. |
-| `WSC_TIP` | Choose the committed WSC branch/tag containing the fixes you intend to carry forward. Include later fixes if the last release tag is no longer the desired source. |
-| `NEW_BASE` | Choose an upstream release tag or a fixed main commit, as below. |
-
-For an update within one channel, start from that channel's maintained WSC line.
-For a first port to another channel, agree which maintained line supplies the
-patches. An old forward-port branch may be missing newer fixes. If the previous
-base was not recorded, establish it from the history with the maintainer before
-continuing; do not assume a merge-base identifies the intended patch range.
-
-| Task | Select `NEW_BASE` from | Later Jenkins setting |
+| Choice | Meaning | Example |
 | --- | --- | --- |
-| Update stable | The chosen upstream release tag, for example `3.44.4` | `RELEASE_BRANCH=stable` |
-| Update beta | The chosen upstream prerelease tag, for example `3.45.0-0.1.pre` | `RELEASE_BRANCH=beta` |
-| Port to main | A reviewed commit on `upstream/main` | `RELEASE_BRANCH=main` |
+| Previous Flutter version | The official Flutter commit that the current patches were built on. Find it in the last update PR or release record. | Tag `3.44.3` |
+| Fork version to carry forward | The branch or tag containing the patches and fixes you want to keep. Use the maintained branch if it has fixes made after the last release. | Tag `wsc-3.44.3-r1` |
+| New Flutter version | The official Flutter commit to apply those patches to. | Tag `3.44.4` |
 
-The versions above illustrate the tag format; they are not a recommendation to
-use those releases. Resolve each selected ref to a full commit SHA. This fixes
-the inputs even if a branch moves during the update.
+For a stable or beta update, choose the corresponding Flutter release tag.
+For main, choose a commit on `upstream/main`, your local copy of the official
+main branch. When moving between channels for the first time, choose the
+maintained fork branch that has the fixes you need. An older experimental branch
+may be missing later fixes.
 
-### Example: prepare a stable update
+If the previous Flutter version was not recorded, establish it from the Git
+history with a maintainer before continuing. Git's common-ancestor calculation
+alone does not tell you which commits were intended as the fork's patches.
 
-This PowerShell example assumes the previous base was `3.44.3`, the desired WSC
-source is tagged `wsc-3.44.3-r1`, and the new base is `3.44.4`. Replace those refs
-with your reviewed inputs. The candidate branch and directory must be new.
-Stop if any command fails to resolve a ref.
+### Example: update stable
+
+The example below takes the patches in `wsc-3.44.3-r1`, based on Flutter
+`3.44.3`, and applies them to Flutter `3.44.4`. These are example version names;
+replace them with the versions you chose.
+
+The commands use PowerShell. Each `rev-parse` resolves a tag to its full commit
+ID, so the selection stays fixed even if a branch moves later. Stop if one of
+these commands fails.
 
 ```powershell
 $oldBase = git rev-parse 'refs/tags/3.44.3^{commit}'
-$wscTip = git rev-parse 'refs/tags/wsc-3.44.3-r1^{commit}'
+$forkTip = git rev-parse 'refs/tags/wsc-3.44.3-r1^{commit}'
 $newBase = git rev-parse 'refs/tags/3.44.4^{commit}'
-$candidate = 'wsc-candidate-3.44.4'
-$candidatePath = '../wsc-candidate-3.44.4'
-git log --reverse --oneline "$oldBase..$wscTip"
-git diff --stat "$oldBase..$wscTip"
-git diff "$oldBase..$wscTip"
+$updateBranch = 'flutter-update-3.44.4'
+$updateFolder = '../flutter-update-3.44.4'
 ```
 
-For beta, resolve the selected beta tag instead. For main, use
-`$newBase = git rev-parse 'refs/remotes/upstream/main^{commit}'` and choose a
-candidate name that includes the date or short commit SHA. Keep `OLD_BASE` tied
-to the WSC source you are replaying, regardless of the destination channel.
+Here, `$oldBase` and `$newBase` are the previous and new Flutter commits.
+`$forkTip` is the selected fork commit; *tip* means the end of a branch or commit
+sequence. The helper's `--tip` option takes this value.
 
-In Bash, assign refs with `oldBase=$(git rev-parse 'REF^{commit}')`, and likewise
-for the other inputs. Assign names with `candidate='NAME'` and
-`candidatePath='../NAME'`. The Git and Python commands below use the same variables.
+The branch and folder names must be unused. If your current checkout is
+`D:\flutter`, the example creates `D:\flutter-update-3.44.4`. The helper creates
+this folder for you.
 
-Read the commit list and diff. The range must be a nonempty, linear sequence of
-WSC changes directly after `OLD_BASE`. The helper rejects merges, but it cannot
-tell whether you accidentally included upstream changes. Resolve an unsuitable
-range before continuing; do not squash published history to bypass the check.
-Record the three full SHAs in the update PR.
+For beta, replace the new tag with your chosen beta tag, such as
+`3.45.0-0.1.pre`. For main, use:
 
-## 2. Preview and replay the WSC changes
+```powershell
+$newBase = git rev-parse 'refs/remotes/upstream/main^{commit}'
+```
 
-From the source checkout, preview the example's selected range:
+Choose a branch and folder name that identifies that update, for example by
+including the date. `$oldBase` always describes the fork version you are taking
+patches from, whichever channel you are updating to.
+
+If you use Bash, assign commit IDs with `oldBase=$(git rev-parse 'REF^{commit}')`
+and names with `updateBranch='NAME'`. Use the same variable names as above for
+the remaining commands.
+
+Review what you are carrying forward:
 
 ```sh
-python dev/bots/wsc_rebase.py prepare --old-base "$oldBase" --tip "$wscTip" --new-base "$newBase" --branch "$candidate" --worktree "$candidatePath"
+git log --reverse --oneline "$oldBase..$forkTip"
+git diff --stat "$oldBase..$forkTip"
+git diff "$oldBase..$forkTip"
 ```
 
-Check the printed commits, branch, and destination. Once the plan is approved,
-run it with `--apply`:
+This range should contain the fork's patches after the previous Flutter commit,
+including its build and packaging changes. The helper requires a nonempty,
+linear sequence of commits and rejects merge commits. It cannot tell whether
+you selected unrelated Flutter history by mistake. Resolve an unsuitable range
+before continuing; do not rewrite published history just to pass the check.
+Record all three commit IDs in the update PR.
+
+You do not need the fork's mirrored `upstream/*` branches for this procedure.
+Those are copies of official Flutter branches stored on Bitbucket. See
+[how the mirrored branches are named](upstream-sync.md#understand-the-branch-names)
+if you encounter names such as `origin/upstream/stable`.
+
+## 2. Apply the patches in a new folder
+
+First ask the helper to show what it would do. This command changes nothing:
 
 ```sh
-python dev/bots/wsc_rebase.py prepare --old-base "$oldBase" --tip "$wscTip" --new-base "$newBase" --branch "$candidate" --worktree "$candidatePath" --apply
+python dev/bots/wsc_rebase.py prepare --old-base "$oldBase" --tip "$forkTip" --new-base "$newBase" --branch "$updateBranch" --worktree "$updateFolder"
 ```
 
-Read the result before changing directory. If it reports `Replay completed`,
-enter the candidate and review the result below. If it reports `Replay stopped.
-Candidate preserved at ...`, enter that directory to inspect the stopped replay,
-even though the command exited nonzero. If preparation failed before creating
-the worktree, stay in the source checkout and fix the reported error.
-
-After confirming the candidate was created:
+Check the listed commits, branch name, and destination folder. Once the plan is
+reviewed, run it with `--apply`:
 
 ```sh
-cd "$candidatePath"
+python dev/bots/wsc_rebase.py prepare --old-base "$oldBase" --tip "$forkTip" --new-base "$newBase" --branch "$updateBranch" --worktree "$updateFolder" --apply
 ```
 
-If replay stops, stay in the candidate and inspect the conflict:
+Read the result before changing folders:
+
+- `Replay completed`: the commits applied. Continue in the new folder.
+- `Replay stopped. Candidate preserved at ...`: a commit needs attention.
+  Enter the printed folder and resolve the conflict as described below.
+- If preparation failed before creating the folder, stay in your original
+  checkout and fix the reported problem.
+
+After confirming that the new folder exists:
+
+```sh
+cd "$updateFolder"
+```
+
+### Resolve conflicts
+
+If a cherry-pick stopped, inspect the conflicting files and the commit being
+applied:
 
 ```sh
 git status
@@ -151,86 +180,89 @@ git diff
 git show CHERRY_PICK_HEAD
 ```
 
-Resolve and review the conflicting files. Stage only those files, then continue:
+Edit the conflicting files, review the result, and continue:
 
 ```sh
 git add PATH_TO_RESOLVED_FILE
 git cherry-pick --continue
 ```
 
-If a commit is empty because upstream already supplies the change, inspect it
-before using `git cherry-pick --skip`. To abandon the replay, run
-`git cherry-pick --abort` in the candidate. Its directory and branch remain;
-a fresh attempt needs a new name/path. Do not rerun `prepare` over a stopped replay.
+If Flutter already includes a patch's change, the cherry-pick may be empty.
+Check that the change really is present before using `git cherry-pick --skip`.
+To abandon the attempt, run `git cherry-pick --abort` in the new folder. The
+branch and folder remain, so use new names for another attempt. Do not rerun
+`prepare` while a cherry-pick is stopped.
 
-After replay, review the result:
+### Review the applied patches
 
 ```sh
-git range-diff "$oldBase..$wscTip" "$newBase..HEAD"
+git range-diff "$oldBase..$forkTip" "$newBase..HEAD"
 git diff --stat "$newBase..HEAD"
 git diff "$newBase..HEAD"
 ```
 
-Look for workarounds upstream has replaced and changes to builder configuration,
-bootstrap scripts, packaging, and patch hooks. A clean replay does not prove
-that the changes still behave correctly. Resolve engine-pin conflicts during
-replay, then derive the final pin in step 4.
+`range-diff` compares the old and new patch sequences. Check whether Flutter
+has replaced any workarounds, and review changes to the engine build, startup
+scripts, packaging, and dependency patches. A patch can apply without conflicts
+and still need changes to work correctly.
+
+Resolve any conflict in `bin/internal/engine.version` during this step; you
+will calculate its final value in step 4.
 
 ## 3. Check Skia and FreeType patches
 
-Replaying the outer repository copies patch files. It does not prove they apply
-to the new dependency revisions.
+Some rendering changes are stored as patch files for Skia and FreeType, which
+Flutter downloads separately. Applying the fork's commits copies these files;
+it does not apply or test them against the new dependency versions.
 
-Follow [Port dependency patches](dependency-patches.md) to compare the candidate's
-`DEPS` pins, prepare isolated dependency checkouts, fix failed patches, and test
-the sync hooks. Commit the patch files and expected revisions in the candidate.
+Follow [Port Skia and FreeType patches](dependency-patches.md) to check those
+versions, fix patches that no longer apply, and test the scripts that apply
+them during dependency setup. Commit the resulting files in the update branch.
 
-If dependencies are not ready, you can run the source checks below without them,
-but dependency validation remains pending. Do not use `SYNC_ENGINE_DEPS=false`
-to bypass synchronization after changing dependency or patch inputs.
+You can run the checks in step 5 before downloading dependencies, but record
+the dependency checks as pending. After changing dependencies or patch files,
+do not use `SYNC_ENGINE_DEPS=false` to skip their setup.
 
-## 4. Commit the changes and update the engine pin
+## 4. Update the engine version used for downloads
 
-Commit all engine, dependency, and patch-file changes first. Then follow
-[engine pin maintenance](releases.md#engine-identity): compute the hash with
-`python dev/bots/engine_identity.py`, put it in `bin/internal/engine.version`,
-commit the pin, and validate the full candidate SHA.
+The SDK reads `bin/internal/engine.version` to choose which compiled engine
+files to download. This value is the **engine pin**. It must match the engine
+code and dependency patches you are about to build.
 
-If the new upstream base ignores an untracked pin, stage it with
-`git add -f bin/internal/engine.version`. Later engine-input changes require a
-new pin check. Framework-only changes and the pin commit itself do not change
-the engine hash.
+Commit those changes first, then follow [update the engine pin](releases.md#engine-identity).
+The procedure calculates the engine ID with `dev/bots/engine_identity.py`,
+writes it to `bin/internal/engine.version`, and validates the committed result.
 
-This step prepares a distributable candidate. For ordinary local engine work,
-keep the published bootstrap pin as described in
-[local engine development](engine-identity.md#local-engine-development).
+If the new Flutter version ignores that file and it is not yet tracked, use
+`git add -f bin/internal/engine.version`. Recheck the pin after any later engine
+or dependency-patch change. Changes only to the Flutter framework, or to the
+pin itself, do not change the calculated engine ID.
 
-## 5. Run source checks
+This step prepares an SDK for distribution. When working on the engine locally
+without distributing an SDK, follow [local engine development](engine-identity.md#local-engine-development)
+instead; that workflow keeps an available engine version for starting the tools.
 
-From the clean candidate checkout, using the same `$newBase` value:
+## 5. Run the checks and tests
+
+Once the changes are committed and the update folder is clean, run:
 
 ```sh
 python dev/bots/wsc_rebase.py verify --new-base "$newBase"
 ```
 
-With prepared dependency repositories, supply both paths:
+If you have prepared the Skia and FreeType repositories, include their paths:
 
 ```sh
 python dev/bots/wsc_rebase.py verify --new-base "$newBase" --skia-dir PATH_TO_SKIA --freetype-dir PATH_TO_FREETYPE
 ```
 
-The helper checks ancestry, whitespace, the engine pin, source identity, and
-focused Python tests. The optional dependency check applies patches to pristine
-Git objects without changing the supplied working trees. Success ends with
-`SOURCE CHECKS PASSED, NOT RELEASE APPROVAL` and lists remaining checks.
+The helper checks the Git history, whitespace, engine pin, SDK version settings,
+and focused Python tests. With the dependency paths, it also checks that the
+patches apply to their recorded revisions, without editing those working folders.
+It prints `SOURCE CHECKS PASSED, NOT RELEASE APPROVAL` on success. This means
+the code checks passed; the helper has not built an engine or tested rendering.
 
-Before using the source checkout's Dart/Flutter commands, select a mirror that
-contains its pinned artifacts; see [mirror selection](artifacts.md#packaging-and-mirror-selection).
-The tracked source default and Jenkins' `ci-v2` default differ. After publication,
-select the build's download root before retrying bootstrap; publication alone
-does not change the source checkout's mirror.
-
-Run the Dart/Flutter checks with a compatible SDK and resolved packages:
+Next, run the packaging and Flutter version tests with a compatible SDK:
 
 ```sh
 dart pub get --directory dev/bots
@@ -240,58 +272,66 @@ flutter test test/general.shard/version_test.dart
 cd ../..
 ```
 
-If the candidate cannot bootstrap until its engine artifacts are published,
-use an available compatible SDK for source tests or record the checks as pending
-until after the CI build. Do not revert the candidate pin to bypass that failure.
-Also run tests for the rendering or diagnostic code you changed and work through
-the [rebase audit checklist](releases.md#rebase-audit-checklist).
+**If Flutter cannot start because an engine download is missing:** the new pin
+may not have been built and uploaded yet. Use an available compatible SDK for
+these tests, or record them as pending until Jenkins publishes the new engine.
+Keep the new pin. Once it is available, select the build's download server using
+[mirror selection](artifacts.md#packaging-and-mirror-selection); a checkout does
+not automatically use Jenkins' download URL.
 
-## 6. Build and review the candidate
+Run tests for any rendering or diagnostic code you changed, and work through
+the [update checklist](releases.md#rebase-audit-checklist).
 
-Before pushing, run the [source identity check](releases.md#engine-identity) on
-the final committed candidate and review Jenkins polling/indexing settings.
-A push may start a build. Obtain approval to push and build, then follow
+## 6. Build and test the updated SDKs
+
+Run the [engine and SDK identity check](releases.md#engine-identity) on the final
+committed update. Before pushing, check Jenkins' polling and branch-discovery
+settings: pushing may start a build. Get approval to push and build, then follow
 [Run the integration build](../../DEPLOYMENT.MD#4-run-the-integration-build).
 
-Select the **candidate branch job** as the source and set `RELEASE_BRANCH` for
-the intended channel. For example, building `wsc-candidate-3.44.4` with
-`RELEASE_BRANCH=stable` packages that candidate as stable; the parameter does
-not select upstream stable or move the fork's stable branch. The named channel
-branch must already exist in the fork for packaging to clone it.
+Select the Jenkins job for your update branch. Set `RELEASE_BRANCH` to the
+channel you are preparing: `stable`, `beta`, or `main`.
 
-Use a separate persistent workspace for the new line. Keep the previous line's
-outputs intact. Build the supported SDK matrix and run the
-[extracted-SDK acceptance checks](../../DEPLOYMENT.MD#5-accept-the-sdks-before-distribution).
+For example, building `flutter-update-3.44.4` with `RELEASE_BRANCH=stable` builds
+your update branch and labels the packaged SDK as stable. It does not build
+official Flutter stable or move the fork's stable branch. The fork must already
+have a branch named `stable`, because the packager clones it before checking out
+the chosen build commit.
 
-Jenkins has FRT comparisons for Windows, macOS, and Web. Review their results;
-disabled or failed comparisons leave rendering acceptance incomplete. Android
-and iOS are not covered by those stages. See
-[rendering acceptance](rendering-regression.md#outcomes-evidence-and-acceptance)
-for CI evidence and remaining agent acceptance work. To run FRT yourself, use
-the [FRT README](https://bitbucket.org/schoolcraftteam/font_rendering_tester/src/master/README.md).
-When porting diagnostics, also check enabled behavior and disabled overhead.
+Use a separate build workspace for the updated version and keep the previous
+version's outputs. Build the required Windows and macOS SDKs, then follow
+[test the extracted SDKs](../../DEPLOYMENT.MD#5-accept-the-sdks-before-distribution).
 
-Record the source and engine IDs, old/new bases, test results, CI build and SDK
-links, rendering baseline/results, and reviewer approval in the update PR.
-Keep compilation, packaging, publication, and runtime results distinct.
+Jenkins currently compares rendering on Windows and Web. Review those results;
+disabled or failed comparisons do not establish that rendering is correct.
+macOS, Android, and iOS need separate testing. See [rendering results and coverage](rendering-regression.md#outcomes-evidence-and-acceptance).
+For running the font rendering tester yourself, use the
+[FRT README](https://bitbucket.org/schoolcraftteam/font_rendering_tester/src/master/README.md).
+If you changed diagnostics, check them both enabled and disabled, including the
+performance cost when disabled.
 
-## 7. Release the accepted candidate
+Record the fork commit, engine ID, previous and new Flutter commits, test results,
+build and SDK links, rendering comparisons, and review decision in the update PR.
+Make clear which stages actually passed: code checks, compilation, packaging,
+uploads, and application/rendering tests.
 
-Follow the [release procedure](releases.md#release-procedure) to tag the accepted
-source, build and check the release SDKs, and hand over the approved downloads.
-Follow [Update a WSC channel](releases.md#update-a-wsc-channel) for the branch
-handoff. Neither the rebase helper nor a green CI build promotes a channel.
+## 7. Release the tested version
 
-## Helper tests and limits
+Follow [release the SDK](releases.md#release-procedure) to tag the accepted commit,
+build and test the release SDKs, and share the approved downloads. Then follow
+[update a release channel](releases.md#update-a-release-channel) to move the
+fork's main, beta, or stable branch. Neither the helper nor a passing Jenkins
+build updates those branches for you.
 
-To check the helper itself:
+## Test the update helper itself
+
+If you change the helper, run its tests:
 
 ```sh
 python -B -m unittest discover -s dev/bots -p test_wsc_rebase.py
 ```
 
-These tests use disposable repositories. They cover replay, conflict recovery,
-input checks, and dependency-patch checking, not a real Flutter build or rendering
-acceptance. Verification executes the candidate's scripts and tests, so use
-trusted source. On Windows, the hash-helper test uses a process-only PowerShell
-execution-policy override; it does not change machine settings.
+They use temporary Git repositories to check patch replay, conflict handling,
+input validation, and dependency-patch checks. They do not build Flutter.
+The `verify` command runs scripts and tests from the selected checkout, so use
+a checkout you trust.

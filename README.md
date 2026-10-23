@@ -21,12 +21,14 @@ mobile, web, and desktop from a single codebase. Flutter works with existing
 code, is used by developers and organizations around the world, and is free and
 open source.
 
-## WSC fork
+## About this Flutter fork
 
-This repository contains the WSC Flutter patches and SDK build pipeline.
-Start with the [WSC maintenance guide](docs/wsc/README.md).
-To move to a new stable, beta, or main base, follow
-[Updating the WSC fork](docs/wsc/updating.md).
+This fork patches Flutter to match text rendering and layout in Worksheet
+Crafter, the existing Qt application. It also includes the pipeline for building
+and distributing the patched Flutter SDK.
+Start with the [maintenance guide](docs/wsc/README.md).
+To bring the patches to a newer stable, beta, or main version, follow
+[Update to a new Flutter version](docs/wsc/updating.md).
 Automation agents should also read [AGENTS.md](AGENTS.md).
 The badges above and the documentation below describe upstream Flutter.
 

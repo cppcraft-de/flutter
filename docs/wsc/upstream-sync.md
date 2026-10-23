@@ -1,115 +1,139 @@
-# Synchronizing upstream Git history
+# Copy official Flutter history into the fork
 
-Use [sync_upstream.py](../../dev/bots/sync_upstream.py) to make upstream Flutter
-history available in the client's fork. This is separate from replaying patches,
-building SDKs, or promoting WSC channel refs.
+Use this guide when you want the official Flutter branches and tags available
+in the Bitbucket repository. The [sync helper](../../dev/bots/sync_upstream.py)
+copies that history without applying our patches or changing the fork's main,
+beta, or stable branches.
 
-| Source on `upstream` | Destination on `origin` |
-| --- | --- |
-| Every branch `<name>` | Branch `upstream/<name>` at the same commit |
-| Every tag `<name>` | Tag `<name>` with the identical Git object |
+To update the patches to a newer Flutter version, use
+[Update to a new Flutter version](updating.md) instead. You can fetch directly
+from official Flutter for that task; copying its history to Bitbucket is optional.
 
-All other destination branches, including `main`, `master`, `beta`, `stable`
-and WSC development branches, are untouched. Destination-only tags (including
-WSC releases) are retained. Git objects reachable from these branches/tags are
-transferred, not GitHub PR metadata, dependency checkouts or build artifacts.
+## Understand the branch names
 
-## Running the sync
+There are two repositories: `upstream` is the official Flutter repository on
+GitHub, and `origin` is this fork on Bitbucket. The sync helper stores copies of
+official branches on Bitbucket with `upstream/` at the start of their names.
+For example, it copies official `stable` to the branch named `upstream/stable`.
+That prefix keeps the copy separate from our patched `stable` branch.
 
-Requires Python 3.10+ and Git 2.31+ (`rev-parse --path-format=absolute`).
-Preview needs read access to both remotes; applying changes also needs fork write access.
-Configure `upstream` as the official Flutter repository and `origin` as the
-client's fork. Use normal Git credential helpers or SSH; do not put secrets in
-remote URLs. Repository-local authentication settings are not copied into the
-temporary repository; use your user-level credential helper/SSH configuration.
+After fetching both repositories, Git shows these names locally:
 
-From the source checkout:
+| Name | Remote repository | Branch in that repository |
+| --- | --- | --- |
+| `upstream/stable` | `upstream` (official Flutter) | `stable` |
+| `origin/upstream/stable` | `origin` (this fork) | `upstream/stable`, the unmodified Flutter copy |
+| `origin/stable` | `origin` (this fork) | `stable`, the patched version |
+
+In `origin/upstream/stable`, only `origin` names a remote. The remaining
+`upstream/stable` is one branch name, not another remote or a folder. The same
+pattern applies to beta, main, and other mirrored branches.
+
+The script currently fixes this prefix to `upstream/`. Renaming those branches
+requires a change to the script and a migration of the existing copies.
+
+Tags keep their original names and Git objects. The helper preserves our
+release tags and all branches outside `upstream/*`. It copies Git history,
+not GitHub pull requests, engine dependencies, or build outputs.
+
+## Preview and apply a sync
+
+You need Python 3.10 or newer, Git 2.31 or newer, and read access to both
+repositories. Applying the sync also needs write access to the fork.
+
+Check the configured repository addresses:
 
 ```sh
 git remote -v
+```
+
+`upstream` should point to `https://github.com/flutter/flutter.git` and `origin`
+to the Bitbucket fork. Use your normal Git credential helper or SSH setup;
+keep credentials out of URLs. The helper uses a temporary repository, so
+repository-local authentication settings are not carried over.
+
+Preview the changes:
+
+```sh
 python dev/bots/sync_upstream.py
+```
+
+Read the proposed branch and tag updates. Once reviewed, apply them:
+
+```sh
 python dev/bots/sync_upstream.py --apply
 ```
 
-To also remove mirrored branches that disappeared upstream, preview and apply
-with `--prune`:
+The apply command checks the repositories again; it does not reuse a saved
+preview. Unchanged branches and tags are skipped. If official Flutter changes
+while the helper is fetching, it stops before pushing. Run a fresh preview.
+
+### Remove copies of deleted branches
+
+Normally, the helper reports branches deleted from official Flutter but keeps
+their Bitbucket copies. To remove those copies, preview with `--prune`:
 
 ```sh
 python dev/bots/sync_upstream.py --prune
+```
+
+Review every `DELETE` entry before applying it:
+
+```sh
 python dev/bots/sync_upstream.py --prune --apply
 ```
 
-The first invocation previews changes using remote ref lists only. `--apply`
-fetches upstream history into a temporary bare repository and requests an atomic
-push; a server that does not advertise atomic pushes is rejected, with no fallback
-to non-atomic publication. The helper waits one second before verifying the
-published refs. A mismatch or failed read gets up to two additional read-only
-attempts, five seconds apart; the push is never retried automatically.
-Unchanged runs are a no-op. Source changes during fetch abort before pushing;
-rerun the preview. The apply invocation computes a fresh plan, not a saved one.
+Only mirrored branches under `upstream/*` can be deleted. Tags and the fork's
+other branches are kept. Use the official repository with access to all its
+branches: the helper cannot distinguish a hidden branch from a deleted one.
 
-On a push/connection failure, inspect a fresh preview before retrying. Some Git
-server policies (notably hidden-ref rejection) can still accept a subset of refs
-despite `--atomic`, and a lost connection does not prove the server rejected the
-push. The helper reports failure without rolling back accepted refs. Fix the
-server policy/authentication issue and rerun; equal refs are skipped safely.
+## If the sync fails
 
-`--repo PATH` selects the checkout whose remote configuration to read. By default
-this is the repository containing the script, regardless of your working
-directory. `--source NAME` and `--destination NAME` select alternative **named
-remotes**. The destination's push URL is used, and multiple URLs are rejected.
-That URL must support `ls-remote` for preview and verification, object fetching
-for apply's lease checks, and pushes; a write-only endpoint is insufficient.
+Run a fresh preview before retrying. A push or connection error does not prove
+that nothing changed on the server. The helper requests an atomic push, but
+some server policies can still accept only part of it. It reports failure and
+does not undo changes already accepted by the server.
 
-The fixed `upstream/*` destination namespace is owned by synchronization. Applying
-the sync updates it even if upstream rewrote a branch; never develop WSC changes
-there. Only planned changes are pushed, with leases on the previously observed
-commits (or absence for new refs). The plan is stored in temporary Git config;
-temporary tracking refs supply the expected branch commits. These refs are
-checked against the initial destination snapshot and never refreshed before
-pushing. This keeps the command short on Windows even for thousands of refs,
-while preserving a single atomic push. A concurrent change
-to a branch being updated or deleted rejects the push rather than overwriting
-that change. Prefer serial sync runs to avoid these failures. Tags are
-never replaced: only missing tags are pushed, with absence required by the lease.
-Any same-name/different-object tag, including a changed annotation, stops the
-entire sync. Investigate conflicts; do not reseat published tags.
+- **Another sync changed a branch:** the push checks that each affected branch
+  still has the commit seen during planning. Fetching a newer plan and reviewing
+  it resolves this; avoid running syncs concurrently.
+- **A tag has the same name but different contents:** investigate the conflict.
+  The helper refuses to replace tags, including changed tag annotations.
+- **A branch name blocks another:** for example, `upstream/foo` can conflict
+  with `upstream/foo/bar`. Review any required cleanup before retrying. The
+  helper will not fall back to a sequence of unprotected pushes.
+- **Authentication or server policy rejects the push:** fix that problem, then
+  preview again. Changes that already reached the server will be skipped.
 
-Without `--prune`, stale mirrored branches are reported and retained. With
-`--prune`, only branches under `refs/heads/upstream/` absent from the source
-snapshot are listed as `DELETE` and removed on apply, in the same atomic push as
-updates. An empty source branch list is rejected, and a changed source snapshot
-during fetch aborts before any push. Use the official upstream remote with full
-branch visibility: the helper cannot distinguish hidden branches from deleted
-ones. All tags are retained, including tags removed upstream; they share a
-namespace with client-owned release tags. Other destination branches are never
-pruned. A branch-name collision such as `upstream/foo` versus new
-`upstream/foo/bar` may still require reviewed cleanup if the server cannot delete
-and create those names in one transaction; there is no non-atomic fallback.
+The helper verifies the remote branches and tags after pushing, with bounded
+read retries. It never retries a push automatically. A server without atomic
+push support is rejected.
 
-## Scope and integration
+## Options and local setup
 
-- Local branches, tags, index, working files and engine outputs are not changed.
-  A dirty source checkout is fine. Repository-selection environment overrides
-  such as `GIT_DIR` or `GIT_WORK_TREE` are rejected before running Git; unset the
-  variables named in the error and retry. Existing Git objects are borrowed read-only
-  from a non-shallow checkout to reduce transfer; missing objects use temporary
-  storage. A shallow checkout needs an independent full upstream download.
-  Temporary storage is removed on normal exit/error; allow room for missing
-  history and do not concurrently prune the borrowed object store.
-- This does **not** refresh your local `upstream/*` remote-tracking refs/tags.
-  Continue using `git fetch upstream --tags` when preparing a local rebase.
-- Run before the [upstream-update workflow](updating.md), or schedule separately
-  once commissioned. No Jenkins changes, builds or schedule are created by the
-  helper. Exclude `upstream/*` from Jenkins discovery/building; pushes can still
-  notify external webhooks configured on the repository.
-- Fetching newly mirrored tags can affect upstream's numeric fallback for
-  untagged SDK versions. Exact WSC release tags remain the release identity;
-  see [versioning](releases.md#version-and-channel-identity).
-- Updating the unprefixed WSC channel refs belongs to the separately reviewed
-  release/development flow, never this script.
+- `--repo PATH`: read the remote configuration from that checkout. The default
+  is the repository containing the script.
+- `--source NAME` and `--destination NAME`: use different configured remote
+  names. The destination's push URL must support reading branches and tags,
+  fetching objects, and pushing. A write-only endpoint is insufficient;
+  multiple URLs are rejected.
+- Your local branches, tags, working files, and engine outputs stay unchanged.
+  You can run the helper with uncommitted edits. If it reports a Git environment
+  override such as `GIT_DIR`, unset the named variable and retry.
+- Allow temporary disk space for missing Git history. A full local checkout
+  lets the helper reuse existing objects; avoid pruning them during the sync.
+- The helper does not refresh your local view of either repository. Use
+  `git fetch upstream --tags` or `git fetch origin --tags` afterward as needed.
+- Exclude the mirrored `upstream/*` branches from Jenkins build discovery.
+  Pushes can trigger repository webhooks even though the helper starts no builds.
 
-Offline tests use disposable local repositories only:
+Fetching new tags can affect Flutter's version display for untagged builds.
+The fork's release tags remain the way to identify releases; see
+[versions and tags](releases.md#version-and-channel-identity).
+
+## Test the helper
+
+These tests use temporary local repositories:
 
 ```sh
 python -m unittest discover -s dev/bots -p test_sync_upstream.py

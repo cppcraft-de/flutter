@@ -1,18 +1,23 @@
 # Port Skia and FreeType patches
 
-Use this when an upstream update changes Skia or FreeType, or a WSC patch no
-longer applies. Work in the isolated candidate from
-[Updating the WSC fork](updating.md). Keep existing development and CI dependency
-trees intact.
+Flutter uses Skia and FreeType for rendering. Some of our changes to these
+libraries live in patch files, which the dependency setup applies after
+downloading them. A Flutter update can change the libraries enough that these
+patches need adjusting.
+
+Use this guide to make those adjustments in the separate update folder created
+by [Update to a new Flutter version](updating.md). Keep your existing development
+and Jenkins build folders intact.
 
 The files under
 [wsc_font_rendering_patches](../../engine/src/flutter/tools/wsc_font_rendering_patches/)
-are the source of truth. Changes made only inside a nested dependency checkout
-will not be included in a release.
+are what the build uses. If you edit Skia or FreeType directly, you must save
+those edits back into these patch files for them to be included in a release.
 
 ## 1. Check the new dependency revisions
 
-Compare the candidate's [DEPS](../../DEPS) with
+`DEPS` records which versions of Skia and FreeType Flutter uses. In the update
+folder, compare [DEPS](../../DEPS) with
 [apply_patches.py](../../engine/src/flutter/tools/wsc_font_rendering_patches/apply_patches.py):
 
 - Skia: `skia_revision` in `DEPS` and `EXPECTED_SKIA_REVISION` in the helper.
@@ -25,14 +30,15 @@ just to make the patch check pass.
 
 ## 2. Fix a patch in a separate checkout
 
-If the candidate's dependencies already have WSC patches applied, preserve any
-intentional nested edits before replacing the patch files. Reset the old applied
-stack with the helper's `--reverse` option while its matching old patch inputs
-are still available. If you cannot establish that old state, use a fresh isolated
-candidate for the hook checks below; keep the existing checkout intact.
+If the update folder already has patched Skia or FreeType checkouts, save any
+edits you made there before replacing the patch files. Use the helper's
+`--reverse` option with the old patch files to undo the old patches first. If
+you no longer have those files or cannot determine what was applied, use a fresh
+update folder for the dependency checks below. Preserve the existing checkout.
 
-For each changed dependency, create a scratch checkout outside the candidate.
-Use its repository URL and revision from the candidate's `DEPS`. For example,
+Make a separate checkout for each library you need to change. These are temporary
+editing folders, separate from the Flutter update folder. Use the repository
+URL and commit from the new `DEPS`. For example,
 replace `SKIA_URL` and `NEW_SKIA_SHA` below:
 
 ```sh
@@ -54,38 +60,41 @@ git -C ../wsc-skia-port apply PATH_TO_PATCH
 
 When a patch fails:
 
-1. Commit the successfully applied earlier patches in the **scratch repository**.
-   This gives you the exact starting state for the failing patch.
+1. In the **temporary library checkout**, commit the earlier patches that
+   applied successfully. This gives you the starting state for the failing patch.
 2. Read the failing patch and the changed upstream code. Implement the intended
-   WSC behavior on the new source, or remove the patch if upstream now supplies
-   that behavior. Review that decision with the maintainer.
+   rendering behavior in the updated library, or remove the patch if upstream
+   now supplies that behavior. Review that decision with the maintainer.
 3. Stage only the files belonging to this patch, including any new files. Review
-   the staged diff, then write it to the corresponding patch file in the candidate:
+   the staged diff, then write it to the corresponding patch file in the Flutter
+   update folder:
 
    ```sh
    git -C ../wsc-skia-port add PATH_TO_CHANGED_FILE
    git -C ../wsc-skia-port diff --cached
-   git -C ../wsc-skia-port diff --cached --binary --output=ABSOLUTE_PATH_TO_CANDIDATE_PATCH
+   git -C ../wsc-skia-port diff --cached --binary --output=ABSOLUTE_PATH_TO_PATCH_FILE
    ```
 
-4. Commit this patch's changes in the scratch repository before porting the next
-   one. Keep each patch's diff separate; do not include the accumulated stack.
-5. Once the stack works, update the helper's expected revisions in the candidate.
+4. Commit this patch's changes in the temporary library checkout before porting
+   the next one. Keep each patch's diff separate from the earlier patches.
+5. Once all patches apply, update the helper's expected revisions in the Flutter
+   update folder.
    Check `GROUP_MARKERS` if the patched code moved or changed. Those markers let
    the hook recognize an applied group; they do not prove rendering correctness.
 
 Use `--output` to write patch bytes directly. Shell redirection can change the
 encoding on Windows. Keep the resulting patch files and helper edits in the
-candidate; scratch commits are not release inputs.
+Flutter update folder; the temporary commits are only for editing.
 
-## 3. Check the real dependency hooks
+## 3. Check that dependency setup applies the patches
 
-Stage the reviewed patch/helper changes in the outer candidate before syncing.
+Stage the reviewed patch files and helper edits in the Flutter update branch
+before syncing.
 Use path-specific `git add` for additions/edits and `git rm` for removed patches.
 An unstaged patch deletion makes the sync helper fail while reading tracked
 inputs, before it reaches `gclient`.
 
-From the candidate root, inspect any existing nested changes before syncing:
+From the Flutter update folder, check for edits inside the library checkouts:
 
 ```sh
 git -C engine/src/flutter/third_party/skia status --short
@@ -94,7 +103,7 @@ git -C engine/src/flutter/third_party/freetype2 status --short
 
 Skip these status commands if the dependencies have not been downloaded yet.
 An outer `git status` does not show all nested edits. Save intentional edits as
-patches first: the pre-sync hook resets WSC patch-owned changes.
+patches first: dependency setup resets changes made by the fork's patches.
 
 With depot_tools and the platform's
 [engine prerequisites](../engine/contributing/Setting-up-the-Engine-development-environment.md)
@@ -107,30 +116,32 @@ git -C engine/src/flutter/third_party/freetype2 rev-parse HEAD
 python engine/src/flutter/tools/wsc_font_rendering_patches/apply_patches.py
 ```
 
-The sync helper writes the standard `.gclient` configuration and runs the DEPS
-hooks. Use `--web` as well when preparing a Web build. Run this only in the
-isolated candidate/build workspace, not a workspace with custom dependency
+The sync helper writes the standard `.gclient` configuration and runs the scripts
+listed in `DEPS`, called hooks, that reset and apply the patches. Add `--web` when
+preparing a Web build. Run this only in the separate update or build folder,
+not a workspace with custom dependency
 settings or unrelated edits. Windows Git needs long-path support, as described
 in the [agent setup](../../DEPLOYMENT.MD#1-prepare-the-agents).
 
 Check that both HEADs match `DEPS` and the expected revisions. The final helper
 invocation should report that the selected patches are already applied.
-Then repeat the same forced sync, keeping `--web` if used, to check that the
-pre-sync hook can reset the applied stack and the post-sync hook can reapply it.
+Then repeat the same sync command, keeping `--web` if used, to check that setup
+can undo and reapply the patches on an already patched checkout.
 
 If a hook fails, inspect the nested state before retrying. In particular,
 `Preserving modified patch-created file` can mean the existing file belongs to
 an earlier version of a patch. Repeating sync with the new patch will not fix
-that mismatch. Preserve edits and use the old-stack reset or fresh candidate
+that mismatch. Preserve edits and use the old-patch reset or fresh update folder
 described in step 2. A partial sync is not a completed check.
 
-## 4. Commit and verify the candidate
+## 4. Commit and check the updated patches
 
-Commit the patch files and helper edits in the outer candidate repository, then
+Commit the patch files and helper edits in the Flutter update branch, then
 update its engine pin. Return to the
-[source checks](updating.md#5-run-source-checks) and supply both dependency paths.
+[checks and tests](updating.md#5-run-the-checks-and-tests) and supply both dependency paths.
 Use the synced checkouts, whose HEADs are the pinned dependency revisions, not
-the scratch repositories containing your temporary porting commits.
+the temporary library checkouts containing your temporary porting commits.
 
-The object-based patch check, real hook checks, engine compilation, and rendering
-comparison are separate checks. Complete all of them before accepting the port.
+Before accepting the updated patches, check that they apply, that dependency
+setup handles them correctly, that the engine builds, and that rendering still
+matches the expected result.

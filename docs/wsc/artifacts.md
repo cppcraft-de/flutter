@@ -1,8 +1,9 @@
 # Artifacts and SDK packaging
 
-For setup and current build defaults, use [DEPLOYMENT.MD](../../DEPLOYMENT.MD).
-This reference explains the artifact contract rather than duplicating the
-Jenkins configuration checklist.
+Jenkins produces SDK ZIPs and publishes the compiled files they download, called
+**artifacts**. Use this reference to find those files, configure their storage,
+or investigate failed downloads and uploads. For the build setup and defaults,
+see [Build and distribute SDKs](../../DEPLOYMENT.MD).
 
 - [Find an SDK or engine artifact](#storage-layout).
 - [Check the upload and download endpoints](#upload-and-read-contract).
@@ -13,16 +14,16 @@ Jenkins configuration checklist.
 
 ## Why SDK archives and an HTTP mirror
 
-The distributed product is one SDK archive per supported host, plus an HTTP(S)
-artifact tree. A fork-specific engine ID does not exist in Flutter's public
-storage. The mirror is a product dependency, not merely a CI cache.
+Developers receive one SDK ZIP for their operating system. The SDK also needs
+access to our download server, called the **mirror**, because official Flutter's
+servers do not have our patched engine. Keep the mirror available for as long
+as those SDKs are in use.
 
-The upstream-style package creator runs unfiltered `flutter precache`: archives
-contain a **warm cache**, not only framework source. Standard artifacts for the
-host's supported target set and modes are preloaded. This can produce
-multi-gigabyte ZIPs. It is not an all-host/all-future-artifact offline bundle.
+Packaging runs `flutter precache` to include the usual engine downloads for that
+SDK's supported platforms and build modes. This prefilled cache makes the ZIPs
+large, often several gigabytes, but does not make the SDK fully offline.
 
-Common subsequent HTTP consumers are:
+The SDK can still need downloads when:
 
 - **Android Gradle builds:** Gradle resolves versioned engine embedding/runtime
   dependencies from the Maven layout at `download.flutter.io`. Gradle is the
@@ -74,7 +75,7 @@ The same server/root serves engine artifacts, Maven artifacts, and SDK ZIPs:
 ```
 
 `host` is `windows` or `macos`. Maven versions include the engine ID but live
-outside the engine-revision directory. The SDK archive name contains the WSC
+outside the engine-revision directory. The SDK archive name contains the fork
 version and channel; its containing path is commit/build/host, not a `latest`
 alias or a release-name directory. Two jobs publishing the same path need
 distinct storage roots if their outputs must remain separate.
@@ -155,7 +156,7 @@ engine input. Even a clean build can therefore upload different bytes to the
 same engine/Maven URLs.
 
 Overwriting replaces the origin, not copies already in CDN, Gradle, or Flutter
-caches. That caused a client build's Maven verification to see an older cached
+caches. That caused a Jenkins build's Maven verification to see an older cached
 JAR after a successful PUT. Disabling CDN caching helps testing but cannot
 invalidate developers' caches. Clearing only the Maven cache does not refresh
 Flutter's separate engine cache. Nor does it restore the original bytes for
@@ -302,8 +303,8 @@ SHA256 sidecar, archives the outputs, and uploads the payload.
 
 The creator clones the fork into a clean directory, attaches the selected
 channel branch to the exact build revision, bootstraps tools/packages, warms
-the cache, and archives it. WSC modifications include the fork origin,
-Windows long-path handling, WSC archive identity, and a packaged mirror file.
+the cache, and archives it. The fork changes the clone URL, handles long Windows
+paths, adds the fork version to archive names, and includes the mirror setting.
 
 `bin/internal/flutter_storage_base_url` is tracked with the default download
 root `https://fluttertest.b-cdn.net`, so fresh source clones retain the existing

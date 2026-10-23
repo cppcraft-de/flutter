@@ -1,8 +1,12 @@
-# WSC FreeType-Canonical Text Path
+# Text rendering with FreeType
 
-This fork keeps native platform font discovery and fallback, then attempts to
-convert selected typefaces to Skia's FreeType backend before shaping, metrics,
-layout, text blob creation, or rendering consume them.
+The fork uses FreeType to help match text rendering and layout in Worksheet
+Crafter, the existing Qt application. This page describes the engine changes,
+their limits, and the diagnostic APIs for developers working on that code.
+
+The operating system still finds fonts and chooses replacements for missing
+characters. The fork then attempts to create FreeType-backed versions of those
+fonts before Flutter measures, lays out, and draws the text.
 
 The policy is implemented in Flutter-owned `txt` code with a canonicalizing
 `SkFontMgr`/`SkFontStyleSet` wrapper. Platform managers still decide which font
@@ -13,7 +17,7 @@ If font data cannot be opened or FreeType construction fails, the code asserts
 with `FML_DCHECK`; without that assertion, it logs an error and returns the
 original native typeface. Such fallback faces have no FreeType parity guarantee.
 
-Existing WSC diagnostics and Qt parity adjustments remain part of the contract:
+The fork also keeps its diagnostics and adjustments for matching Qt:
 Qt-like integer layout metrics, subpixel-off SkParagraph settings, optional
 advance/line diagnostics, and the third-party patch hooks remain in place.
 
