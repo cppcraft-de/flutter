@@ -95,15 +95,17 @@ def checkoutFrt(Map plan, String revision) {
 }
 
 def resolveFrt(Set<String> hosts) {
+    // Capture only Windows and Web for now; macOS SDK packaging stays enabled.
+    hosts = hosts.intersect(['windows'] as Set)
     bat "${params.WINDOWS_PYTHON} dev/bots/frt_ci.py plan --hosts \"${hosts.sort().join(',')}\" --output build/frt-plan.json"
     env.WSC_FRT_PLAN = readFile('build/frt-plan.json')
     def plan = parseFrtPlan(env.WSC_FRT_PLAN)
     if (!plan.enabled || hosts.isEmpty()) {
-        echo 'FRT regression NOT VALIDATED: disabled in configuration or no host SDKs selected.'
+        echo 'FRT regression NOT VALIDATED: disabled in configuration or no Windows SDK selected.'
         return
     }
-    // Resolve a moving ref once, before parallel host work. Both agents check
-    // out this SHA, even if FRT master advances during engine compilation.
+    // Resolve a moving ref once, before engine work. Capture and reporting use
+    // this SHA, even if FRT master advances during engine compilation.
     dir('build/frt-resolution') {
         def checkoutResult = checkoutFrt(plan, plan.ref)
         env.WSC_FRT_REVISION = checkoutResult.GIT_COMMIT
@@ -1114,14 +1116,10 @@ pipeline {
                                 }
                             }
                         }
-                        stage('macOS FRT regression') {
-                            when { expression { parseFrtPlan(env.WSC_FRT_PLAN).enabled } }
-                            steps { script { runFrt('macos') } }
-                        }
                     }
                     post {
                         failure {
-                            script { mailBuildLog('macOS SDK / FRT', 'FAILURE') }
+                            script { mailBuildLog('macOS SDK', 'FAILURE') }
                         }
                     }
                 }

@@ -3,6 +3,30 @@ def source = new File('Jenkinsfile.testing').text
 
 class TestAbort extends RuntimeException {}
 
+// Planning and reporting must exclude macOS, even while packaging both SDKs.
+for (selected in [['windows', 'macos'], ['windows'], ['macos'], []]) {
+    def expectedHosts = selected.contains('windows') ? ['windows'] : []
+    def commands = []
+    def environment = [:]
+    def binding = new Binding([
+        env: environment, params: [WINDOWS_PYTHON: 'python'],
+        scm: [userRemoteConfigs: [[credentialsId: 'test-id']]],
+        bat: { String command -> commands << command },
+        readFile: { String path -> 'plan' },
+        readJSON: { Map args -> [enabled: true, hosts: expectedHosts, ref: 'master'] },
+        echo: { String message -> },
+        dir: { String path, Closure body -> body() },
+        checkout: { Map args -> [GIT_COMMIT: 'a' * 40] },
+        archiveArtifacts: { Map args -> }, stash: { Map args -> },
+    ])
+    new GroovyShell(binding).parse(source).resolveFrt(selected as Set)
+    assert commands.size() == 1
+    assert commands[0].contains('--hosts "' + expectedHosts.join(',') + '"')
+    assert (environment.WSC_FRT_REPORT_READY == 'true') == !expectedHosts.isEmpty()
+}
+assert !source.contains("runFrt('macos')")
+assert source.contains("runFrt('windows')")
+
 def exercise = { Map options ->
     def events = []
     def build = [currentResult: options.initial ?: 'SUCCESS']

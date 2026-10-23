@@ -1,8 +1,9 @@
 # SDK rendering regression in Jenkins
 
 Jenkins uses the font rendering tester (FRT) to compare candidate SDKs against
-approved WSC SDKs. Windows and Web run on the Windows packaging agent; macOS runs
-on the Mac. Android and iOS are not wired into this pipeline.
+approved WSC SDKs. Only Windows and Web run, both on the Windows packaging agent.
+macOS FRT is disabled; macOS engine builds and SDK packaging remain enabled.
+Android and iOS are not wired into this pipeline.
 
 For FRT setup, local comparisons, fixtures, and capture commands, use the
 [FRT README](https://bitbucket.org/schoolcraftteam/font_rendering_tester/src/master/README.md).
@@ -66,8 +67,9 @@ under the client's retention policy.
 ## Configure once, then version the defaults
 
 [frt_ci.json](../../dev/bots/frt_ci.json) owns the defaults. FRT is enabled by
-default. Windows and Web use the configured Windows baseline SDK; macOS uses
-the macOS baseline. The checked-in baselines are from client build #24 and still
+default. Windows and Web use the configured Windows baseline SDK. The macOS
+baseline is retained for future use but not required by the current pipeline.
+The checked-in baselines are from client build #24 and still
 need real-agent acceptance. A configured baseline is not proof of correctness.
 
 Choose a baseline that matches the agent architecture and exposes the APIs
@@ -96,9 +98,10 @@ properties when adopting committed defaults; inherited values continue to win.
 The FRT checkout credential needs read access to that repository. Do not put
 credentials in folder properties.
 
-When enabled, every selected `HOST_SDKS` host needs a valid baseline or preflight
-fails. Windows selection includes Windows and Web; macOS selection includes
-macOS. Empty `HOST_SDKS` means no SDK regression cells. Use `WSC_FRT_ENABLED=0`
+When enabled and `HOST_SDKS` includes Windows, a valid Windows baseline is required
+or preflight fails. The Jenkinsfile limits capture and report expectations to
+Windows and Web. macOS-only or empty `HOST_SDKS` means no SDK regression cells.
+Use `WSC_FRT_ENABLED=0`
 while setting up an agent if necessary; that leaves rendering unvalidated.
 
 Preflight resolves the FRT ref to one commit for all cells. FRT changes do not
@@ -114,15 +117,15 @@ README when commissioning agents and recording acceptance evidence.
 
 ## Execution and prerequisites
 
-The pipeline packages and uploads each SDK, then compares its local ZIP against
+The pipeline packages and uploads the Windows SDK, then compares its local ZIP against
 the approved baseline. It builds two FRT clients per target and uses isolated
 comparison data. It does not run another engine build or use a shared FRT server.
 
-Reporting always needs a `flutter_win` executor, even for a macOS-only SDK run.
+Reporting needs a `flutter_win` executor. A macOS-only SDK run skips FRT and reporting.
 That executor needs Git, FRT repository access, and `WINDOWS_PYTHON -m uv` for
 the report checkout and aggregation.
 
-On each packaging agent:
+On the Windows packaging/capture agent:
 
 - Provide the native app-build tools and a graphical desktop for desktop capture.
   Use the FRT README for its current Python and runtime prerequisites.
@@ -173,7 +176,7 @@ and record a separate developer-run comparison if needed for release review.
 | Target | Current Jenkins capture |
 | --- | --- |
 | Windows | Windows packaging agent |
-| macOS | macOS packaging agent |
+| macOS | Disabled (SDK packaging remains enabled) |
 | Web | Windows packaging agent, headless Chromium; Edge by default |
 | Android | Not integrated |
 | iOS | Not integrated |

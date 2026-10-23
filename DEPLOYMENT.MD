@@ -24,9 +24,10 @@ The pipeline is **`Jenkinsfile.testing`**. There is no separate production
 Jenkinsfile. It builds engine artifacts, uploads them directly from their agents,
 then packages and uploads Windows and macOS SDKs using those artifacts. Large
 engine payloads do not pass through Jenkins stashes.
-FRT comparison follows each host's SDK packaging: Windows and Web on Windows,
-macOS on macOS. It is enabled by default with client build #24's Windows/macOS
-SDKs pinned as commissioning baselines; Web uses Edge. Missing baseline
+FRT comparison follows Windows SDK packaging: Windows and Web both run on Windows.
+macOS FRT is disabled; macOS engine builds and SDK packaging are unchanged.
+FRT is enabled by default with client build #24's Windows SDK pinned as the
+commissioning baseline; Web uses Edge. Missing baseline
 configuration fails preflight. Real-agent FRT execution still needs acceptance;
 a packaging-only green build does not certify rendering.
 
@@ -304,11 +305,11 @@ Debug-only SDK packaging is not implemented. Detailed tradeoffs are in
 
 ## 5. Accept the SDKs before distribution
 
-A configurable [FRT regression stage](docs/wsc/rendering-regression.md) can
-compare each Windows/macOS candidate SDK against a manually approved SDK.
+A configurable [FRT regression stage](docs/wsc/rendering-regression.md) compares
+the Windows candidate SDK against a manually approved SDK for Windows and Web.
 Its versioned defaults and optional folder overrides are documented there.
-This covers desktop and Chromium Web rendering and complements the checks below;
-it does not capture Android or iOS.
+This covers Windows desktop and Chromium Web rendering and complements the checks
+below; it does not currently capture macOS, Android or iOS.
 
 A successful upload is not a release approval. Extract each SDK into a fresh
 directory and use **that SDK's** `flutter` executable, without `--local-engine`.
