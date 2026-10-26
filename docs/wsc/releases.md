@@ -230,8 +230,14 @@ commits do not automatically change the tracked pin, and local engine builds do
 not need HTTP publication. See the [local development explanation](engine-identity.md#local-engine-development)
 for bootstrap and SDK compatibility limits.
 
-When preparing a distributable candidate, after committing all engine/DEPS/patch
-changes, run from the repository root:
+**Check the pin before every push that can start a Jenkins build, even for a
+docs-only change.** Upstream includes every tracked file under `engine/` in the
+engine hash, including Markdown files. Editing a document there changes the
+hash without changing rendering code. A stale pin stops Jenkins before any
+compilation; incremental builds are not exempt.
+
+When preparing a distributable candidate, after committing your changes, run
+from the repository root:
 
 ```sh
 python dev/bots/engine_identity.py
