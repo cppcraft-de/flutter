@@ -1,9 +1,9 @@
 # Port Skia and FreeType patches
 
-Flutter uses Skia and FreeType for rendering. Some of our changes to these
-libraries live in patch files, which the dependency setup applies after
-downloading them. A Flutter update can change the libraries enough that these
-patches need adjusting.
+Flutter uses Skia and FreeType for rendering. Engine dependency setup downloads
+these libraries, then applies our patch files from this repository to them.
+A Flutter update can change the libraries enough that these patches need
+adjusting.
 
 Use this guide to make those adjustments in the separate update folder created
 by [Update to a new Flutter version](updating.md). Keep your existing development
@@ -64,7 +64,8 @@ When a patch fails:
    applied successfully. This gives you the starting state for the failing patch.
 2. Read the failing patch and the changed upstream code. Implement the intended
    rendering behavior in the updated library, or remove the patch if upstream
-   now supplies that behavior. Review that decision with the maintainer.
+   now supplies that behavior. Check that the resulting rendering still matches
+   the intended behavior.
 3. Stage only the files belonging to this patch, including any new files. Review
    the staged diff, then write it to the corresponding patch file in the Flutter
    update folder:

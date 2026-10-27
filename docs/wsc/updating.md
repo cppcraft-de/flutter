@@ -5,14 +5,14 @@ release, or to a chosen commit on Flutter's **main** branch. The aim is to keep
 our rendering behavior while picking up Flutter's changes. You can skip
 intermediate releases.
 
-The update helper creates a branch and a separate working folder, called a Git
-*worktree*. It applies the fork's commits to the chosen Flutter version using
-`git cherry-pick`. This is the patch replay used here to rebase the fork. Your
-existing folder and build outputs stay in place.
+Most of the Git work is handled by [wsc_rebase.py](../../dev/bots/wsc_rebase.py).
+You give it the fork version and the old and new Flutter versions. It creates
+an update branch in a new folder and applies the fork's commits there. If a
+patch conflicts with the new Flutter code, it stops so you can fix that conflict.
 
-The new branch is a **candidate**: an updated version to build and test before
-releasing it. Applying the patches successfully is only the first part of the
-update; you still need to check that the SDK builds and renders correctly.
+The script does not complete the whole update: you still need to check the
+Skia and FreeType patches, update the engine version, and build and test the SDK.
+The steps below take you through that process.
 
 1. [Choose the versions to use](#1-choose-the-versions-to-use).
 2. [Apply the patches in a new folder](#2-apply-the-patches-in-a-new-folder).
@@ -24,149 +24,185 @@ update; you still need to check that the SDK builds and renders correctly.
 
 ## Before you start
 
-Use a checkout with full Git history and Python 3.10 or newer. The helper
-requires a clean working folder, including no untracked files. Commit or save
-unfinished work elsewhere, and finish any pending merge or cherry-pick first.
-Do not remove local work or build outputs just to satisfy this check.
+You need Git, Python 3.10 or newer, and a checkout of this fork with full Git
+history. The examples below use ordinary commands that work in PowerShell and
+Bash. Run each command from the repository root unless a step says to change
+folders.
 
-You do not need to download or build the engine to apply the commits. The later
-dependency and build steps need the [engine development setup](../engine/contributing/Setting-up-the-Engine-development-environment.md)
-and enough disk space for another build folder.
+### Start from a clean folder
 
-Agree with the release reviewer which maintained version to start from, which
-Flutter version to use, and which SDK to compare rendering against. Keep that
-comparison baseline fixed while investigating differences.
+**The folder you run the helper from must already be clean.** The helper checks
+it, but does not save, stash, or delete files. The new folder it creates later
+is where it applies the patches; creating that folder does not bypass this check.
+
+Check your current folder:
+
+```sh
+git status --short
+```
+
+If there is no output and no merge, rebase, or cherry-pick is in progress,
+continue to step 1. If you have changes, commit them if they belong in the fork.
+To leave unfinished work and local files where they are, create a separate clean
+folder from your current commit instead:
+
+```sh
+git worktree add --detach ../flutter-update-tools HEAD
+cd ../flutter-update-tools
+```
+
+Choose an unused folder name. This is a Git *worktree*: another working folder
+that shares the same repository history. Your uncommitted edits stay in the
+original folder and are not included. Run the remaining commands from this
+clean folder. In step 2, the helper creates a second folder for the updated
+Flutter code. Neither step removes your existing build outputs.
+
+You do not need engine dependencies yet. Step 3 explains when to download them.
 
 ## 1. Choose the versions to use
 
-Run these commands in your existing checkout. Check the repository addresses:
+Start with the **latest fork release** and choose the official Flutter version
+you want to update to. If you need fixes committed since that fork release,
+use the branch or commit containing those fixes instead.
 
-- `origin` should be this fork on Bitbucket.
-- `upstream` should be the official repository, `https://github.com/flutter/flutter.git`.
+Also choose the **previous fork release to compare rendering against**. Its
+built SDK will be the comparison baseline. Keep that baseline fixed while
+investigating differences. Jenkins has a configured baseline; check that it is
+the one you intend to use when you reach step 6.
+
+### Fetch the Git history
+
+Check the repository addresses:
 
 ```sh
 git remote -v
 ```
 
-If `upstream` is missing, add it:
+`origin` should be this fork on Bitbucket. `upstream` should be the official
+Flutter repository. If `upstream` is missing, add it:
 
 ```sh
 git remote add upstream https://github.com/flutter/flutter.git
 ```
 
-Fetch both repositories so their branches and tags are available locally:
+Fetch both repositories:
 
 ```sh
 git fetch origin --tags
 git fetch upstream --tags
 ```
 
-You need three commits to describe the update:
+### Find where the fork's patches start
 
-| Choice | Meaning | Example |
-| --- | --- | --- |
-| Previous Flutter version | The official Flutter commit that the current patches were built on. Find it in the last update PR or release record. | Tag `3.44.3` |
-| Fork version to carry forward | The branch or tag containing the patches and fixes you want to keep. Use the maintained branch if it has fixes made after the last release. | Tag `wsc-3.44.3-r1` |
-| New Flutter version | The official Flutter commit to apply those patches to. | Tag `3.44.4` |
+The commands below use an illustrative update from fork release
+`wsc-3.44.3-r1` to official Flutter `3.44.4`. Replace these example names with
+the releases you selected; they are not a list of available releases.
 
-For a stable or beta update, choose the corresponding Flutter release tag.
-For main, choose a commit on `upstream/main`, your local copy of the official
-main branch. When moving between channels for the first time, choose the
-maintained fork branch that has the fixes you need. An older experimental branch
-may be missing later fixes.
+The helper currently requires `--old-base`: the official Flutter commit just
+before the fork's patches. It reapplies every commit after that point up to
+the selected fork version. It does not calculate this starting point itself.
 
-If the previous Flutter version was not recorded, establish it from the Git
-history with a maintainer before continuing. Git's common-ancestor calculation
-alone does not tell you which commits were intended as the fork's patches.
-
-### Example: update stable
-
-The example below takes the patches in `wsc-3.44.3-r1`, based on Flutter
-`3.44.3`, and applies them to Flutter `3.44.4`. These are example version names;
-replace them with the versions you chose.
-
-The commands use PowerShell. Each `rev-parse` resolves a tag to its full commit
-ID, so the selection stays fixed even if a branch moves later. Stop if one of
-these commands fails.
-
-```powershell
-$oldBase = git rev-parse 'refs/tags/3.44.3^{commit}'
-$forkTip = git rev-parse 'refs/tags/wsc-3.44.3-r1^{commit}'
-$newBase = git rev-parse 'refs/tags/3.44.4^{commit}'
-$updateBranch = 'flutter-update-3.44.4'
-$updateFolder = '../flutter-update-3.44.4'
-```
-
-Here, `$oldBase` and `$newBase` are the previous and new Flutter commits.
-`$forkTip` is the selected fork commit; *tip* means the end of a branch or commit
-sequence. The helper's `--tip` option takes this value.
-
-The branch and folder names must be unused. If your current checkout is
-`D:\flutter`, the example creates `D:\flutter-update-3.44.4`. The helper creates
-this folder for you.
-
-For beta, replace the new tag with your chosen beta tag, such as
-`3.45.0-0.1.pre`. For main, use:
-
-```powershell
-$newBase = git rev-parse 'refs/remotes/upstream/main^{commit}'
-```
-
-Choose a branch and folder name that identifies that update, for example by
-including the date. `$oldBase` always describes the fork version you are taking
-patches from, whichever channel you are updating to.
-
-If you use Bash, assign commit IDs with `oldBase=$(git rev-parse 'REF^{commit}')`
-and names with `updateBranch='NAME'`. Use the same variable names as above for
-the remaining commands.
-
-Review what you are carrying forward:
+For the usual update, where the new Flutter version continues the old version's
+history, find that point with:
 
 ```sh
-git log --reverse --oneline "$oldBase..$forkTip"
-git diff --stat "$oldBase..$forkTip"
-git diff "$oldBase..$forkTip"
+git merge-base --all wsc-3.44.3-r1 3.44.4
 ```
 
-This range should contain the fork's patches after the previous Flutter commit,
-including its build and packaging changes. The helper requires a nonempty,
-linear sequence of commits and rejects merge commits. It cannot tell whether
-you selected unrelated Flutter history by mistake. Resolve an unsuitable range
-before continuing; do not rewrite published history just to pass the check.
-Record all three commit IDs in the update PR.
+For a fork with a straight sequence of patches on top of Flutter, this returns
+the Flutter commit it was based on. To see any release tag on that commit, replace
+`BASE_COMMIT` with the returned commit ID:
+
+```sh
+git tag --points-at BASE_COMMIT
+```
+
+In this example, the official tag is `3.44.3`. Use that tag as `--old-base`, or
+use the commit ID directly if there is no tag. Check the commits after it:
+
+```sh
+git log --reverse --oneline 3.44.3..wsc-3.44.3-r1
+```
+
+The list should contain the fork's patches, including its build and packaging
+changes. If it includes official Flutter changes, or the common-ancestor
+command returned more than one commit, inspect the history before proceeding:
+
+```sh
+git log --first-parent --decorate --oneline wsc-3.44.3-r1
+```
+
+Walking back through that history can identify the original Flutter commit.
+When switching channels, the target may have branched off before that commit;
+in that case their common ancestor is too old to use as the patch starting
+point. Use the actual starting commit from the fork's history. The helper
+requires a straight sequence of patches and rejects merge commits in that range.
+
+### For beta or main
+
+The same procedure applies. For beta, replace the target `3.44.4` with your chosen
+official beta tag. For main, obtain the current official commit:
+
+```sh
+git rev-parse upstream/main
+```
+
+Use that full commit ID as the target in the common-ancestor command and the
+steps below, so a later fetch
+cannot change which version you are updating to. If you selected a fork branch
+instead of a release tag, use `git rev-parse BRANCH_NAME` to fix that selection
+to a commit too. Choose an update branch and folder name that describes your
+update, for example `flutter-update-main-2026-10-27`.
 
 You do not need the fork's mirrored `upstream/*` branches for this procedure.
-Those are copies of official Flutter branches stored on Bitbucket. See
-[how the mirrored branches are named](upstream-sync.md#understand-the-branch-names)
+See [how the mirrored branches are named](upstream-sync.md#understand-the-branch-names)
 if you encounter names such as `origin/upstream/stable`.
 
 ## 2. Apply the patches in a new folder
 
-First ask the helper to show what it would do. This command changes nothing:
+Preview the update with one command. Substitute your versions and choose unused
+branch and folder names:
 
 ```sh
-python dev/bots/wsc_rebase.py prepare --old-base "$oldBase" --tip "$forkTip" --new-base "$newBase" --branch "$updateBranch" --worktree "$updateFolder"
+python dev/bots/wsc_rebase.py prepare --old-base 3.44.3 --tip wsc-3.44.3-r1 --new-base 3.44.4 --branch flutter-update-3.44.4 --worktree ../flutter-update-3.44.4
 ```
 
-Check the listed commits, branch name, and destination folder. Once the plan is
-reviewed, run it with `--apply`:
+Here is what the options mean:
+
+| Option | What to supply |
+| --- | --- |
+| `--old-base` | The official Flutter commit or tag just before the fork's patches. |
+| `--tip` | The fork release, branch, or commit containing the patches to carry forward. |
+| `--new-base` | The official Flutter release tag or commit you are updating to. |
+| `--branch` | A new local branch name for the update. |
+| `--worktree` | A new folder for the updated code, outside the folder you are running from. The helper creates it. |
+
+The preview changes nothing. It prints the resolved commit IDs, the patches to
+apply, and the destination. Check that these match your choices. Then run the
+same command with `--apply`:
 
 ```sh
-python dev/bots/wsc_rebase.py prepare --old-base "$oldBase" --tip "$forkTip" --new-base "$newBase" --branch "$updateBranch" --worktree "$updateFolder" --apply
+python dev/bots/wsc_rebase.py prepare --old-base 3.44.3 --tip wsc-3.44.3-r1 --new-base 3.44.4 --branch flutter-update-3.44.4 --worktree ../flutter-update-3.44.4 --apply
 ```
+
+This creates the branch and folder, then runs `git cherry-pick` to apply the
+commits in order. It does not ask interactive questions. Git may stop for a
+conflict, as explained below.
 
 Read the result before changing folders:
 
 - `Replay completed`: the commits applied. Continue in the new folder.
 - `Replay stopped. Candidate preserved at ...`: a commit needs attention.
-  Enter the printed folder and resolve the conflict as described below.
-- If preparation failed before creating the folder, stay in your original
-  checkout and fix the reported problem.
+  Here, "candidate" means your update branch. Enter the printed folder and
+  resolve the conflict as described below.
+- If preparation failed before creating the folder, stay where you are and fix
+  the reported problem.
 
-After confirming that the new folder exists:
+For example, running from `D:\flutter` or `D:\flutter-update-tools` creates
+`D:\flutter-update-3.44.4`. Once the folder exists, enter it:
 
 ```sh
-cd "$updateFolder"
+cd ../flutter-update-3.44.4
 ```
 
 ### Resolve conflicts
@@ -195,10 +231,12 @@ branch and folder remain, so use new names for another attempt. Do not rerun
 
 ### Review the applied patches
 
+Use the same versions you chose in step 1:
+
 ```sh
-git range-diff "$oldBase..$forkTip" "$newBase..HEAD"
-git diff --stat "$newBase..HEAD"
-git diff "$newBase..HEAD"
+git range-diff 3.44.3..wsc-3.44.3-r1 3.44.4..HEAD
+git diff --stat 3.44.4..HEAD
+git diff 3.44.4..HEAD
 ```
 
 `range-diff` compares the old and new patch sequences. Check whether Flutter
@@ -211,9 +249,10 @@ will calculate its final value in step 4.
 
 ## 3. Check Skia and FreeType patches
 
-Some rendering changes are stored as patch files for Skia and FreeType, which
-Flutter downloads separately. Applying the fork's commits copies these files;
-it does not apply or test them against the new dependency versions.
+Flutter downloads the Skia and FreeType libraries during engine dependency
+setup. Our changes to those libraries are stored as patch files in this
+repository. Step 2 carries those patch files into the update branch, but does
+not download the libraries or check whether the patches still apply to them.
 
 Follow [Port Skia and FreeType patches](dependency-patches.md) to check those
 versions, fix patches that no longer apply, and test the scripts that apply
@@ -244,16 +283,17 @@ instead; that workflow keeps an available engine version for starting the tools.
 
 ## 5. Run the checks and tests
 
-Once the changes are committed and the update folder is clean, run:
+Once the changes are committed and the update folder is clean, run the helper's
+checks. Replace `3.44.4` with the target version or commit you chose in step 1:
 
 ```sh
-python dev/bots/wsc_rebase.py verify --new-base "$newBase"
+python dev/bots/wsc_rebase.py verify --new-base 3.44.4
 ```
 
 If you have prepared the Skia and FreeType repositories, include their paths:
 
 ```sh
-python dev/bots/wsc_rebase.py verify --new-base "$newBase" --skia-dir PATH_TO_SKIA --freetype-dir PATH_TO_FREETYPE
+python dev/bots/wsc_rebase.py verify --new-base 3.44.4 --skia-dir PATH_TO_SKIA --freetype-dir PATH_TO_FREETYPE
 ```
 
 The helper checks the Git history, whitespace, engine pin, SDK version settings,
@@ -286,7 +326,7 @@ the [update checklist](releases.md#rebase-audit-checklist).
 
 Run the [engine and SDK identity check](releases.md#engine-identity) on the final
 committed update. Before pushing, check Jenkins' polling and branch-discovery
-settings: pushing may start a build. Get approval to push and build, then follow
+settings: pushing may start a build. Follow your team's usual review process and
 [Run the integration build](../../DEPLOYMENT.MD#4-run-the-integration-build).
 
 Select the Jenkins job for your update branch. Set `RELEASE_BRANCH` to the
@@ -298,8 +338,10 @@ official Flutter stable or move the fork's stable branch. The fork must already
 have a branch named `stable`, because the packager clones it before checking out
 the chosen build commit.
 
-Use a separate build workspace for the updated version and keep the previous
-version's outputs. Build the required Windows and macOS SDKs, then follow
+Before building, check that the [configured rendering baseline](rendering-regression.md#configure-once-then-version-the-defaults)
+is the previous fork release you chose in step 1. Use a separate build workspace
+for the updated version and keep the previous version's outputs. Build the
+required Windows and macOS SDKs, then follow
 [test the extracted SDKs](../../DEPLOYMENT.MD#5-accept-the-sdks-before-distribution).
 
 Jenkins currently compares rendering on Windows and Web. Review those results;
@@ -311,7 +353,7 @@ If you changed diagnostics, check them both enabled and disabled, including the
 performance cost when disabled.
 
 Record the fork commit, engine ID, previous and new Flutter commits, test results,
-build and SDK links, rendering comparisons, and review decision in the update PR.
+build and SDK links, rendering comparisons, and any remaining issues in the update PR.
 Make clear which stages actually passed: code checks, compilation, packaging,
 uploads, and application/rendering tests.
 
