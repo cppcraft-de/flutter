@@ -22,8 +22,8 @@ beta, and main, including updates that skip intermediate releases.
 The workflow is:
 
 1. Choose the Flutter version to update to.
-2. Apply the fork's patches to that version in a separate folder.
-3. Resolve conflicts and check the patches and tests.
+2. Run the update helper to rebase the patches in your current folder.
+3. Run dependency setup, resolve any patch conflicts, and run the checks and tests.
 4. Build SDKs with Jenkins and check their rendering.
 5. Release the tested version.
 
@@ -32,7 +32,7 @@ The workflow is:
 | I need to... | Start here |
 | --- | --- |
 | Copy upstream branches and tags into the fork | [Synchronize upstream history](upstream-sync.md) |
-| Fix a Skia or FreeType patch after an update | [Port dependency patches](dependency-patches.md) |
+| Fix a Skia or FreeType patch after an update | [Prepare and fix dependency patches](dependency-patches.md) |
 | Work on the engine locally | [Local engine development](engine-identity.md#local-engine-development) |
 | Configure Jenkins or build an SDK for testing | [Build and distribute SDKs](../../DEPLOYMENT.MD) |
 | Tag a release or update main, beta, or stable | [Release procedure](releases.md#release-procedure) |

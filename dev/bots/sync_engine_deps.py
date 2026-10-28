@@ -37,15 +37,18 @@ def fingerprint(root, config, host):
     # tools subtree conservatively: it contains patch scripts and local hooks
     # plus their helpers. Nested dependency hook code is pinned through DEPS.
     paths = git(
-        root, "ls-files", "-z", "--", "DEPS", ":(glob)**/DEPS",
+        root, "ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", "DEPS", ":(glob)**/DEPS",
         "engine/scripts/standard.gclient", "engine/src/flutter/tools",
         ":(glob)engine/**/pubspec.yaml", ":(glob)engine/**/pubspec.lock",
         "dev/bots/sync_engine_deps.py",
     ).decode("utf-8").split("\0")
-    digest = hashlib.sha256(("v1\0" + host + "\0" + config).encode())
-    for name in sorted(filter(None, paths)):
+    digest = hashlib.sha256(("v2\0" + host + "\0" + config).encode())
+    for name in sorted(set(filter(None, paths))):
         digest.update(name.encode() + b"\0")
-        digest.update(hashlib.sha256((root / name).read_bytes()).digest())
+        path = root / name
+        # A patch may be added or removed while being ported, before git add.
+        digest.update(b"file\0" + hashlib.sha256(path.read_bytes()).digest()
+                      if path.exists() else b"deleted\0")
     return digest.hexdigest()
 
 

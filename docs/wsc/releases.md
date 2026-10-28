@@ -145,6 +145,29 @@ the team. Keep the previous SDKs and their downloads for rollback;
 moving a branch does not replace an installed
 SDK. There is no automatic binary promotion or private channel-update service.
 
+### Remove the temporary update branch
+
+Once the release tag and channel point to the accepted commit and no build
+still needs the update branch, remove that branch. For example, after releasing
+`wsc-3.44.9-r1` from `flutter-update-3.44.9`:
+
+```sh
+git switch --detach wsc-3.44.9-r1
+git branch -d flutter-update-3.44.9
+```
+
+The first command leaves your checkout on the release tag so the update branch
+is no longer checked out. If Git refuses to delete the branch, check for
+unreleased commits or another worktree using it; do not force the deletion.
+If you also published the temporary branch, remove its remote copy:
+
+```sh
+git push --no-follow-tags origin --delete flutter-update-3.44.9
+```
+
+The release tag and channel remain. These commands do not remove working folders
+or build outputs. Keep an older development branch if you still maintain it.
+
 ## Version and channel identity
 
 The release tag identifies our patched SDK; the embedded Flutter version keeps
@@ -279,10 +302,13 @@ Follow [Update to a new Flutter version](updating.md) for the full procedure.
 Even a small Flutter patch release needs a new test build. Keep the previous
 tested version and its downloads available while checking the update.
 
-Keep the fork's commits as a linear sequence after the recorded official Flutter
-commit. The update helper reapplies that sequence to the new Flutter version
-and stops for conflicts. It does not push branches or approve releases. Patches
-that apply cleanly still need build and rendering tests.
+Keep the fork's commits as a linear sequence after an official Flutter commit.
+The update helper finds that starting commit in fetched upstream history and
+rebases the patches onto the new Flutter version. It creates a temporary update
+branch in the current worktree and stops for conflicts. It does not push branches
+or approve releases. Patches that apply cleanly still need build and rendering
+tests. After release, the release tag preserves the result; the temporary update
+branch can be deleted once no build needs it.
 
 The fork's `main`, `beta`, and `stable` branches should point to reviewed patched
 versions. Release tags stay fixed on their commits. The separate
@@ -293,8 +319,9 @@ skip intermediate Flutter releases.
 
 ### Nested Skia and FreeType patches
 
-Follow [Port Skia and FreeType patches](dependency-patches.md) for the editing,
-sync, and verification steps. Commit nested changes as patch inputs in the outer
+Run `python dev/bots/wsc_rebase.py dependencies` to check and prepare the
+libraries selected by `DEPS`. Follow [prepare Skia and FreeType](dependency-patches.md)
+if a patch needs fixing. Commit nested changes as patch inputs in the outer
 repository. Do not rely on untracked edits in an existing dependency checkout.
 
 Startup-gated diagnostics are implemented. The Dart API
@@ -345,7 +372,7 @@ machine-specific test environment paths.
 | Responsibility | Source |
 | --- | --- |
 | Copies of official Flutter branches and tags | [sync_upstream.py](../../dev/bots/sync_upstream.py), used by the [sync procedure](upstream-sync.md) |
-| Prepare an update branch and run its checks | [wsc_rebase.py](../../dev/bots/wsc_rebase.py), used by the [update procedure](updating.md) |
+| Rebase, prepare dependencies, and run checks | [wsc_rebase.py](../../dev/bots/wsc_rebase.py), used by the [update procedure](updating.md) |
 | Orchestration, workspace policy, credentials, polling, notifications | [Jenkinsfile.testing](../../Jenkinsfile.testing) |
 | Engine artifact collection from builder manifests | [collect_engine_artifacts.py](../../dev/bots/collect_engine_artifacts.py) |
 | Copy missing upstream files to the download server | [seed_artifact_mirror.py](../../dev/bots/seed_artifact_mirror.py) |

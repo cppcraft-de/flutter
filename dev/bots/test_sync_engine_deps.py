@@ -105,6 +105,23 @@ class DependencySyncTest(unittest.TestCase):
         self.sync()
         self.runner.assert_called_once()
 
+    def test_unstaged_patch_addition_and_deletion_trigger_sync(self):
+        self.sync()
+        relative = "engine/src/flutter/tools/wsc_font_rendering_patches/new.patch"
+        self.write(relative, "new patch")
+        self.runner.reset_mock()
+        self.sync()
+        self.runner.assert_called_once()
+        (self.root / relative).unlink()
+        self.runner.reset_mock()
+        self.sync()
+        self.runner.assert_called_once()
+        tracked = self.root / "engine/src/flutter/tools/wsc_font_rendering_patches/test.patch"
+        tracked.unlink()
+        self.runner.reset_mock()
+        self.sync()
+        self.runner.assert_called_once()
+
     def test_web_and_effective_config_changes_trigger_sync(self):
         self.sync()
         self.sync(web=True)
